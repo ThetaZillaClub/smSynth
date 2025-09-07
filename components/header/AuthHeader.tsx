@@ -1,6 +1,7 @@
 'use client';
 import type { FC, JSX } from 'react';
 import Link from 'next/link';
+import Logo from './Logo';
 
 const AuthHeader: FC = (): JSX.Element => (
   <header
@@ -22,12 +23,17 @@ const AuthHeader: FC = (): JSX.Element => (
     <div className="justify-self-start">
       <Link
         href="/"
-        className="
-          text-xl sm:text-2xl md:text-3xl font-semibold
-          text-[#0f0f0f]
-        "
+        className="flex items-center gap-2"
       >
-        smSynth
+        <Logo className="w-12 h-12" />
+        <span
+          className="
+            text-xl sm:text-2xl md:text-3xl font-semibold
+            text-[#0f0f0f]
+          "
+        >
+          smSynth
+        </span>
       </Link>
     </div>
     {/* ───────── Column 2 – (empty) ───────── */}

@@ -7,6 +7,7 @@ import BeginJourneyButton from './BeginJourneyButton'
 import SignOutButton from './SignOutButton'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
+import Logo from './Logo'
 const supabase = createClient()
 /* ───────── types ───────── */
 export interface SectionLink {
@@ -82,6 +83,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({
   /* ----- brand content ----- */
   const brandContent = (
     <div className="flex items-center gap-2">
+      <Logo className="w-12 h-12" />
       <span
         className="
           text-xl sm:text-2xl md:text-3xl font-semibold
