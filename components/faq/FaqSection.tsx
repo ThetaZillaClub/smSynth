@@ -9,7 +9,6 @@ export interface FaqItem {
 }
 
 interface FaqSectionProps {
-  items: FaqItem[];
   className?: string;
 }
 
@@ -119,7 +118,14 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
   )
 }
 
-export default function FaqSection({ items, className = '' }: FaqSectionProps) {
+export default function FaqSection({ className = '' }: FaqSectionProps) {
+  const faqItems = [
+    { question: "What is smSynth?", answer: "smSynth is a gamified app that allows users to train custom singing models and convert raw audio into vocals using prompts, creating copyright-free voices." },
+    { question: "How do I start training a model?", answer: "Sign up for an account, upload your audio data, and follow the guided steps to finetune your model in a fun, interactive way." },
+    { question: "Is smSynth free to use?", answer: "We offer a free tier with basic features. Premium subscriptions unlock advanced training options and unlimited model creation." },
+    { question: "Can I share my models?", answer: "Yes, you can make your models public or keep them private. Public models contribute to our growing hub of singing voices." },
+    { question: "What makes smSynth unique?", answer: "Our gamified approach makes model training engaging, and all models are ensured to be copyright-free through our platform." }
+  ];
   return (
     /* ─────────────── FAQs ─────────────── */
     <section
@@ -131,7 +137,7 @@ export default function FaqSection({ items, className = '' }: FaqSectionProps) {
     >
       <h2 className="text-3xl font-bold text-center">FAQs</h2>
       <div className="mt-6 space-y-4">
-        {items.map(({ question, answer }, idx) => (
+        {faqItems.map(({ question, answer }, idx) => (
           <FaqAccordionItem key={idx} question={question} answer={answer} />
         ))}
       </div>
