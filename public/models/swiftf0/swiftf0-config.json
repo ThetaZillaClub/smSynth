@@ -1,0 +1,10 @@
+{
+  "fmin": 46.875,
+  "fmax": 2093.75,
+  "confidence_threshold": 0.5,
+  "window_seconds": 0.20,
+  "target_sample_rate": 24000,
+  "backend": "wasm",
+  "ep_strict_single": true,
+  "webgpu_require_shader_f16": false
+}

@@ -123,7 +123,7 @@ export default function FaqSection({ className = '' }: FaqSectionProps) {
     }
 
     // ⏱ Start after Features finishes (Features starts at 1.8s and runs ~1.0–1.2s)
-    const FAQ_START_DELAY = 3.1; // seconds
+    const FAQ_START_DELAY = 2.5; // seconds
 
     const ctx = gsap.context(() => {
       const title = '.js-faq-title';

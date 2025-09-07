@@ -14,7 +14,7 @@ export default function Features() {
     }
 
     // ⏱ Start after the Hero finishes (Hero ~1.6s); add a small buffer
-    const FEATURES_START_DELAY = 1.8; // seconds
+    const FEATURES_START_DELAY = 1.25; // seconds
 
     const ctx = gsap.context(() => {
       const header = '.js-features-title';
