@@ -74,7 +74,7 @@ export default function Footer({ className = '' }: { className?: string }) {
               </li>
             </ul>
             <p className="mt-8 text-sm opacity-60">
-              © {new Date().getFullYear()} smSynth LLC. All rights reserved.
+              © {new Date().getFullYear()} Scale Mode Tools LLC. All rights reserved.
             </p>
           </div>
           {/* pages + legal grouped */}

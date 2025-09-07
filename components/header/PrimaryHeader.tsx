@@ -182,7 +182,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({
                 My Account
               </a>
             ) : (
-              navLink('/profile?refresh=true', 'My Account')
+              navLink('/profile', 'My Account')
             )}
             <SignOutButton />
           </>

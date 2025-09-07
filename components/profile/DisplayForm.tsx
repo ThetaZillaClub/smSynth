@@ -1,0 +1,57 @@
+"use client";
+import { createClient } from "@/lib/supabase/client";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useState } from "react";
+
+export default function DisplayForm({ initialDisplayName, onSuccess }: { initialDisplayName: string, onSuccess: (newName: string) => void }) {
+  const [displayName, setDisplayName] = useState(initialDisplayName);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const supabase = createClient();
+    setIsLoading(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: { display_name: displayName }
+      });
+      if (error) throw error;
+      setSuccess(true);
+      onSuccess(displayName);
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : "An error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleUpdate} className="flex flex-col gap-6">
+      <h1 className="text-3xl font-bold mb-6 text-[#0f0f0f]">Update Display Name</h1>
+      <div className="grid gap-2">
+        <Label htmlFor="displayName" className="text-[#0f0f0f] font-medium">New Display Name</Label>
+        <Input
+          id="displayName"
+          type="text"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          className="h-10 rounded-md bg-[#ebebeb] text-[#0f0f0f] border border-[#d2d2d2] focus:border-[#0f0f0f] focus:ring-0"
+        />
+      </div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {success && <p className="text-sm text-green-600">Display name updated successfully!</p>}
+      <button
+        type="submit"
+        disabled={isLoading}
+        className="w-full h-10 rounded-md bg-[#d7d7d7] text-[#0f0f0f] font-medium transition duration-200 hover:bg-[#d2d2d2] active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none"
+      >
+        {isLoading ? "Updating..." : "Save Changes"}
+      </button>
+    </form>
+  );
+}
