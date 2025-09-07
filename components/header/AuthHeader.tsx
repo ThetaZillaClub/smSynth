@@ -16,7 +16,7 @@ const AuthHeader: FC = (): JSX.Element => (
       /* use theme surface colours @ 40 % so “primary” links pop */
       bg-[#f0f0f0]/20
       /* no-blur fallback */
-      supports-[not(backdrop-filter)]:bg-[#d7d7d7]/95
+      supports-[not(backdrop-filter)]:bg-[#f0f0f0]/20
     "
   >
     {/* ───────── Column 1 – Brand ───────── */}
