@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import ModelTitle from './ModelTitle';
 import ModelImage from './ModelImage';
 import ModelMeta from './ModelMeta';
+import RateModel from './RateModel';
 
 type Gender = 'male' | 'female' | 'other' | 'unspecified';
 type Privacy = 'public' | 'private';
@@ -61,27 +62,23 @@ export default function ModelHome({ modelId }: { modelId: string }) {
     );
   }
 
-  if (err) {
-    return (
-      <div className="text-center text-red-600">
-        {err}
-      </div>
-    );
-  }
-
+  if (err) return <div className="text-center text-red-600">{err}</div>;
   if (!model) return null;
 
   return (
     <div className="space-y-8">
       <ModelTitle name={model.name} />
-
       <ModelImage imagePath={model.image_path} alt={model.name} />
-
       <ModelMeta
         creatorName={model.creator_display_name}
         gender={model.gender}
         privacy={model.privacy}
       />
+
+      {/* ⭐ Rating sits AFTER title/image/meta */}
+      <section>
+        <RateModel modelId={model.id} />
+      </section>
     </div>
   );
 }

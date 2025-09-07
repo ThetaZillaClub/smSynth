@@ -1,10 +1,11 @@
-'use client'
-import { FC, useState } from 'react'
+// components/faq/FaqSection.tsx
+'use client';
+
+import { FC, useState, useRef, useLayoutEffect } from 'react';
+import { gsap } from 'gsap';
 
 export interface FaqItem {
-  /** Shown inside the accordion header. */
   question: string;
-  /** Rendered inside the collapsible content. */
   answer: string;
 }
 
@@ -13,7 +14,7 @@ interface FaqSectionProps {
 }
 
 const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(false);
   return (
     <div
       className="
@@ -21,6 +22,7 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
         bg-[#d7d7d7]/5
         rounded-lg p-4
         transition-[background-color] duration-300 cursor-pointer
+        js-faq-item
       "
       role="button"
       tabIndex={0}
@@ -28,8 +30,8 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
       onClick={() => setIsOpen(!isOpen)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          setIsOpen(!isOpen)
+          e.preventDefault();
+          setIsOpen(!isOpen);
         }
       }}
     >
@@ -41,7 +43,6 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
         "
       >
         {question}
-        {/* Icon wrapper: rotates 90deg when open */}
         <div
           className={`
             flex-shrink-0 rounded-full p-1 h-8 w-8
@@ -52,7 +53,6 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
           `}
           aria-hidden="true"
         >
-          {/* Single SVG: minus is the horizontal line, vertical line scales away */}
           <svg
             className="h-6 w-6 text-[#0f0f0f]"
             fill="none"
@@ -60,19 +60,19 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
             stroke="currentColor"
             xmlns="http://www.w3.org/2000/svg"
           >
-          <path
-            d="M5 12H19"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            vectorEffect="non-scaling-stroke"
-            className={`
-              origin-center
-              transition-transform duration-300 ease-in-out
-              ${isOpen ? '-rotate-90' : 'rotate-0'}
-            `}
-          />
+            <path
+              d="M5 12H19"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+              className={`
+                origin-center
+                transition-transform duration-300 ease-in-out
+                ${isOpen ? '-rotate-90' : 'rotate-0'}
+              `}
+            />
             <path
               d="M12 5V19"
               stroke="currentColor"
@@ -89,7 +89,7 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
           </svg>
         </div>
       </div>
-      {/* Content transition: height (via CSS grid trick) + opacity */}
+
       <div
         className={`
           transition-[grid-template-rows] duration-300 ease-in-out
@@ -104,38 +104,65 @@ const FaqAccordionItem: FC<FaqItem> = ({ question, answer }) => {
             ${isOpen ? 'opacity-100' : 'opacity-0'}
           `}
         >
-          <p
-            className="
-              mt-3 text-sm leading-relaxed
-              text-[#0f0f0f]
-            "
-          >
+          <p className="mt-3 text-sm leading-relaxed text-[#0f0f0f]">
             {answer}
           </p>
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
 export default function FaqSection({ className = '' }: FaqSectionProps) {
+  const scope = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    // Respect reduced motion
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
+    // ⏱ Start after Features finishes (Features starts at 1.8s and runs ~1.0–1.2s)
+    const FAQ_START_DELAY = 3.1; // seconds
+
+    const ctx = gsap.context(() => {
+      const title = '.js-faq-title';
+      const items = '.js-faq-item';
+
+      gsap.set([title, items], {
+        opacity: 0,
+        y: 20,
+        willChange: 'transform, opacity',
+      });
+
+      gsap
+        .timeline({ defaults: { duration: 0.6, ease: 'power3.out' }, delay: FAQ_START_DELAY })
+        .to(title, { opacity: 1, y: 0 })
+        .to(items, { opacity: 1, y: 0, stagger: 0.12 }, '-=0.2');
+    }, scope);
+
+    return () => ctx.revert();
+  }, []);
+
   const faqItems = [
-    { question: "What is smSynth?", answer: "smSynth is a gamified app that allows users to train custom singing models and convert raw audio into vocals using prompts, creating copyright-free voices." },
-    { question: "How do I start training a model?", answer: "Sign up for an account, upload your audio data, and follow the guided steps to finetune your model in a fun, interactive way." },
-    { question: "Is smSynth free to use?", answer: "We offer a free tier with basic features. Premium subscriptions unlock advanced training options and unlimited model creation." },
-    { question: "Can I share my models?", answer: "Yes, you can make your models public or keep them private. Public models contribute to our growing hub of singing voices." },
-    { question: "What makes smSynth unique?", answer: "Our gamified approach makes model training engaging, and all models are ensured to be copyright-free through our platform." }
+    { question: 'What is smSynth?', answer: 'smSynth is a gamified app that allows users to train custom singing models and convert raw audio into vocals using prompts, creating copyright-free voices.' },
+    { question: 'How do I start training a model?', answer: 'Sign up for an account, upload your audio data, and follow the guided steps to finetune your model in a fun, interactive way.' },
+    { question: 'Is smSynth free to use?', answer: 'We offer a free tier with basic features. Premium subscriptions unlock advanced training options and unlimited model creation.' },
+    { question: 'Can I share my models?', answer: 'Yes, you can make your models public or keep them private. Public models contribute to our growing hub of singing voices.' },
+    { question: 'What makes smSynth unique?', answer: 'Our gamified approach makes model training engaging, and all models are ensured to be copyright-free through our platform.' },
   ];
+
   return (
-    /* ─────────────── FAQs ─────────────── */
     <section
+      ref={scope}
       className={`
         max-w-2xl w-full
         text-left text-[#0f0f0f]
         ${className}
       `}
     >
-      <h2 className="text-3xl font-bold text-center">FAQs</h2>
+      <h2 className="text-3xl font-bold text-center js-faq-title">FAQs</h2>
+
       <div className="mt-6 space-y-4">
         {faqItems.map(({ question, answer }, idx) => (
           <FaqAccordionItem key={idx} question={question} answer={answer} />
