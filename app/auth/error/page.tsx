@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import AuthHeader from "@/components/header/AuthHeader";
 
 export default async function Page({
   searchParams,
@@ -6,31 +7,33 @@ export default async function Page({
   searchParams: Promise<{ error: string }>;
 }) {
   const params = await searchParams;
-
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-2xl">
-                Sorry, something went wrong.
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {params?.error ? (
-                <p className="text-sm text-muted-foreground">
-                  Code error: {params.error}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  An unspecified error occurred.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+    <>
+      <AuthHeader />
+      <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-[#f0f0f0]">
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col gap-6">
+            <Card className="bg-[#f0f0f0] border-[#d7d7d7]">
+              <CardHeader>
+                <CardTitle className="text-2xl text-[#0f0f0f]">
+                  Sorry, something went wrong.
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {params?.error ? (
+                  <p className="text-sm text-[#373737]">
+                    Code error: {params.error}
+                  </p>
+                ) : (
+                  <p className="text-sm text-[#373737]">
+                    An unspecified error occurred.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
