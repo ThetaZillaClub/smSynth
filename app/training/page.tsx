@@ -1,94 +1,147 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import PianoRollCanvas from "@/components/piano-roll/PianoRollCanvas";
+import React, { useMemo, useState, useEffect } from "react";
+import GameLayout from "@/components/game-layout/GameLayout";
+import RangeCapture from "@/components/game-layout/range/RangeCapture";
 import usePitchDetection from "@/hooks/usePitchDetection";
-import { hzToNoteName } from "@/utils/pitch";
+import { hzToNoteName, hzToMidi } from "@/utils/pitch/pitchMath";
+import type { Phrase } from "@/components/piano-roll/PianoRollCanvas";
 
-function buildDemoPhrase() {
-  // 2 bars ~4s (8 notes × 0.5s) C4→C5
-  const midiSeq = [60, 62, 64, 65, 67, 69, 71, 72];
-  const dur = 0.5;
-  const notes = midiSeq.map((midi, i) => ({ midi, startSec: i * dur, durSec: dur }));
-  return { durationSec: midiSeq.length * dur, notes };
+type Step = "low" | "high" | "play";
+
+const SOLFEGE = ["do", "re", "mi", "fa", "sol", "la", "ti", "do"] as const;
+const MAJOR_OFFSETS = [0, 2, 4, 5, 7, 9, 11, 12]; // semitones
+
+function buildPhraseFromRangeDiatonic(lowHz: number, highHz: number, a4Hz = 440): Phrase {
+  const low = Math.round(hzToMidi(lowHz, a4Hz));
+  const high = Math.round(hzToMidi(highHz, a4Hz));
+  const a = Math.min(low, high);
+  const b = Math.max(low, high);
+  const span = b - a;
+
+  const dur = 0.5; // 8 notes => 4s window
+  let mids: number[] = [];
+
+  if (span >= 12) {
+    // fit a full octave inside detected range
+    const startMidi = Math.max(a, b - 12);
+    mids = MAJOR_OFFSETS.map((off) => startMidi + off);
+  } else {
+    // not enough room for 12 semitones — compress to available span
+    mids = MAJOR_OFFSETS.map((off) => {
+      const ratio = off / 12;
+      return Math.round(a + ratio * span);
+    });
+  }
+
+  const notes = mids.map((m, i) => ({
+    midi: m,
+    startSec: i * dur,
+    durSec: dur,
+  }));
+
+  return { durationSec: notes.length * dur, notes };
 }
 
 export default function Training() {
-  const [running, setRunning] = useState(false);
-  const phrase = useMemo(buildDemoPhrase, []);
+  const [step, setStep] = useState<Step>("low");
+  const [lowHz, setLowHz] = useState<number | null>(null);
+  const [highHz, setHighHz] = useState<number | null>(null);
 
+  // mic always on (range + play)
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
-    enabled: running,
+    enabled: true,
     fps: 60,
     minDb: -45,
     smoothing: 2,
     centsTolerance: 3,
-  }) as {
-    pitch: number | null;
-    confidence: number;
-    isReady: boolean;
-    error: string | null;
-  }; // TS: explicit type for JS hook
+  });
 
-  const pitchText = (typeof pitch === "number") ? `${pitch.toFixed(1)} Hz` : "—";
-  const noteText = (typeof pitch === "number")
-    ? (() => {
-        const { name, octave, cents } = hzToNoteName(pitch, 440, { useSharps: true });
-        const sign = cents > 0 ? "+" : "";
-        return `${name}${octave} ${sign}${cents}¢`;
-      })()
-    : "—";
+  // play/scroll state
+  const [running, setRunning] = useState(false);
+  const [activeWord, setActiveWord] = useState<number>(-1);
+
+  // stop scrolling unless we're in play
+  useEffect(() => {
+    if (step !== "play") setRunning(false);
+  }, [step]);
+
+  const pitchText = typeof pitch === "number" ? `${pitch.toFixed(1)} Hz` : "—";
+  const noteText =
+    typeof pitch === "number"
+      ? (() => {
+          const { name, octave, cents } = hzToNoteName(pitch, 440, { useSharps: true });
+          const sign = cents > 0 ? "+" : "";
+          return `${name}${octave} ${sign}${cents}¢`;
+        })()
+      : "—";
+
+  const micText = error ? `Mic error: ${String(error)}` : isReady ? "Mic ready" : "Starting mic…";
+
+  const phrase: Phrase | null = useMemo(() => {
+    if (step === "play" && lowHz != null && highHz != null) {
+      return buildPhraseFromRangeDiatonic(lowHz, highHz, 440);
+    }
+    return null;
+  }, [step, lowHz, highHz]);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-start gap-6 bg-[#0e0f12] text-white p-6">
-      <div className="w-full max-w-5xl flex items-center justify-between gap-4">
-        <h1 className="text-3xl font-semibold">Training</h1>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setRunning(r => !r)}
-            className={`px-4 py-2 rounded-lg font-medium ${running ? "bg-red-500 hover:bg-red-600" : "bg-emerald-500 hover:bg-emerald-600"}`}
-          >
-            {running ? "Stop" : "Start"}
-          </button>
-          <div className="text-sm opacity-80">
-            {error ? <span className="text-red-400">Mic error: {String(error)}</span> :
-              <span>{isReady ? "Mic ready" : running ? "Starting mic…" : "Mic idle"}</span>}
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full max-w-5xl">
-        <PianoRollCanvas
-          width={960}
-          height={280}
-          phrase={phrase}
-          running={running}
-          livePitchHz={typeof pitch === "number" ? pitch : null}
-          confidence={confidence ?? 0}
+    <GameLayout
+      title="Training"
+      micText={micText}
+      error={error}
+      // play controls
+      running={running}
+      onToggle={() => setRunning((r) => !r)}
+      // stage & lyrics (only show lyrics in play)
+      phrase={phrase}
+      lyrics={step === "play" ? (SOLFEGE as unknown as string[]) : undefined}
+      activeLyricIndex={step === "play" ? activeWord : -1}
+      onActiveNoteChange={(idx) => setActiveWord(idx)}
+      // bottom stats
+      pitchText={pitchText}
+      noteText={noteText}
+      confidence={confidence}
+      // live pitch for the roll overlay
+      livePitchHz={typeof pitch === "number" ? pitch : null}
+      confThreshold={0.5}
+    >
+      {step === "low" && (
+        <RangeCapture
+          mode="low"
+          active
+          pitchHz={typeof pitch === "number" ? pitch : null}
+          confidence={confidence}
           confThreshold={0.5}
+          bpm={60}
+          beatsRequired={1}
+          centsWindow={75}
           a4Hz={440}
+          onConfirm={(hz) => {
+            setLowHz(hz);
+            setStep("high");
+          }}
         />
-      </div>
+      )}
 
-      <div className="w-full max-w-5xl grid grid-cols-3 gap-4 text-sm">
-        <div className="bg-white/5 rounded-lg p-4">
-          <div className="opacity-70">Live Pitch</div>
-          <div className="text-xl font-mono">{pitchText}</div>
-        </div>
-        <div className="bg-white/5 rounded-lg p-4">
-          <div className="opacity-70">Note (A440)</div>
-          <div className="text-xl font-mono">{noteText}</div>
-        </div>
-        <div className="bg-white/5 rounded-lg p-4">
-          <div className="opacity-70">Confidence</div>
-          <div className="text-xl font-mono">{(confidence ?? 0).toFixed(2)}</div>
-        </div>
-      </div>
-
-      <p className="max-w-3xl text-center text-white/70">
-        Tip: sing the ascending C major scale (C4→C5). The yellow line shows detected pitch; the red dot is the latest point.
-        Try to keep the dot centered on each blue block.
-      </p>
-    </main>
+      {step === "high" && (
+        <RangeCapture
+          mode="high"
+          active
+          pitchHz={typeof pitch === "number" ? pitch : null}
+          confidence={confidence}
+          confThreshold={0.5}
+          bpm={60}
+          beatsRequired={1}
+          centsWindow={75}
+          a4Hz={440}
+          onConfirm={(hz) => {
+            setHighHz(hz);
+            setStep("play");
+            setRunning(false); // ensure user must click Start
+          }}
+        />
+      )}
+    </GameLayout>
   );
 }

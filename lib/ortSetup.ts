@@ -8,7 +8,9 @@ export function initOrtEnv() {
   try {
     // WASM tuning
     if (ort.env.wasm) {
-      try { ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2); } catch {}
+      try {
+        ort.env.wasm.numThreads = Math.min(4, (navigator as any).hardwareConcurrency || 2);
+      } catch {}
       // ORT will enable SIMD automatically if the build supports it; no need to force here.
     }
     // Keep default logLevel; we are *fixing* provider mismatch, not hiding it.
