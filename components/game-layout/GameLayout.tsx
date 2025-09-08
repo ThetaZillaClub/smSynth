@@ -73,7 +73,7 @@ export default function GameLayout({
         </div>
       </div>
 
-      {/* Lyrics rail (passed only in play step) */}
+      {/* Lyrics rail */}
       {phrase && lyrics && lyrics.length ? (
         <div className="w-full flex justify-center px-6 mt-4">
           <GameLyrics words={lyrics} activeIndex={activeLyricIndex} />
@@ -90,7 +90,12 @@ export default function GameLayout({
       {/* Bottom stats */}
       <div className="w-full flex justify-center px-6 mt-6 mb-8">
         <div className="w-full max-w-7xl">
-          <GameStats pitchText={pitchText} noteText={noteText} confidence={confidence} />
+          <GameStats
+            pitchText={pitchText}
+            noteText={noteText}
+            confidence={confidence}
+            confThreshold={confThreshold}
+          />
         </div>
       </div>
     </main>

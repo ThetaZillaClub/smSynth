@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { hzToNoteName, centsBetweenHz } from "@/utils/pitch/pitchMath";
 
 type Props = {
@@ -10,7 +10,7 @@ type Props = {
 
   pitchHz: number | null | undefined;
   confidence: number;
-  confThreshold?: number;
+  confThreshold?: number; // present but not used for gating here (hook already gates)
 
   bpm?: number;             // default 60
   beatsRequired?: number;   // default 1 (≈1 second at 60 BPM)
@@ -27,110 +27,244 @@ export default function RangeCapture({
   confidence,
   confThreshold = 0.5,
   bpm = 60,
-  beatsRequired = 1,  // 1 beat at 60 BPM = 1 second
-  centsWindow = 75,   // relaxed tolerance
+  beatsRequired = 1,
+  centsWindow = 75,
   a4Hz = 440,
   onConfirm,
 }: Props) {
+  /* ------------------- timing/targets ------------------- */
   const targetSec = useMemo(() => (60 / bpm) * beatsRequired, [bpm, beatsRequired]);
 
-  const [progressSec, setProgressSec] = useState(0);
   const [capturedHz, setCapturedHz] = useState<number | null>(null);
   const [completed, setCompleted] = useState(false);
 
+  /* ---------------- latest input refs ------------------- */
+  const latestActive = useRef(active);
+  const latestPitch = useRef<number | null>(pitchHz ?? null);
+  const latestCentsWindow = useRef<number>(centsWindow);
+  const latestTargetSec = useRef<number>(targetSec);
+
+  useLayoutEffect(() => { latestActive.current = active; }, [active]);
+  useLayoutEffect(() => { latestPitch.current = (typeof pitchHz === "number" ? pitchHz : null); }, [pitchHz]);
+  useLayoutEffect(() => { latestCentsWindow.current = centsWindow; }, [centsWindow]);
+  useLayoutEffect(() => { latestTargetSec.current = targetSec; }, [targetSec]);
+
+  /* ------------------- internal refs -------------------- */
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
+
+  // Anchor that follows the singer
   const baseHzRef = useRef<number | null>(null);
+  const anchorAgeSecRef = useRef<number>(0);
+
+  // Buffer for robust median on lock-in
   const bufRef = useRef<number[]>([]);
 
-  const effectiveHz =
-    typeof pitchHz === "number" && confidence >= confThreshold ? pitchHz : null;
+  // Logical progress (for capture logic)
+  const holdSecRef = useRef<number>(0);
 
+  // Visual progress (bar + counter) — lerps toward the logical value
+  const [visualSec, setVisualSec] = useState(0);
+  const visualSecRef = useRef(0);
+
+  // Inside/outside state + grace timers
+  const insideRef = useRef<boolean>(false);
+  const unvoicedGapSecRef = useRef<number>(0);
+  const outsideGapSecRef = useRef<number>(0);
+
+  const [frozen, setFrozen] = useState(false);
+  const completedRef = useRef(false);
+  useEffect(() => { completedRef.current = completed; }, [completed]);
+
+  /* ----------------------- tunables --------------------- */
+  const HYSTERESIS_GAP = 0.5;           // inner = window*(1 - gap)
+  const WARMUP_SEC = 0.15;              // brief "assume inside" after anchor
+  const UNVOICED_GRACE_SEC = 0.15;
+  const OUTSIDE_GRACE_SEC = 0.18;
+  const REANCHOR_SILENT_SEC = 0.25;
+
+  const FOLLOW_HZ_INSIDE = 2.0;
+  const CHASE_HZ_OUTSIDE = 4.0;
+  const FOLLOW_HZ_WARMUP = 6.0;
+
+  const DECAY_RATE = 0.8;               // s of progress lost per real second
+  const VISUAL_FOLLOW_RATE = 14;        // per second (bar/timer smoothing)
+
+  /* --------------------- helpers ------------------------ */
   const hardReset = () => {
     baseHzRef.current = null;
+    anchorAgeSecRef.current = 0;
     bufRef.current = [];
-    setProgressSec(0);
+    holdSecRef.current = 0;
+    insideRef.current = false;
+    unvoicedGapSecRef.current = 0;
+    outsideGapSecRef.current = 0;
+    visualSecRef.current = 0;
+    setVisualSec(0);
     setCapturedHz(null);
     setCompleted(false);
+    setFrozen(false);
   };
 
+  const moveTowards = (cur: number, tgt: number, maxDelta: number) => {
+    const diff = tgt - cur;
+    if (Math.abs(diff) <= maxDelta) return tgt;
+    return cur + Math.sign(diff) * maxDelta;
+  };
+
+  const updateVisual = (dt: number) => {
+    // target for the visual: during capture -> holdSec; after capture -> pin to targetSec
+    const logicalTarget = completedRef.current ? latestTargetSec.current : holdSecRef.current;
+    const lerp = Math.min(1, VISUAL_FOLLOW_RATE * dt);
+    let next = visualSecRef.current + (logicalTarget - visualSecRef.current) * lerp;
+
+    // make the bar **monotonic non-decreasing** during a capture attempt
+    if (!completedRef.current) next = Math.max(visualSecRef.current, next);
+
+    // once completed, keep it full
+    if (completedRef.current) next = latestTargetSec.current;
+
+    visualSecRef.current = next;
+    setVisualSec(next);
+  };
+
+  /* ----------------------- RAF tick --------------------- */
   const tick = (ts: number) => {
-    if (!active) {
-      lastTsRef.current = ts;
-      rafRef.current = requestAnimationFrame(tick);
-      return;
-    }
-
     const last = lastTsRef.current ?? ts;
-    lastTsRef.current = ts;
     const dt = Math.max(0, (ts - last) / 1000);
+    lastTsRef.current = ts;
 
-    if (completed) {
-      // Freeze progress & captured value until user confirms or restarts
-      rafRef.current = requestAnimationFrame(tick);
+    // Always keep visual synced first (also when frozen)
+    updateVisual(dt);
+
+    if (!latestActive.current || frozen) return;
+
+    const voiced = latestPitch.current != null;
+
+    // --- Unvoiced (no reliable pitch)
+    if (!voiced) {
+      unvoicedGapSecRef.current += dt;
+      outsideGapSecRef.current = 0;
+
+      if (unvoicedGapSecRef.current >= REANCHOR_SILENT_SEC) {
+        baseHzRef.current = null;
+        insideRef.current = false;
+        anchorAgeSecRef.current = 0;
+        bufRef.current.length = 0;
+      }
+
+      if (!completedRef.current && unvoicedGapSecRef.current > UNVOICED_GRACE_SEC) {
+        const decay = Math.min(dt * DECAY_RATE, dt);
+        holdSecRef.current = Math.max(0, holdSecRef.current - decay);
+      }
       return;
     }
 
-    if (effectiveHz == null) {
-      hardReset();
-      rafRef.current = requestAnimationFrame(tick);
-      return;
-    }
+    // --- Voiced (we have a pitch)
+    unvoicedGapSecRef.current = 0;
+    const hz = latestPitch.current as number;
 
     if (baseHzRef.current == null) {
-      baseHzRef.current = effectiveHz;
-      bufRef.current = [effectiveHz];
-      setProgressSec(0);
-      rafRef.current = requestAnimationFrame(tick);
-      return;
+      baseHzRef.current = hz;
+      insideRef.current = true;
+      anchorAgeSecRef.current = 0;
+      bufRef.current.length = 0;
+      // IMPORTANT: no initial "kick" — progress starts at 0.00 until real time accumulates
+    } else {
+      anchorAgeSecRef.current += dt;
     }
 
-    const cents = centsBetweenHz(effectiveHz, baseHzRef.current);
-    if (Math.abs(cents) > centsWindow) {
-      // out of window → restart hold
-      baseHzRef.current = effectiveHz;
-      bufRef.current = [effectiveHz];
-      setProgressSec(0);
-      setCapturedHz(null);
-      rafRef.current = requestAnimationFrame(tick);
-      return;
+    const outerWindow = Math.max(5, latestCentsWindow.current);
+    const innerWindow = Math.max(0, outerWindow * (1 - HYSTERESIS_GAP));
+    const inWarmup = anchorAgeSecRef.current < WARMUP_SEC;
+
+    let isInside = true;
+    if (!inWarmup) {
+      const cents = centsBetweenHz(hz, baseHzRef.current as number);
+      const wasInside = insideRef.current;
+      isInside = wasInside ? Math.abs(cents) <= outerWindow : Math.abs(cents) <= innerWindow;
+    }
+    insideRef.current = inWarmup ? true : isInside;
+
+    const rate =
+      inWarmup ? FOLLOW_HZ_WARMUP :
+      (insideRef.current ? FOLLOW_HZ_INSIDE : CHASE_HZ_OUTSIDE);
+    baseHzRef.current = moveTowards(baseHzRef.current as number, hz, rate * dt);
+
+    if (!completedRef.current) {
+      if (insideRef.current) {
+        outsideGapSecRef.current = 0;
+        holdSecRef.current = Math.min(latestTargetSec.current, holdSecRef.current + dt);
+        bufRef.current.push(hz);
+        const maxBuf = Math.max(30, Math.min(120, Math.round(60 * 1.2)));
+        if (bufRef.current.length > maxBuf) bufRef.current.shift();
+      } else {
+        outsideGapSecRef.current += dt;
+
+        if (holdSecRef.current <= 0.05 && outsideGapSecRef.current >= 0.15) {
+          // quick re-anchor at the start of a hold if they drifted before progress built up
+          baseHzRef.current = hz;
+          insideRef.current = true;
+          anchorAgeSecRef.current = 0;
+          bufRef.current.length = 0;
+          // no kick here either — still start from exact accumulated time
+        } else if (outsideGapSecRef.current > OUTSIDE_GRACE_SEC) {
+          const decay = Math.min(dt * DECAY_RATE, dt);
+          holdSecRef.current = Math.max(0, holdSecRef.current - decay);
+          if (bufRef.current.length > 0) bufRef.current.shift();
+        }
+      }
     }
 
-    const nextProgress = Math.min(targetSec, progressSec + dt);
-    setProgressSec(nextProgress);
-
-    // keep a small buffer to compute median
-    bufRef.current.push(effectiveHz);
-    if (bufRef.current.length > 60) bufRef.current.shift();
-
-    // if we reached the target duration, lock-in
-    if (nextProgress >= targetSec) {
+    // Reached target? Capture & freeze (but do NOT auto-advance).
+    if (!completedRef.current && holdSecRef.current >= latestTargetSec.current) {
       const sorted = [...bufRef.current].sort((a, b) => a - b);
-      const med = sorted[Math.floor(sorted.length / 2)];
-      setCapturedHz(med);
-      setCompleted(true); // show confirm UI automatically
-    }
+      const med = sorted[Math.floor(sorted.length / 2)] ?? hz;
 
-    rafRef.current = requestAnimationFrame(tick);
+      setCapturedHz(med);
+      setCompleted(true);
+      completedRef.current = true;
+
+      // Pin logical & visual at full to avoid any backslide.
+      holdSecRef.current = latestTargetSec.current;
+      visualSecRef.current = latestTargetSec.current;
+      setVisualSec(latestTargetSec.current);
+
+      setFrozen(true);
+    }
   };
 
+  /* ------------------ start/stop RAF loop ---------------- */
   useEffect(() => {
-    rafRef.current = requestAnimationFrame(tick);
+    lastTsRef.current = null;
+
+    if (!active) {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      return;
+    }
+
+    const step = (ts: number) => {
+      tick(ts);
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, effectiveHz, confThreshold, centsWindow, targetSec]);
+  }, [active]);
 
-  // UI text
+  /* ------------------------ UI -------------------------- */
   const title =
     mode === "low"
       ? "Step 1 — Sing your lowest comfortable note"
       : "Step 2 — Sing your highest comfortable note";
   const sub = "Hold it steadily for 1 beat (≈1 second).";
 
-  const progressPct = Math.min(100, Math.round((progressSec / targetSec) * 100));
+  // Use visualSec for both bar and counter
+  const progressPct = Math.max(0, Math.min(100, (visualSec / targetSec) * 100));
 
   const display =
     capturedHz != null
@@ -152,16 +286,13 @@ export default function RangeCapture({
         </div>
       </div>
 
-      {/* Progress bar */}
+      {/* Progress bar (we animate per frame) */}
       <div className="mt-4">
         <div className="h-2 w-full bg-[#dcdcdc] rounded overflow-hidden">
-          <div
-            className="h-full bg-[#0f0f0f] transition-[width] duration-100"
-            style={{ width: `${progressPct}%` }}
-          />
+          <div className="h-full bg-[#0f0f0f]" style={{ width: `${progressPct}%` }} />
         </div>
         <div className="mt-2 text-sm text-[#2d2d2d]">
-          Hold progress: <span className="font-mono">{progressSec.toFixed(2)}s</span> /{" "}
+          Hold progress: <span className="font-mono">{visualSec.toFixed(2)}s</span> /{" "}
           <span className="font-mono">{targetSec.toFixed(2)}s</span>
         </div>
       </div>
@@ -175,16 +306,23 @@ export default function RangeCapture({
 
         <div className="flex items-center sm:justify-end gap-2">
           {!completed ? (
-            // While singing: no clickable actions (prevents interaction)
-            <button
-              type="button"
-              disabled
-              className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] opacity-40 cursor-not-allowed"
-              aria-disabled
-            >
-              {/* Placeholder so layout doesn't jump */}
-              Holding…
-            </button>
+            <>
+              <button
+                type="button"
+                disabled
+                className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] opacity-40 cursor-not-allowed"
+                aria-disabled
+              >
+                Holding…
+              </button>
+              <button
+                type="button"
+                onClick={hardReset}
+                className="px-4 h-11 rounded-md bg-[#ebebeb] border border-[#d2d2d2] text-[#0f0f0f] hover:opacity-90 active:scale-[0.98]"
+              >
+                Try Again
+              </button>
+            </>
           ) : (
             <>
               <button
