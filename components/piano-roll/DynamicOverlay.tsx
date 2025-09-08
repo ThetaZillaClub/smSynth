@@ -15,15 +15,33 @@ type Props = {
   windowSec?: number;
   anchorRatio?: number;
 
-  // live pitch curve
   livePitchHz?: number | null;
   confidence?: number;
   confThreshold?: number;
   a4Hz?: number;
 
-  // pre-roll before first note reaches anchor
   leadInSec?: number;
 };
+
+// Simple MIDI → name helper (A4=440 semantics not needed for note spelling)
+// Simple MIDI → name helper (A-based octave numbering: octave increments at A)
+function midiToNameAOctave(m: number, useSharps = true) {
+  const SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const FLAT  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
+  const names = useSharps ? SHARP : FLAT;
+
+  const pc = ((m % 12) + 12) % 12;     // pitch class 0..11
+  const name = names[pc];
+
+  // base (C-based) octave
+  let octave = Math.floor(m / 12) - 1;
+
+  // shift up by 1 for A/A#/B (pc >= 9) to make octave change happen at A
+  if (pc >= 9) octave += 1;
+
+  return `${name}${octave}`;
+}
+
 
 export default function DynamicOverlay({
   width,
@@ -47,8 +65,6 @@ export default function DynamicOverlay({
   const rafRef = useRef<number | null>(null);
   const startRef = useRef<number | null>(null);
   const lastActiveRef = useRef<number>(-1);
-
-  // live pitch points (time, midi)
   const pointsRef = useRef<Array<{ t: number; midi: number }>>([]);
 
   const draw = useCallback((nowMs: number) => {
@@ -56,24 +72,25 @@ export default function DynamicOverlay({
     if (!cnv) return;
 
     const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    if (cnv.width !== Math.floor(width * dpr) || cnv.height !== Math.floor(height * dpr)) {
-      cnv.width = Math.floor(width * dpr);
-      cnv.height = Math.floor(height * dpr);
-    }
+
+    // Ensure backing store matches CSS pixels exactly → prevents any stretch
+    const wantW = Math.round(width * dpr);
+    const wantH = Math.round(height * dpr);
+    if (cnv.width !== wantW) cnv.width = wantW;
+    if (cnv.height !== wantH) cnv.height = wantH;
+
     const ctx = cnv.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // Layout & time
-    const anchorX = Math.max(0, Math.min(width * anchorRatio, width - 1)); // playhead X
+    const anchorX = Math.max(0, Math.min(width * anchorRatio, width - 1));
     const pxPerSec = (width - anchorX) / Math.max(0.001, windowSec);
 
     const t0 = startRef.current ?? nowMs;
     const tNow = running ? (nowMs - t0) / 1000 : 0;
 
-    // Notes scroll in VIEW time (adds pre-roll at the start)
     const tView = tNow - leadInSec;
-    // Musical time exactly at the playhead (anchor)
     const headTime = tView;
 
     // clear + bg
@@ -81,23 +98,32 @@ export default function DynamicOverlay({
     ctx.fillStyle = PR_COLORS.bg;
     ctx.fillRect(0, 0, width, height);
 
-    // horizontal grid
+    // horizontal grid + octave labels centered in their cells
     const span = maxMidi - minMidi;
     for (let i = 0; i <= span; i++) {
       const midi = minMidi + i;
-      const y = midiToY(midi, height, minMidi, maxMidi);
+
+      // grid line (MIDI boundary)
+      const yLine = midiToY(midi, height, minMidi, maxMidi);
       const isC = midi % 12 === 0;
       ctx.strokeStyle = isC ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
       ctx.lineWidth = isC ? 1.25 : 0.75;
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
+      ctx.moveTo(0, yLine);
+      ctx.lineTo(width, yLine);
       ctx.stroke();
+
+      // label "C#" only for C rows; center vertically within the C cell
       if (isC) {
-        const octave = Math.floor(midi / 12) - 1;
+        const cell = midiCellRect(midi, height, minMidi, maxMidi);
+        const centerY = cell.y + cell.h / 2;
+
         ctx.fillStyle = PR_COLORS.label;
         ctx.font = "11px ui-sans-serif, system-ui, -apple-system, Segoe UI";
-        ctx.fillText(`C${octave}`, 4, Math.max(10, y - 2));
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        const octave = Math.floor(midi / 12) - 1;
+        ctx.fillText(`C${octave}`, 4, centerY);
       }
     }
 
@@ -111,11 +137,27 @@ export default function DynamicOverlay({
       if (x + w < visLeft || x > visRight) continue;
 
       const { y, h } = midiCellRect(n.midi, height, minMidi, maxMidi);
+
+      // green block
       ctx.fillStyle = PR_COLORS.noteFill;
-      ctx.fillRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.max(2, Math.round(w)), Math.round(h));
+      const drawW = Math.max(2, Math.round(w));
+      ctx.fillRect(Math.round(x) + 0.5, Math.round(y) + 0.5, drawW, Math.round(h));
       ctx.strokeStyle = PR_COLORS.noteStroke;
       ctx.lineWidth = 1;
-      ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.max(2, Math.round(w)), Math.round(h));
+      ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, drawW, Math.round(h));
+
+// label inside note (centered)
+const minWForText = 28;
+const minHForText = 14;
+if (drawW >= minWForText && h >= minHForText) {
+  const label = midiToNameAOctave(n.midi, true); // ← A-based octave numbering
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, Math.round(x) + drawW / 2, Math.round(y) + h / 2);
+}
+
 
       // choose "active" by the playhead's musical time (aligns lyrics & dot)
       const nextStart = phrase.notes[i + 1]?.startSec ?? (n.startSec + n.durSec);
@@ -124,14 +166,13 @@ export default function DynamicOverlay({
 
     if (activeIdx !== lastActiveRef.current) {
       lastActiveRef.current = activeIdx;
-      onActiveNoteChange?.(activeIdx); // lyrics flip exactly at the dot
+      onActiveNoteChange?.(activeIdx);
     }
 
-    // LIVE PITCH CURVE aligned to the playhead:
-    // samples timestamped in engine time tNow are rendered so that tNow sits at anchorX.
+    // Live pitch curve
     {
-      const left = tNow - (windowSec * 1.1); // a little history behind dot
-      const right = tNow + 0.25;             // tiny look-ahead
+      const left = tNow - (windowSec * 1.1);
+      const right = tNow + 0.25;
       pointsRef.current = pointsRef.current.filter(p => p.t >= left && p.t <= right);
 
       if (pointsRef.current.length > 1) {
@@ -140,23 +181,17 @@ export default function DynamicOverlay({
         ctx.beginPath();
         let pen = false;
         for (const p of pointsRef.current) {
-          const x = anchorX + (p.t - tNow) * pxPerSec; // tNow → anchor
+          const x = anchorX + (p.t - tNow) * pxPerSec;
           const y = midiToY(p.midi, height, minMidi, maxMidi);
-          if (!pen) {
-            ctx.moveTo(x, y);
-            pen = true;
-          } else {
-            ctx.lineTo(x, y);
-          }
+          if (!pen) { ctx.moveTo(x, y); pen = true; } else { ctx.lineTo(x, y); }
         }
         ctx.stroke();
       }
     }
 
-    // --- PLAYHEAD DOT (bouncy) ---
+    // Playhead dot — keep perfectly round
+    const DOT_RADIUS = 7;
     const xGuide = Math.round(anchorX) + 0.5;
-
-    // helper easing: quick departure, gentle approach
     const easeOutCubic = (u: number) => 1 - Math.pow(1 - u, 3);
 
     if (activeIdx >= 0) {
@@ -168,37 +203,32 @@ export default function DynamicOverlay({
       const uRaw = clamp((headTime - cur.startSec) / denom, 0, 1);
       const u = easeOutCubic(uRaw);
 
-      // decide which EDGE to bounce from on the current note (toward the next)
       const goingUp = nxt.midi > cur.midi;
       const curCell = midiCellRect(cur.midi, height, minMidi, maxMidi);
-      const yEdgeStart = goingUp ? curCell.y : (curCell.y + curCell.h); // top if going up, bottom if going down
+      const yEdgeStart = goingUp ? curCell.y : (curCell.y + curCell.h);
       const yStart = yEdgeStart;
 
-      // end at NEXT note center
       const yEnd = midiToYCenter(nxt.midi, height, minMidi, maxMidi);
 
-      // control point creates the "bounce" outward away from the note edge
       const dy = yEnd - yStart;
       const cellH = curCell.h;
-      const baseArc = Math.abs(dy) * 0.25 + cellH * 0.15; // proportionate + a touch of cell height
-      const arc = clamp(baseArc, 6, 22);                  // not too bouncy
-
-      // push control point outward in the direction of travel
+      const baseArc = Math.abs(dy) * 0.25 + cellH * 0.15;
+      const arc = clamp(baseArc, 6, 22);
       const yCtrl = yStart + (goingUp ? -arc : arc);
 
-      // evaluate quadratic Bezier with eased time
-      const yGuide = (1 - u) * (1 - u) * yStart + 2 * (1 - u) * u * yCtrl + u * u * yEnd;
+      const yGuide =
+        (1 - u) * (1 - u) * yStart +
+        2 * (1 - u) * u * yCtrl +
+        u * u * yEnd;
 
       ctx.fillStyle = PR_COLORS.dotFill;
       ctx.beginPath();
-      ctx.arc(xGuide, yGuide, 4, 0, Math.PI * 2);
+      ctx.arc(xGuide, yGuide, DOT_RADIUS, 0, Math.PI * 2);
       ctx.fill();
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.25;
       ctx.strokeStyle = PR_COLORS.dotStroke;
       ctx.stroke();
     } else if (phrase.notes.length && headTime < phrase.notes[0].startSec) {
-      // PRE-ROLL: park the dot on the EDGE of the first note facing the next note,
-      // so it visibly "bounces off" right when playback begins.
       const first = phrase.notes[0];
       const next = phrase.notes[1] ?? first;
       const goingUp = next.midi > first.midi;
@@ -207,9 +237,9 @@ export default function DynamicOverlay({
 
       ctx.fillStyle = PR_COLORS.dotFill;
       ctx.beginPath();
-      ctx.arc(xGuide, yEdge, 4, 0, Math.PI * 2);
+      ctx.arc(xGuide, yEdge, DOT_RADIUS, 0, Math.PI * 2);
       ctx.fill();
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.25;
       ctx.strokeStyle = PR_COLORS.dotStroke;
       ctx.stroke();
     }
@@ -255,7 +285,6 @@ export default function DynamicOverlay({
 
     pointsRef.current.push({ t: tNow, midi });
 
-    // safety prune
     const keepFrom = tNow - (windowSec * 1.5);
     if (pointsRef.current.length > 2000) {
       pointsRef.current = pointsRef.current.filter(p => p.t >= keepFrom);
@@ -265,9 +294,10 @@ export default function DynamicOverlay({
   return (
     <canvas
       ref={canvasRef}
+      /* Fixed CSS size to avoid any scaling → ensures perfect circle */
       style={{
-        width: "100%",           // fill parent — no early pixel mismatch
-        height: "100%",
+        width: `${width}px`,
+        height: `${height}px`,
         display: "block",
         position: "absolute",
         inset: 0
