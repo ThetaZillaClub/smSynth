@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { getMidiRange, PR_COLORS } from "./scale";
 import DynamicOverlay from "./DynamicOverlay";
 import type { Phrase as PhraseT, Note as NoteT } from "./types";
@@ -35,14 +35,20 @@ export default function PianoRollCanvas({
   const { minMidi, maxMidi } = useMemo(() => getMidiRange(phrase, 2), [phrase]);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(800);
+  const [width, setWidth] = useState<number | null>(null); // ← start unknown to avoid an early, wrong-sized draw
 
-  useEffect(() => {
+  // Measure immediately after mount, then track with RO
+  useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth || 800));
+
+    // initial measure
+    setWidth(el.clientWidth || 0);
+
+    const ro = new ResizeObserver(() => {
+      setWidth(el.clientWidth || 0);
+    });
     ro.observe(el);
-    setWidth(el.clientWidth || 800);
     return () => ro.disconnect();
   }, []);
 
@@ -60,23 +66,26 @@ export default function PianoRollCanvas({
         background: PR_COLORS.bg,
       }}
     >
-      <DynamicOverlay
-        width={width}
-        height={height}
-        phrase={phrase}
-        running={running}
-        minMidi={minMidi}
-        maxMidi={maxMidi}
-        onActiveNoteChange={onActiveNoteChange}
-        windowSec={4}
-        anchorRatio={0.10}
-        // live pitch line + preroll
-        livePitchHz={livePitchHz}
-        confidence={confidence}
-        confThreshold={confThreshold}
-        leadInSec={leadInSec}
-        a4Hz={a4Hz}
-      />
+      {/* Don't draw the overlay until we have a real width to prevent oval artefacts */}
+      {width != null && width > 0 && (
+        <DynamicOverlay
+          width={width}
+          height={height}
+          phrase={phrase}
+          running={running}
+          minMidi={minMidi}
+          maxMidi={maxMidi}
+          onActiveNoteChange={onActiveNoteChange}
+          windowSec={4}
+          anchorRatio={0.10}
+          // live pitch line + preroll
+          livePitchHz={livePitchHz}
+          confidence={confidence}
+          confThreshold={confThreshold}
+          leadInSec={leadInSec}
+          a4Hz={a4Hz}
+        />
+      )}
     </div>
   );
 }

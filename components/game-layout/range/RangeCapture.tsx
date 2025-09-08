@@ -169,7 +169,7 @@ export default function RangeCapture({
       insideRef.current = true;
       anchorAgeSecRef.current = 0;
       bufRef.current.length = 0;
-      // IMPORTANT: no initial "kick" — progress starts at 0.00 until real time accumulates
+      // no initial kick
     } else {
       anchorAgeSecRef.current += dt;
     }
@@ -207,7 +207,6 @@ export default function RangeCapture({
           insideRef.current = true;
           anchorAgeSecRef.current = 0;
           bufRef.current.length = 0;
-          // no kick here either — still start from exact accumulated time
         } else if (outsideGapSecRef.current > OUTSIDE_GRACE_SEC) {
           const decay = Math.min(dt * DECAY_RATE, dt);
           holdSecRef.current = Math.max(0, holdSecRef.current - decay);
@@ -305,41 +304,21 @@ export default function RangeCapture({
         </div>
 
         <div className="flex items-center sm:justify-end gap-2">
-          {!completed ? (
-            <>
-              <button
-                type="button"
-                disabled
-                className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] opacity-40 cursor-not-allowed"
-                aria-disabled
-              >
-                Holding…
-              </button>
-              <button
-                type="button"
-                onClick={hardReset}
-                className="px-4 h-11 rounded-md bg-[#ebebeb] border border-[#d2d2d2] text-[#0f0f0f] hover:opacity-90 active:scale-[0.98]"
-              >
-                Try Again
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={hardReset}
-                className="px-4 h-11 rounded-md bg-[#ebebeb] border border-[#d2d2d2] text-[#0f0f0f] hover:opacity-90 active:scale-[0.98]"
-              >
-                Try Again
-              </button>
-              <button
-                type="button"
-                onClick={() => capturedHz != null && onConfirm(capturedHz)}
-                className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] font-medium transition duration-200 hover:opacity-90 active:scale-[0.98]"
-              >
-                {mode === "low" ? "Confirm Low Note" : "Confirm High Note"}
-              </button>
-            </>
+          <button
+            type="button"
+            onClick={hardReset}
+            className="px-4 h-11 rounded-md bg-[#ebebeb] border border-[#d2d2d2] text-[#0f0f0f] hover:opacity-90 active:scale-[0.98]"
+          >
+            Try Again
+          </button>
+          {completed && (
+            <button
+              type="button"
+              onClick={() => capturedHz != null && onConfirm(capturedHz)}
+              className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] font-medium transition duration-200 hover:opacity-90 active:scale-[0.98]"
+            >
+              {mode === "low" ? "Confirm Low Note" : "Confirm High Note"}
+            </button>
           )}
         </div>
       </div>

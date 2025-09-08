@@ -262,5 +262,16 @@ export default function DynamicOverlay({
     }
   }, [running, livePitchHz, confidence, confThreshold, a4Hz, windowSec]);
 
-  return <canvas ref={canvasRef} style={{ width, height, display: "block", position: "absolute", inset: 0 }} />;
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        width: "100%",           // fill parent — no early pixel mismatch
+        height: "100%",
+        display: "block",
+        position: "absolute",
+        inset: 0
+      }}
+    />
+  );
 }

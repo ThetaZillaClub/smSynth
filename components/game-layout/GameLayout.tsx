@@ -4,7 +4,6 @@ import GameHeader from "./GameHeader";
 import GameStage from "./GameStage";
 import GameStats from "./GameStats";
 import GameLyrics from "./GameLyrics";
-import PlayControls from "./PlayControls";
 import { type Phrase } from "@/components/piano-roll/PianoRollCanvas";
 
 type LayoutProps = {
@@ -32,31 +31,37 @@ type LayoutProps = {
 };
 
 export default function GameLayout({
-  title, micText, error,
-  running, onToggle,
+  title,
+  micText,
+  error,
+  running,
+  onToggle,
   phrase,
-  lyrics, activeLyricIndex = -1,
-  pitchText, noteText, confidence,
-  livePitchHz, confThreshold = 0.5,
-  children, onActiveNoteChange,
+  lyrics,
+  activeLyricIndex = -1,
+  pitchText,
+  noteText,
+  confidence,
+  livePitchHz,
+  confThreshold = 0.5,
+  children,
+  onActiveNoteChange,
 }: LayoutProps) {
+  const showPlay = !!phrase;
+
   return (
     <main className="min-h-screen flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
-      {/* Header (no start button here) */}
+      {/* Header with mic status + Start/Pause on the same row */}
       <div className="w-full flex justify-center pt-6 px-6">
-        <div className="w-full max-w-7xl">
-          <GameHeader title={title} micText={micText} error={error} />
-        </div>
+        <GameHeader
+          title={title}
+          micText={micText}
+          error={error}
+          showPlay={showPlay}
+          running={running}
+          onToggle={onToggle}
+        />
       </div>
-
-      {/* Play controls (only when phrase exists) */}
-      {phrase ? (
-        <div className="w-full flex justify-center px-6 mt-3">
-          <div className="w-full max-w-7xl flex items-center justify-end">
-            <PlayControls running={running} onToggle={onToggle} />
-          </div>
-        </div>
-      ) : null}
 
       {/* Stage */}
       <div className="w-full flex justify-center px-0 md:px-6 mt-3">
@@ -76,7 +81,9 @@ export default function GameLayout({
       {/* Lyrics rail */}
       {phrase && lyrics && lyrics.length ? (
         <div className="w-full flex justify-center px-6 mt-4">
-          <GameLyrics words={lyrics} activeIndex={activeLyricIndex} />
+          <div className="w-full max-w-7xl">
+            <GameLyrics words={lyrics} activeIndex={activeLyricIndex} />
+          </div>
         </div>
       ) : null}
 
