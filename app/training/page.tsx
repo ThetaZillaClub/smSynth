@@ -4,26 +4,24 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import GameLayout from "@/components/game-layout/GameLayout";
 import RangeCapture from "@/components/game-layout/range/RangeCapture";
+import TrainingSessionPanel from "@/components/game-layout/TrainingSessionPanel";
+import ExportModal from "@/components/game-layout/ExportModal";
+
 import usePitchDetection from "@/hooks/usePitchDetection";
 import useWavRecorder from "@/hooks/useWavRecorder";
-import type { Phrase } from "@/components/piano-roll/types";
-import { hzToNoteName } from "@/utils/pitch/pitchMath";
-import { makeWordLyricVariant } from "@/utils/lyrics/wordBank";
-import { buildPhraseFromRangeDiatonicVariant } from "@/utils/phrase/diatonic";
-import { buildTakeV2 } from "@/utils/take/buildTakeV2";
-import { buildSessionV2 } from "@/utils/take/buildSessionV2";
-import { APP_BUILD, CONF_THRESHOLD } from "@/utils/training/constants";
 import useFixedFpsTrace from "@/hooks/useFixedFpsTrace";
-import { encodeWavPCM16, concatFloat32 } from "@/utils/audio/wav";
+import useSessionPackager from "@/hooks/training/useSessionPackager";
+import useUiRecordTimer from "@/hooks/training/useUiRecordTimer";
+import usePhraseLyrics from "@/hooks/training/usePhraseLyrics";
 
-/** --- Loop timing --- */
+import { hzToNoteName } from "@/utils/pitch/pitchMath";
+import { APP_BUILD, CONF_THRESHOLD } from "@/utils/training/constants";
+
+// timing (kept local; move to constants if you prefer)
 const RECORD_SEC = 8;
 const REST_SEC = 8;
 const TRAIN_LEAD_IN_SEC = 1.0;
-/** 8 notes * 0.5s = 4s notes inside the 8s window */
 const NOTE_DUR_SEC = 0.5;
-
-/** Session limits — stop before we run forever */
 const MAX_TAKES = 24;
 const MAX_SESSION_SEC = 15 * 60;
 
@@ -33,41 +31,54 @@ export default function Training() {
   const [highHz, setHighHz] = useState<number | null>(null);
 
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
-    enabled: true,
-    fps: 50,
-    minDb: -45,
-    smoothing: 2,
-    centsTolerance: 3,
+    enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
   });
 
-  /** take-level flags */
+  // phrase + lyrics with seeded control
+  const { phrase, words, reset: resetPhraseLyrics, advance: advancePhraseLyrics, getLyricSeed } =
+    usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: NOTE_DUR_SEC });
+
+  // recorder + traces
+  const {
+    isRecording, start: startRec, stop: stopRec, wavBlob, durationSec, startedAtMs,
+    sampleRateOut, deviceSampleRateHz, workletBufferSize, baseLatencySec,
+    metrics, numSamplesOut, pcm16k, resampleMethod,
+  } = useWavRecorder({ sampleRateOut: 16000 });
+
+  const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 50);
+  useEffect(() => { setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0); },
+    [pitch, confidence, setLatest]);
+
+  // session packager (pins phrase/words per take, aggregates PCM, builds export)
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+  const {
+    packagedCount, inFlight,
+    beginTake, completeTakeFromBlob, resetSession, finalizeSession,
+    showExport, setShowExport, sessionWavUrl, sessionJsonUrl,
+  } = useSessionPackager({ appBuild: APP_BUILD, sessionId: sessionIdRef.current });
+
+  // loop flags
   const [running, setRunning] = useState(false);
   const [looping, setLooping] = useState(false);
   const [loopPhase, setLoopPhase] = useState<"idle" | "record" | "rest">("idle");
-
   const [activeWord, setActiveWord] = useState<number>(-1);
-  const [lyricStrategy] = useState<"mixed" | "stableVowel">("mixed");
 
-  /** Session bookkeeping */
+  // anchors & timers
+  const playEpochMsRef = useRef<number | null>(null);
+  const recordTimerRef = useRef<number | null>(null);
+  const restTimerRef = useRef<number | null>(null);
+  const clearTimers = useCallback(() => {
+    if (recordTimerRef.current != null) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
+    if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
+  }, []);
+
+  // guard time window
   const sessionStartMsRef = useRef<number | null>(null);
-  // How many takes have been *packaged* this session
-  const packagedCountRef = useRef<number>(0);
-  // How many takes are *started but not yet packaged*
-  const inFlightRef = useRef<number>(0);
 
-  /** Aggregation (PCM + takes) */
-  const pcmChunksRef = useRef<Float32Array[]>([]);
-  const sampleCountsRef = useRef<number[]>([]);
-  const takesRef = useRef<any[]>([]);
+  // nice wall-clock seconds tied to play anchor
+  const uiRecordSec = useUiRecordTimer(isRecording, playEpochMsRef.current);
 
-  /** Final export URLs */
-  const [sessionWavUrl, setSessionWavUrl] = useState<string | null>(null);
-  const [sessionJsonUrl, setSessionJsonUrl] = useState<string | null>(null);
-  const [showExport, setShowExport] = useState(false);
-
-  /** Wall-clock record timer for UI (anchored to playEpochMsRef) */
-  const [uiRecordSec, setUiRecordSec] = useState(0);
-
+  // mic/pitch text
   const micText = error ? `Mic error: ${String(error)}` : isReady ? "Mic ready" : "Starting mic…";
   const pitchText = typeof pitch === "number" ? `${pitch.toFixed(1)} Hz` : "—";
   const noteText =
@@ -79,172 +90,18 @@ export default function Training() {
         })()
       : "—";
 
-  /** UI phrase/lyrics (what we show on screen) */
-  const [phrase, setPhrase] = useState<Phrase | null>(null);
-  const [words, setWords] = useState<string[] | null>(null);
-
-  /** “Pinned” phrase/lyrics for the take being recorded (used for packaging) */
-  const takePhraseRef = useRef<Phrase | null>(null);
-  const takeWordsRef = useRef<string[] | null>(null);
-
-  /** Seeds */
-  const phraseSeedRef = useRef<number>(crypto.getRandomValues(new Uint32Array(1))[0]! >>> 0);
-  const lyricSeedRef = useRef<number>(crypto.getRandomValues(new Uint32Array(1))[0]! >>> 0);
-
-  // initialize first UI phrase/lyrics when entering play
+  // on enter play: reset session + phrase/lyrics
   useEffect(() => {
     if (step === "play" && lowHz != null && highHz != null) {
-      const p = buildPhraseFromRangeDiatonicVariant(lowHz, highHz, 440, NOTE_DUR_SEC, phraseSeedRef.current);
-      const w = makeWordLyricVariant(8, lyricStrategy, lyricSeedRef.current);
-      setPhrase(p);
-      setWords(w);
-
-      // fresh session counters + buffers
+      resetSession();
+      resetPhraseLyrics();
       sessionStartMsRef.current = performance.now();
-      packagedCountRef.current = 0;
-      inFlightRef.current = 0;
-      pcmChunksRef.current = [];
-      sampleCountsRef.current = [];
-      takesRef.current = [];
-      setSessionWavUrl(null);
-      setSessionJsonUrl(null);
-      setShowExport(false);
-      // reset de-dupe
-      lastPackagedBlobRef.current = null;
-      // clear any stale IDs
-      takeIdRef.current = "";
-    } else {
-      setPhrase(null);
-      setWords(null);
-    }
-  }, [step, lowHz, highHz, lyricStrategy]);
-
-  // Recorder + traces
-  const {
-    isRecording,
-    start: startRec,
-    stop: stopRec,
-    wavBlob,
-    durationSec,
-    startedAtMs,
-    sampleRateOut,
-    deviceSampleRateHz,
-    workletBufferSize,
-    baseLatencySec,
-    metrics,
-    numSamplesOut,
-    pcm16k,
-    resampleMethod,
-  } = useWavRecorder({ sampleRateOut: 16000 });
-
-  const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 50);
-  useEffect(() => {
-    setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0);
-  }, [pitch, confidence, setLatest]);
-
-  // Anchor UI start time
-  const playEpochMsRef = useRef<number | null>(null);
-
-  // Timers
-  const recordTimerRef = useRef<number | null>(null);
-  const restTimerRef = useRef<number | null>(null);
-  const clearTimers = useCallback(() => {
-    if (recordTimerRef.current != null) {
-      clearTimeout(recordTimerRef.current);
-      recordTimerRef.current = null;
-    }
-    if (restTimerRef.current != null) {
-      clearTimeout(restTimerRef.current);
-      restTimerRef.current = null;
-    }
-  }, []);
-
-  // IDs
-  const sessionIdRef = useRef<string>(crypto.randomUUID());
-  const takeIdRef = useRef<string>("");
-  const lastPackagedBlobRef = useRef<Blob | null>(null); // de-dupe per blob
-
-  /** Start one take */
-  const startRecordPhase = useCallback(() => {
-    if (lowHz == null || highHz == null || !phrase || !words) return;
-
-    // session guard — use packaged + in-flight
-    const elapsed = sessionStartMsRef.current ? (performance.now() - sessionStartMsRef.current) / 1000 : 0;
-    const startedOrPackaged = packagedCountRef.current + inFlightRef.current;
-    if (startedOrPackaged >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
-      setLooping(false);
-      setRunning(false);
-      setLoopPhase("idle");
       playEpochMsRef.current = null;
-      clearTimers();
-      finalizeSession();
-      return;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, lowHz, highHz]);
 
-    // new take id + pin phrase/words for THIS take
-    takeIdRef.current = crypto.randomUUID();
-    takePhraseRef.current = phrase;
-    takeWordsRef.current = words;
-
-    // mark one take in-flight
-    inFlightRef.current += 1;
-
-    // sync overlay start → now
-    playEpochMsRef.current = performance.now();
-
-    // run recorder
-    setLoopPhase("record");
-    setRunning(true);
-
-    // end the record window
-    if (recordTimerRef.current != null) clearTimeout(recordTimerRef.current);
-    recordTimerRef.current = window.setTimeout(() => {
-      setRunning(false);
-      setActiveWord(-1);
-      setLoopPhase("rest");
-
-      // prepare NEXT phrase/lyrics immediately for REST display
-      phraseSeedRef.current = (phraseSeedRef.current + 1) >>> 0;
-      const nextPhrase = buildPhraseFromRangeDiatonicVariant(lowHz, highHz, 440, NOTE_DUR_SEC, phraseSeedRef.current);
-
-      lyricSeedRef.current = (lyricSeedRef.current + 1) >>> 0;
-      const nextWords = makeWordLyricVariant(nextPhrase.notes.length, lyricStrategy, lyricSeedRef.current);
-
-      setPhrase(nextPhrase);
-      setWords(nextWords);
-    }, RECORD_SEC * 1000);
-  }, [lowHz, highHz, phrase, words, lyricStrategy, clearTimers]);
-
-  /** Stop loop fully */
-  const stopLoop = useCallback(() => {
-    setLooping(false);
-    clearTimers();
-    setRunning(false);
-    setLoopPhase("idle");
-    playEpochMsRef.current = null;
-    finalizeSession();
-  }, [clearTimers]);
-
-  /** Header button */
-  const handleToggle = useCallback(() => {
-    if (step !== "play" || lowHz == null || highHz == null) return;
-    if (!looping) {
-      setLooping(true);
-      clearTimers();
-      startRecordPhase();
-    } else {
-      stopLoop();
-    }
-  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, stopLoop]);
-
-  /** If phrase disappears, stop loop */
-  useEffect(() => {
-    if (step !== "play" || lowHz == null || highHz == null) {
-      if (looping) stopLoop();
-    }
-  }, [step, lowHz, highHz, looping, stopLoop]);
-
-  /** Start/Stop recorder when running flips */
+  // start/stop recorder when running flips
   const recLockRef = useRef({ starting: false, stopping: false });
   useEffect(() => {
     (async () => {
@@ -263,24 +120,21 @@ export default function Training() {
     })();
   }, [step, running, isRecording, startRec, stopRec, resetFixed]);
 
-  /** After recorder fully stopped, begin REST countdown and then queue next take (or finish) */
+  // REST countdown → next take
   useEffect(() => {
     if (loopPhase !== "rest" || !looping) {
-      if (restTimerRef.current != null) {
-        clearTimeout(restTimerRef.current);
-        restTimerRef.current = null;
-      }
+      if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
       return;
     }
     if (!isRecording && restTimerRef.current == null) {
       restTimerRef.current = window.setTimeout(() => {
         restTimerRef.current = null;
-        startRecordPhase(); // guard inside will decide if we can actually start
+        startRecordPhase();
       }, REST_SEC * 1000);
     }
-  }, [loopPhase, looping, isRecording, startRecordPhase]);
+  }, [loopPhase, looping, isRecording]); // startRecordPhase is stable
 
-  // TS-safe view over PCM (16k mono from the hook)
+  // TS-safe view over PCM (16k mono)
   const pcmView: Float32Array | null = useMemo(() => {
     if (!pcm16k) return null;
     try {
@@ -293,45 +147,77 @@ export default function Training() {
     }
   }, [pcm16k]);
 
-  /** finalize: build one big WAV + one big JSON, show modal */
-  const finalizeSession = useCallback(() => {
-    if (!takesRef.current.length) {
-      setShowExport(false);
+  // start one take
+  const startRecordPhase = useCallback(() => {
+    if (lowHz == null || highHz == null || !phrase || !words) return;
+
+    // guard by session limits
+    const elapsed = sessionStartMsRef.current ? (performance.now() - sessionStartMsRef.current) / 1000 : 0;
+    if (packagedCount + inFlight >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
+      setLooping(false); setRunning(false); setLoopPhase("idle");
+      playEpochMsRef.current = null;
+      clearTimers();
+      finalizeSession(sampleRateOut || 16000);
       return;
     }
-    const merged = concatFloat32(pcmChunksRef.current);
-    const sr = sampleRateOut || 16000;
-    const wavBlobFinal = encodeWavPCM16(merged, sr);
-    const wavUrlFinal = URL.createObjectURL(wavBlobFinal);
-    setSessionWavUrl(wavUrlFinal);
 
-    const sessionJson = buildSessionV2({
-      sessionId: sessionIdRef.current,
-      appBuild: APP_BUILD,
-      sampleRateHz: sr,
-      takes: takesRef.current,
-      takeSampleLengths: sampleCountsRef.current,
-    });
-    const jsonBlob = new Blob([JSON.stringify(sessionJson, null, 2)], { type: "application/json" });
-    const jsonUrl = URL.createObjectURL(jsonBlob);
-    setSessionJsonUrl(jsonUrl);
+    // pin current UI for THIS take & mark inflight
+    beginTake(phrase, words);
 
-    setShowExport(true);
-  }, [sampleRateOut]);
+    // anchor overlay to wall-clock
+    playEpochMsRef.current = performance.now();
 
-  /** Package ONE take per wavBlob (de-duped), bump packaged++, and stop if we hit the cap */
+    setLoopPhase("record");
+    setRunning(true);
+
+    // close record window
+    if (recordTimerRef.current != null) clearTimeout(recordTimerRef.current);
+    recordTimerRef.current = window.setTimeout(() => {
+      setRunning(false);
+      setActiveWord(-1);
+      setLoopPhase("rest");
+      // prepare NEXT set for REST display
+      advancePhraseLyrics();
+    }, RECORD_SEC * 1000);
+  }, [
+    lowHz, highHz, phrase, words,
+    packagedCount, inFlight, clearTimers, finalizeSession,
+    beginTake, advancePhraseLyrics, sampleRateOut
+  ]);
+
+  // stop loop fully
+  const stopLoop = useCallback(() => {
+    setLooping(false);
+    clearTimers();
+    setRunning(false);
+    setLoopPhase("idle");
+    playEpochMsRef.current = null;
+    finalizeSession(sampleRateOut || 16000);
+  }, [clearTimers, finalizeSession, sampleRateOut]);
+
+  // play/pause button
+  const handleToggle = useCallback(() => {
+    if (step !== "play" || lowHz == null || highHz == null) return;
+    if (!looping) {
+      setLooping(true);
+      clearTimers();
+      startRecordPhase();
+    } else {
+      stopLoop();
+    }
+  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, stopLoop]);
+
+  // if phrase disappears, stop loop
   useEffect(() => {
-    if (!wavBlob || !takePhraseRef.current || !takeWordsRef.current || !takeIdRef.current) return;
+    if (step !== "play" || lowHz == null || highHz == null) {
+      if (looping) stopLoop();
+    }
+  }, [step, lowHz, highHz, looping, stopLoop]);
 
-    // de-dupe: only package each blob once
-    if (lastPackagedBlobRef.current === wavBlob) return;
-    lastPackagedBlobRef.current = wavBlob;
-
-    const { take } = buildTakeV2({
-      ids: { sessionId: sessionIdRef.current, takeId: takeIdRef.current, subjectId: null },
-      appBuild: APP_BUILD,
-      phrase: takePhraseRef.current,
-      words: takeWordsRef.current,
+  // package ONE take per wavBlob (using pinned phrase/words inside the hook)
+  useEffect(() => {
+    if (!wavBlob) return;
+    completeTakeFromBlob(wavBlob, {
       traces: { hzArr, confArr, rmsDbArr, fps: 50 },
       audio: {
         sampleRateOut,
@@ -350,84 +236,28 @@ export default function Training() {
         highHz: highHz ?? null,
         leadInSec: TRAIN_LEAD_IN_SEC,
         bpm: 120,
-        lyricStrategy,
-        lyricSeed: lyricSeedRef.current,
+        lyricStrategy: "mixed",
+        lyricSeed: getLyricSeed(),
         scale: "major",
       },
-      timing: {
-        playStartMs: playEpochMsRef.current ?? null,
-        recStartMs: startedAtMs ?? null,
-      },
+      timing: { playStartMs: playEpochMsRef.current ?? null, recStartMs: startedAtMs ?? null },
       controls: { genderLabel: null },
     });
 
-    // aggregate PCM + take
-    if (pcmView && pcmView.length) {
-      pcmChunksRef.current.push(new Float32Array(pcmView)); // copy
-      sampleCountsRef.current.push(pcmView.length);
-    } else {
-      pcmChunksRef.current.push(new Float32Array(0));
-      sampleCountsRef.current.push(0);
-    }
-    takesRef.current.push(take);
-
-    // one take completed: packaged++ and inFlight--
-    packagedCountRef.current += 1;
-    inFlightRef.current = Math.max(0, inFlightRef.current - 1);
-
-    // If we just hit the cap, stop immediately (prevents any queued start)
-    if (packagedCountRef.current >= MAX_TAKES) {
+    // cap guard: stop immediately if we hit max by packaging
+    if (packagedCount + 1 >= MAX_TAKES) {
       setLooping(false);
       setRunning(false);
       setLoopPhase("idle");
       playEpochMsRef.current = null;
       clearTimers();
-      finalizeSession();
+      finalizeSession(sampleRateOut || 16000);
     }
-  }, [
-    wavBlob,
-    hzArr,
-    confArr,
-    rmsDbArr,
-    sampleRateOut,
-    numSamplesOut,
-    durationSec,
-    deviceSampleRateHz,
-    baseLatencySec,
-    workletBufferSize,
-    resampleMethod,
-    pcmView,
-    metrics,
-    lowHz,
-    highHz,
-    lyricStrategy,
-    startedAtMs,
-    clearTimers,
-    finalizeSession,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wavBlob]); // internals captured via refs/state in the hook
 
-  // Cleanup timers on unmount
+  // cleanup timers on unmount
   useEffect(() => stopLoop, [stopLoop]);
-
-  // Smooth wall-clock UI timer while recording
-  useEffect(() => {
-    let raf: number | null = null;
-    const tick = () => {
-      if (isRecording && playEpochMsRef.current != null) {
-        const t = (performance.now() - playEpochMsRef.current) / 1000;
-        setUiRecordSec(t);
-        raf = requestAnimationFrame(tick);
-      }
-    };
-    if (isRecording && playEpochMsRef.current != null) {
-      raf = requestAnimationFrame(tick);
-    } else {
-      setUiRecordSec(0);
-    }
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [isRecording, loopPhase]);
 
   const statusText =
     loopPhase === "record" ? (isRecording ? "Recording…" : "Playing…") : loopPhase === "rest" && looping ? "Breather…" : "Idle";
@@ -441,7 +271,7 @@ export default function Training() {
         running={running}
         uiRunning={looping}
         onToggle={handleToggle}
-        phrase={phrase}
+        phrase={phrase ?? undefined}
         lyrics={step === "play" && words ? words : undefined}
         activeLyricIndex={step === "play" ? activeWord : -1}
         onActiveNoteChange={(idx) => setActiveWord(idx)}
@@ -464,10 +294,7 @@ export default function Training() {
             beatsRequired={1}
             centsWindow={75}
             a4Hz={440}
-            onConfirm={(hz) => {
-              setLowHz(hz);
-              setStep("high");
-            }}
+            onConfirm={(hz) => { setLowHz(hz); setStep("high"); }}
           />
         )}
 
@@ -482,57 +309,29 @@ export default function Training() {
             beatsRequired={1}
             centsWindow={75}
             a4Hz={440}
-            onConfirm={(hz) => {
-              setHighHz(hz);
-              setStep("play");
-            }}
+            onConfirm={(hz) => { setHighHz(hz); setStep("play"); }}
           />
         )}
 
         {step === "play" && (
-          <div className="mt-2 grid gap-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-            <div className="flex items-center justify-between text-sm">
-              <div>
-                <span className="font-semibold">{statusText}</span>
-                {isRecording && (
-                  <span className="ml-2 opacity-70">{Math.min(uiRecordSec, RECORD_SEC).toFixed(2)}s</span>
-                )}
-              </div>
-            </div>
-            <div className="text-xs opacity-70">
-              Record {RECORD_SEC}s → Rest {REST_SEC}s. Auto-stops by {MAX_TAKES} takes or {Math.round(MAX_SESSION_SEC / 60)} minutes.
-            </div>
-          </div>
+          <TrainingSessionPanel
+            statusText={statusText}
+            isRecording={isRecording}
+            uiRecordSec={Math.min(uiRecordSec, RECORD_SEC)}
+            recordSec={RECORD_SEC}
+            restSec={REST_SEC}
+            maxTakes={MAX_TAKES}
+            maxSessionSec={MAX_SESSION_SEC}
+          />
         )}
       </GameLayout>
 
-      {showExport && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-2">Training complete</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Combined session files for validation. In production, this will upload automatically.
-            </p>
-            <div className="flex flex-col gap-2">
-              {sessionWavUrl && (
-                <a className="underline text-blue-700" href={sessionWavUrl} download="session.wav">
-                  Download combined WAV
-                </a>
-              )}
-              {sessionJsonUrl && (
-                <a className="underline text-blue-700" href={sessionJsonUrl} download="session.json">
-                  Download combined JSON
-                </a>
-              )}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button className="px-3 py-1.5 rounded-md border" onClick={() => setShowExport(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ExportModal
+        open={showExport}
+        wavUrl={sessionWavUrl ?? undefined}
+        jsonUrl={sessionJsonUrl ?? undefined}
+        onClose={() => setShowExport(false)}
+      />
     </>
   );
 }
