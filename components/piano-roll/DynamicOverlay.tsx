@@ -1,7 +1,7 @@
 "use client";
-import React, { useEffect, useRef, useCallback } from "react";
-import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS } from "./scale";
-import { hzToMidi } from "@/utils/pitch/pitchMath";
+ import React, { useEffect, useRef, useCallback } from "react";
+ import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS } from "./scale";
+ import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 import type { Phrase } from "./types";
 
 type Props = {
@@ -27,19 +27,7 @@ type Props = {
   startAtMs?: number | null;
 };
 
-// MIDI → name helper with A-based octave numbering (octave changes at A)
-function midiToNameAOctave(m: number, useSharps = true) {
-  const SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-  const FLAT  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
-  const names = useSharps ? SHARP : FLAT;
 
-  const pc = ((m % 12) + 12) % 12;
-  const name = names[pc];
-
-  let octave = Math.floor(m / 12) - 1; // C-based
-  if (pc >= 9) octave += 1;            // shift so change happens at A
-  return `${name}${octave}`;
-}
 
 export default function DynamicOverlay({
   width,
@@ -128,8 +116,8 @@ export default function DynamicOverlay({
         ctx.font = "11px ui-sans-serif, system-ui, -apple-system, Segoe UI";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        const octave = Math.floor(midi / 12) - 1;
-        ctx.fillText(`C${octave}`, 4, centerY);
+ const { octave } = midiToNoteName(midi, { useSharps: true, octaveAnchor: "A" });
+ ctx.fillText(`C${octave + 1}`, 4, centerY);
       }
     }
 
@@ -156,7 +144,8 @@ export default function DynamicOverlay({
       const minWForText = 28;
       const minHForText = 14;
       if (drawW >= minWForText && h >= minHForText) {
-        const label = midiToNameAOctave(n.midi, true);
+ const { name, octave } = midiToNoteName(n.midi, { useSharps: true, octaveAnchor: "A" });
+ const label = `${name}${octave + 1}`;
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI";
         ctx.textAlign = "center";

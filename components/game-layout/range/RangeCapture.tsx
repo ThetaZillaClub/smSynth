@@ -265,13 +265,15 @@ export default function RangeCapture({
   // Use visualSec for both bar and counter
   const progressPct = Math.max(0, Math.min(100, (visualSec / targetSec) * 100));
 
-  const display =
-    capturedHz != null
-      ? (() => {
-          const n = hzToNoteName(capturedHz, a4Hz, { useSharps: true });
-          return `${n.name}${n.octave} • ${capturedHz.toFixed(1)} Hz`;
-        })()
-      : "—";
+ const display =
+   capturedHz != null
+     ? (() => {
+         const n = hzToNoteName(capturedHz, a4Hz, { useSharps: true, octaveAnchor: "A" });
+         const dispOct = n.octave + 1;
+         return `${n.name}${dispOct} • ${capturedHz.toFixed(1)} Hz`;
+       })()
+     : "—";
+
 
   return (
     <div className="w-full max-w-5xl rounded-md border border-[#d2d2d2] bg-[#ebebeb] p-6">
