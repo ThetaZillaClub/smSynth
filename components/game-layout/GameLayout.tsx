@@ -11,6 +11,7 @@ type LayoutProps = {
   micText: string;
   error?: string | null;
 
+  /** Drives the stage/recorder only */
   running: boolean;
   onToggle: () => void;
 
@@ -28,6 +29,12 @@ type LayoutProps = {
 
   /** Recorder anchor in ms since epoch/performance time; keeps overlay in sync with audio engine */
   startAtMs?: number | null;
+
+  /** Lead-in seconds shown in the overlay prior to first note (default 1.5) */
+  leadInSec?: number;
+
+  /** UI-only “running” flag used for the header label; lets us show Pause during rest */
+  uiRunning?: boolean;
 
   children?: React.ReactNode;
   onActiveNoteChange?: (idx: number) => void;
@@ -48,6 +55,8 @@ export default function GameLayout({
   livePitchHz,
   confThreshold = 0.5,
   startAtMs = null,
+  leadInSec = 1.5,
+  uiRunning,
   children,
   onActiveNoteChange,
 }: LayoutProps) {
@@ -63,7 +72,8 @@ export default function GameLayout({
             micText={micText}
             error={error}
             showPlay={showPlay}
-            running={running}
+            /** show Pause while looping, even in rest phase */
+            running={uiRunning ?? running}
             onToggle={onToggle}
           />
         </div>
@@ -102,6 +112,7 @@ export default function GameLayout({
               confThreshold={confThreshold}
               startAtMs={startAtMs}
               lyrics={lyrics}
+              leadInSec={leadInSec}
             />
           </div>
 

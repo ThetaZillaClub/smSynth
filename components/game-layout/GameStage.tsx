@@ -17,6 +17,9 @@ type Props = {
 
   /** Lyric words aligned 1:1 with phrase.notes (optional) */
   lyrics?: string[];
+
+  /** Lead-in seconds shown in the overlay prior to first note (default 1.5) */
+  leadInSec?: number;
 };
 
 export default function GameStage({
@@ -29,6 +32,7 @@ export default function GameStage({
   confThreshold = 0.5,
   startAtMs = null,
   lyrics,
+  leadInSec = 1.5,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [fillH, setFillH] = useState<number>(height ?? 320);
@@ -64,7 +68,7 @@ export default function GameStage({
         livePitchHz={livePitchHz}
         confidence={confidence}
         confThreshold={confThreshold}
-        leadInSec={1.5}
+        leadInSec={leadInSec}
         startAtMs={startAtMs}
         lyrics={lyrics}
       />

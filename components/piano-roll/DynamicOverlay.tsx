@@ -61,10 +61,19 @@ export default function DynamicOverlay({
   const lastActiveRef = useRef<number>(-1);
   const pointsRef = useRef<Array<{ t: number; midi: number }>>([]);
 
-  const dpr = useMemo(
-    () => (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1),
-    []
-  );
+  const dpr = useMemo(() => (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1), []);
+
+  // 12px-width cache (massively reduces measureText calls)
+  const width12CacheRef = useRef<Map<string, number>>(new Map());
+  const getWidth12 = useCallback((ctx: CanvasRenderingContext2D, text: string, bold = false) => {
+    const key = (bold ? "b|" : "n|") + text;
+    const cached = width12CacheRef.current.get(key);
+    if (cached != null) return cached;
+    ctx.font = `${bold ? "700 " : ""}12px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
+    const w = ctx.measureText(text).width;
+    width12CacheRef.current.set(key, w);
+    return w;
+  }, []);
 
   const draw = useCallback(
     (nowMs: number) => {
@@ -74,7 +83,7 @@ export default function DynamicOverlay({
       // if we're running but don't yet have the recorder anchor, wait (prevents pre-roll skew)
       if (running && startAtMs == null) return;
 
-      // Ensure backing store matches CSS pixels exactly → prevents stretch / oval artefacts
+      // Ensure backing store matches CSS pixels → crisp circles/text
       const wantW = Math.round(width * dpr);
       const wantH = Math.round(height * dpr);
       if (cnv.width !== wantW) cnv.width = wantW;
@@ -83,106 +92,6 @@ export default function DynamicOverlay({
       const ctx = cnv.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      // Helpers for single-row label layout (WORD [gap] NOTE)
-      const fitWithEllipsis = (text: string, maxW: number) => {
-        if (ctx.measureText(text).width <= maxW) return text;
-        if (maxW <= 8) return ""; // nothing reasonable fits
-        const ell = "…";
-        let lo = 0, hi = text.length;
-        while (lo < hi) {
-          const mid = ((lo + hi) / 2) | 0;
-          const trial = text.slice(0, mid) + ell;
-          if (ctx.measureText(trial).width <= maxW) lo = mid + 1;
-          else hi = mid;
-        }
-        const n = Math.max(0, lo - 1);
-        return text.slice(0, n) + ell;
-      };
-
-      const drawInlineWordAndNote = (
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        word: string | undefined,
-        noteLabel: string
-      ) => {
-        const paddingX = 4;
-        const available = Math.max(0, w - paddingX * 2);
-        if (available < 18 || h < 12) return;
-
-        // Base sizes scaled by cell height, clamped to sensible desktop sizes
-        const baseWordPx = Math.min(36, Math.max(12, Math.floor(h * 0.52)));
-        const baseNotePx = Math.min(12, Math.max(10, Math.floor(h * 0.40)));
-
-        // Start with bold lyric + lighter note
-        let wordPx = baseWordPx;
-        const notePx = baseNotePx;
-        const gap = 6;
-
-        // Measure & potentially shrink the word to fit the row; prefer keeping the note visible
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-
-        const cx = x + w / 2;
-        const cy = y + h / 2;
-
-        const setWordFont = (px: number) =>
-          (ctx.font = `700 ${px}px ui-sans-serif, system-ui, -apple-system, Segoe UI`);
-        const setNoteFont = (px: number) =>
-          (ctx.font = `${px}px ui-sans-serif, system-ui, -apple-system, Segoe UI`);
-
-        const measureRow = (lyricStr: string, lyricPx: number) => {
-          setWordFont(lyricPx);
-          const wWord = lyricStr ? ctx.measureText(lyricStr).width : 0;
-          setNoteFont(notePx);
-          const wNote = ctx.measureText(noteLabel).width;
-          return { wWord, wNote, total: (lyricStr ? wWord : 0) + (lyricStr ? gap : 0) + wNote };
-        };
-
-        let lyricStr = word ?? "";
-        let { wWord, wNote, total } = measureRow(lyricStr, wordPx);
-
-        // Try shrinking lyric size down to min to make both fit
-        while (lyricStr && total > available && wordPx > 10) {
-          wordPx -= 1;
-          ({ wWord, wNote, total } = measureRow(lyricStr, wordPx));
-        }
-
-        // If still too wide, drop the note first (lyrics are primary)
-        if (lyricStr && total > available) {
-          setWordFont(wordPx);
-          lyricStr = fitWithEllipsis(lyricStr, available);
-          ({ wWord, wNote, total } = { wWord: ctx.measureText(lyricStr).width, wNote: 0, total: ctx.measureText(lyricStr).width });
-        }
-
-        // If there is no lyric, try note alone centered
-        if (!lyricStr) {
-          setNoteFont(notePx);
-          const noteW = ctx.measureText(noteLabel).width;
-          if (noteW <= available) {
-            ctx.fillStyle = "rgba(255,255,255,0.92)";
-            ctx.fillText(noteLabel, cx - noteW / 2, cy);
-          }
-          return;
-        }
-
-        // Draw composed row centered
-        const startX = cx - total / 2;
-
-        // Lyric (bold, brighter)
-        setWordFont(wordPx);
-        ctx.fillStyle = "rgba(255,255,255,0.98)";
-        ctx.fillText(lyricStr, startX, cy);
-
-        // Note (smaller, slightly dimmer), only if it fits after lyric
-        if (wNote > 0 && (wWord + gap + wNote) <= available) {
-          setNoteFont(notePx);
-          ctx.fillStyle = "rgba(255,255,255,0.78)";
-          ctx.fillText(noteLabel, startX + wWord + gap, cy);
-        }
-      };
 
       // Layout & time
       const anchorX = Math.max(0, Math.min(width * anchorRatio, width - 1));
@@ -204,7 +113,6 @@ export default function DynamicOverlay({
       const span = maxMidi - minMidi;
       for (let i = 0; i <= span; i++) {
         const midi = minMidi + i;
-
         const yLine = midiToY(midi, height, minMidi, maxMidi);
         const isC = midi % 12 === 0;
         ctx.strokeStyle = isC ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
@@ -217,7 +125,6 @@ export default function DynamicOverlay({
         if (isC) {
           const cell = midiCellRect(midi, height, minMidi, maxMidi);
           const centerY = cell.y + cell.h / 2;
-
           ctx.fillStyle = PR_COLORS.label;
           ctx.font = "11px ui-sans-serif, system-ui, -apple-system, Segoe UI";
           ctx.textAlign = "left";
@@ -227,8 +134,73 @@ export default function DynamicOverlay({
         }
       }
 
+      // Fast single-row label painter (WORD bold + NOTE light). No per-frame loops.
+      const drawInlineWordAndNote = (
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        word: string | undefined,
+        noteLabel: string
+      ) => {
+        const paddingX = 4;
+        const available = Math.max(0, w - paddingX * 2);
+        if (available < 18 || h < 12) return;
+
+        // Base sizes from cell height
+        const wordPx = Math.min(36, Math.max(12, Math.floor(h * 0.52)));
+        const notePx = Math.min(12, Math.max(10, Math.floor(h * 0.40)));
+
+        // Predict widths from cached 12px widths (linear scale ≈ good enough)
+        const wordW12 = word ? getWidth12(ctx, word, true) : 0;
+        const noteW12 = getWidth12(ctx, noteLabel, false);
+        const wWord = (wordW12 * wordPx) / 12;
+        const wNote = (noteW12 * notePx) / 12;
+
+        // prefer lyric; include note only if it fits with a small gap
+        const gap = 6;
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+
+        const canShowBoth = word ? wWord + gap + wNote <= available : wNote <= available;
+
+        // If lyric overflows even without the note, approximate ellipsis without extra measures
+        let lyricStr = word ?? "";
+        let wLyric = wWord;
+        if (lyricStr && !canShowBoth && wWord > available) {
+          const avgChar = Math.max(1, wordW12 / Math.max(1, lyricStr.length)); // @12px
+          const maxChars = Math.max(1, Math.floor((available * 12) / (avgChar * wordPx)) - 1);
+          lyricStr = lyricStr.slice(0, maxChars) + "…";
+          // recompute width at wordPx (linear scale)
+          const ell12 = getWidth12(ctx, lyricStr, true);
+          wLyric = (ell12 * wordPx) / 12;
+        }
+
+        // draw centered
+        const total = lyricStr ? (canShowBoth ? wLyric + gap + (wNote <= available ? wNote : 0) : wLyric) : wNote;
+        const startX = cx - total / 2;
+
+        if (lyricStr) {
+          ctx.font = `700 ${wordPx}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
+          ctx.fillStyle = "rgba(255,255,255,0.98)";
+          ctx.fillText(lyricStr, startX, cy);
+        }
+
+        const showNote = (!lyricStr && wNote <= available) || (lyricStr && canShowBoth);
+        if (showNote) {
+          const noteX = lyricStr ? startX + wLyric + gap : startX;
+          ctx.font = `${notePx}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
+          ctx.fillStyle = "rgba(255,255,255,0.78)";
+          ctx.fillText(noteLabel, noteX, cy);
+        }
+      };
+
       // Notes (scroll right→left in VIEW time)
-      const visLeft = -64, visRight = width + 64;
+      const visLeft = -64,
+        visRight = width + 64;
       let activeIdx = -1;
       for (let i = 0; i < phrase.notes.length; i++) {
         const n = phrase.notes[i];
@@ -249,7 +221,7 @@ export default function DynamicOverlay({
         ctx.lineWidth = 1;
         ctx.strokeRect(rx, ry, drawW, rh);
 
-        // single-row label: WORD (bold, larger) + NOTE (lighter) on one line
+        // label row
         const minWForText = 24;
         const minHForText = 14;
         if (drawW >= minWForText && h >= minHForText) {
@@ -259,7 +231,7 @@ export default function DynamicOverlay({
         }
 
         // determine "active" note at playhead
-        const nextStart = phrase.notes[i + 1]?.startSec ?? (n.startSec + n.durSec);
+        const nextStart = phrase.notes[i + 1]?.startSec ?? n.startSec + n.durSec;
         if (headTime >= n.startSec && headTime < nextStart) activeIdx = i;
       }
 
@@ -270,9 +242,9 @@ export default function DynamicOverlay({
 
       // Live pitch curve
       {
-        const left = tNow - (windowSec * 1.1);
+        const left = tNow - windowSec * 1.1;
         const right = tNow + 0.25;
-        pointsRef.current = pointsRef.current.filter(p => p.t >= left && p.t <= right);
+        pointsRef.current = pointsRef.current.filter((p) => p.t >= left && p.t <= right);
 
         if (pointsRef.current.length > 1) {
           ctx.lineWidth = 2;
@@ -282,7 +254,12 @@ export default function DynamicOverlay({
           for (const p of pointsRef.current) {
             const x = anchorX + (p.t - tNow) * pxPerSec;
             const y = midiToY(p.midi, height, minMidi, maxMidi);
-            if (!pen) { ctx.moveTo(x, y); pen = true; } else { ctx.lineTo(x, y); }
+            if (!pen) {
+              ctx.moveTo(x, y);
+              pen = true;
+            } else {
+              ctx.lineTo(x, y);
+            }
           }
           ctx.stroke();
         }
@@ -304,7 +281,7 @@ export default function DynamicOverlay({
 
         const goingUp = nxt.midi > cur.midi;
         const curCell = midiCellRect(cur.midi, height, minMidi, maxMidi);
-        const yEdgeStart = goingUp ? curCell.y : (curCell.y + curCell.h);
+        const yEdgeStart = goingUp ? curCell.y : curCell.y + curCell.h;
         const yStart = yEdgeStart;
 
         const yEnd = midiToYCenter(nxt.midi, height, minMidi, maxMidi);
@@ -315,10 +292,7 @@ export default function DynamicOverlay({
         const arc = clamp(baseArc, 6, 22);
         const yCtrl = yStart + (goingUp ? -arc : arc);
 
-        const yGuide =
-          (1 - u) * (1 - u) * yStart +
-          2 * (1 - u) * u * yCtrl +
-          u * u * yEnd;
+        const yGuide = (1 - u) * (1 - u) * yStart + 2 * (1 - u) * u * yCtrl + u * u * yEnd;
 
         ctx.fillStyle = PR_COLORS.dotFill;
         ctx.beginPath();
@@ -332,7 +306,7 @@ export default function DynamicOverlay({
         const next = phrase.notes[1] ?? first;
         const goingUp = next.midi > first.midi;
         const firstCell = midiCellRect(first.midi, height, minMidi, maxMidi);
-        const yEdge = goingUp ? firstCell.y : (firstCell.y + firstCell.h);
+        const yEdge = goingUp ? firstCell.y : firstCell.y + firstCell.h;
 
         ctx.fillStyle = PR_COLORS.dotFill;
         ctx.beginPath();
@@ -357,6 +331,7 @@ export default function DynamicOverlay({
       startAtMs,
       dpr,
       lyrics,
+      getWidth12,
     ]
   );
 
@@ -420,7 +395,6 @@ export default function DynamicOverlay({
   return (
     <canvas
       ref={canvasRef}
-      /* Fixed CSS size to avoid any scaling → ensures perfect circle */
       style={{
         width: `${width}px`,
         height: `${height}px`,

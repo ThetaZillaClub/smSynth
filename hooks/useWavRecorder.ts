@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { encodeWavPCM16 } from "@/utils/audio/wav";
 
 type Metrics = { rmsDb: number; maxAbs: number; clippedPct: number };
 
@@ -53,9 +54,16 @@ export default function useWavRecorder(opts?: {
     clip: 0,
   });
 
+  // guard against double start (StrictMode / fast toggles)
+  const startingRef = useRef(false);
+
   const cleanup = useCallback(async () => {
-    try { procRef.current?.port?.postMessage("flush"); } catch {}
-    try { procRef.current?.disconnect(); } catch {}
+    try {
+      procRef.current?.port?.postMessage("flush");
+    } catch {}
+    try {
+      procRef.current?.disconnect();
+    } catch {}
     procRef.current = null;
 
     if (streamRef.current) {
@@ -63,19 +71,26 @@ export default function useWavRecorder(opts?: {
       streamRef.current = null;
     }
     if (ctxRef.current) {
-      try { await ctxRef.current.close(); } catch {}
+      try {
+        await ctxRef.current.close();
+      } catch {}
       ctxRef.current = null;
     }
   }, []);
 
   useEffect(() => {
-    return () => { void cleanup(); };
+    return () => {
+      void cleanup();
+    };
   }, [cleanup]);
 
   const concat = (arrays: Float32Array[], total: number) => {
     const out = new Float32Array(total);
     let o = 0;
-    for (const a of arrays) { out.set(a, o); o += a.length; }
+    for (const a of arrays) {
+      out.set(a, o);
+      o += a.length;
+    }
     return out;
   };
 
@@ -143,119 +158,100 @@ export default function useWavRecorder(opts?: {
     return dst;
   };
 
-  const encodeWavPCM16 = (mono: Float32Array, sr: number) => {
-    // clamp to [-1, 1] & convert
-    const N = mono.length;
-    const pcm16 = new Int16Array(N);
-    for (let i = 0; i < N; i++) {
-      let s = Math.max(-1, Math.min(1, mono[i]));
-      pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
-
-    // RIFF/WAVE header
-    const blockAlign = 2; // 16-bit mono
-    const byteRate = sr * blockAlign;
-    const dataSize = pcm16.byteLength;
-    const buf = new ArrayBuffer(44 + dataSize);
-    const dv = new DataView(buf);
-
-    let p = 0;
-    const wstr = (s: string) => { for (let i = 0; i < s.length; i++) dv.setUint8(p++, s.charCodeAt(i)); };
-    const w16  = (v: number) => { dv.setUint16(p, v, true); p += 2; };
-    const w32  = (v: number) => { dv.setUint32(p, v, true); p += 4; };
-
-    wstr("RIFF"); w32(36 + dataSize);
-    wstr("WAVE");
-    wstr("fmt "); w32(16); w16(1); w16(1); w32(sr); w32(byteRate); w16(blockAlign); w16(16);
-    wstr("data"); w32(dataSize);
-    new Uint8Array(buf, 44).set(new Uint8Array(pcm16.buffer));
-    return new Blob([buf], { type: "audio/wav" });
-  };
-
   const start = useCallback(async () => {
-    if (isRecording) return;
+    if (isRecording || startingRef.current) return;
+    startingRef.current = true;
 
-    // fresh state
-    chunksRef.current = [];
-    totalRef.current = 0;
-    metricsRef.current = { sumSq: 0, samples: 0, maxAbs: 0, clip: 0 };
-    setWavBlob(null);
-    if (wavUrl) URL.revokeObjectURL(wavUrl);
-    setWavUrl(null);
-    setDurationSec(0);
-    setEndedAtMs(null);
-    setMetrics(null);
-    setNumSamplesOut(null);
-    setPcm16k(null);
-    setResampleMethod("linear");
+    try {
+      // fresh state
+      chunksRef.current = [];
+      totalRef.current = 0;
+      metricsRef.current = { sumSq: 0, samples: 0, maxAbs: 0, clip: 0 };
+      setWavBlob(null);
+      if (wavUrl) URL.revokeObjectURL(wavUrl);
+      setWavUrl(null);
+      setDurationSec(0);
+      setEndedAtMs(null);
+      setMetrics(null);
+      setNumSamplesOut(null);
+      setPcm16k(null);
+      setResampleMethod("linear");
 
-    const AC: typeof AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
-    const ctx = new AC({ sampleRate: 48000 });
-    ctxRef.current = ctx;
-    deviceSrRef.current = ctx.sampleRate || 48000;
-    setDeviceSampleRateHz(deviceSrRef.current);
-    setBaseLatencySec((ctx as any).baseLatency ?? null);
+      const AC: typeof AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AC({ sampleRate: 48000 });
+      ctxRef.current = ctx;
+      deviceSrRef.current = ctx.sampleRate || 48000;
+      setDeviceSampleRateHz(deviceSrRef.current);
+      setBaseLatencySec((ctx as any).baseLatency ?? null);
 
-    // Load the same worklet module (downmix→mono & transfer buffers)
-    try { await ctx.audioWorklet.addModule("/audio-processor.js"); } catch {}
+      // Load the same worklet module (downmix→mono & transfer buffers)
+      try {
+        await ctx.audioWorklet.addModule("/audio-processor.js");
+      } catch {}
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        sampleRate: 48000,
-      },
-    });
-    streamRef.current = stream;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          sampleRate: 48000,
+        },
+      });
+      streamRef.current = stream;
 
-    const mic = ctx.createMediaStreamSource(stream);
+      const mic = ctx.createMediaStreamSource(stream);
 
-    // choose buffer size similar to pitch hook
-    const deviceSR = ctx.sampleRate || 48000;
-    const minBuf = (deviceSR / sampleRateOut) * 256; // scale with actual output SR
-    let bufferSize = 1024;
-    while (bufferSize < Math.max(bufferSizeMin, minBuf)) bufferSize *= 2;
-    setWorkletBufferSize(bufferSize);
+      // choose buffer size similar to pitch hook
+      const deviceSR = ctx.sampleRate || 48000;
+      const minBuf = (deviceSR / sampleRateOut) * 256; // scale with actual output SR
+      let bufferSize = 1024;
+      while (bufferSize < Math.max(bufferSizeMin, minBuf)) bufferSize *= 2;
+      setWorkletBufferSize(bufferSize);
 
-    const node = new AudioWorkletNode(ctx, "audio-processor", {
-      processorOptions: { bufferSize },
-    });
-    procRef.current = node;
+      const node = new AudioWorkletNode(ctx, "audio-processor", {
+        processorOptions: { bufferSize },
+      });
+      procRef.current = node;
 
-    node.port.onmessage = (ev: MessageEvent) => {
-      let data: any = ev.data;
-      if (data instanceof ArrayBuffer) {
-        data = new Float32Array(data);
-      } else if (!(data instanceof Float32Array) && data?.buffer instanceof ArrayBuffer) {
-        data = new Float32Array(data.buffer, data.byteOffset || 0, (data.byteLength || data.buffer.byteLength) / 4);
-      }
-      if (!(data instanceof Float32Array) || !data.length) return;
+      node.port.onmessage = (ev: MessageEvent) => {
+        let data: any = ev.data;
+        if (data instanceof ArrayBuffer) {
+          data = new Float32Array(data);
+        } else if (!(data instanceof Float32Array) && data?.buffer instanceof ArrayBuffer) {
+          data = new Float32Array(data.buffer, data.byteOffset || 0, (data.byteLength || data.buffer.byteLength) / 4);
+        }
+        if (!(data instanceof Float32Array) || !data.length) return;
 
-      // metrics at device SR
-      let maxA = metricsRef.current.maxAbs;
-      let sumSq = metricsRef.current.sumSq;
-      let clip = metricsRef.current.clip;
-      for (let i = 0; i < data.length; i++) {
-        const x = data[i];
-        const a = Math.abs(x);
-        if (a > maxA) maxA = a;
-        if (a >= 0.999) clip++;
-        sumSq += x * x;
-      }
-      metricsRef.current.maxAbs = maxA;
-      metricsRef.current.sumSq = sumSq;
-      metricsRef.current.samples += data.length;
+        // metrics at device SR
+        let maxA = metricsRef.current.maxAbs;
+        let sumSq = metricsRef.current.sumSq;
+        let clip = metricsRef.current.clip;
+        for (let i = 0; i < data.length; i++) {
+          const x = data[i];
+          const a = Math.abs(x);
+          if (a > maxA) maxA = a;
+          if (a >= 0.999) clip++;
+          sumSq += x * x;
+        }
+        metricsRef.current.maxAbs = maxA;
+        metricsRef.current.sumSq = sumSq;
+        metricsRef.current.samples += data.length;
 
-      chunksRef.current.push(data);
-      totalRef.current += data.length;
-      setDurationSec(totalRef.current / deviceSR);
-    };
+        chunksRef.current.push(data);
+        totalRef.current += data.length;
 
-    mic.connect(node);
-    setStartedAtMs(performance.now()); // mark the moment audio is flowing to our node
-    setIsRecording(true);
+        // use the ref'd device SR to avoid stale closures
+        const sr = deviceSrRef.current || (ctx.sampleRate || 48000);
+        setDurationSec(totalRef.current / sr);
+      };
+
+      mic.connect(node);
+      setStartedAtMs(performance.now()); // mark the moment audio is flowing to our node
+      setIsRecording(true);
+    } finally {
+      startingRef.current = false;
+    }
   }, [isRecording, wavUrl, bufferSizeMin, sampleRateOut]);
 
   const stop = useCallback(async (): Promise<{ blob: Blob; url: string; durationSec: number } | null> => {
@@ -266,7 +262,17 @@ export default function useWavRecorder(opts?: {
     await new Promise((r) => setTimeout(r, 0)); // let final postMessage arrive
 
     const deviceSR = deviceSrRef.current;
-    const mono = concat(chunksRef.current, totalRef.current);
+    // concat @ device SR
+    const mono = (() => {
+      const total = totalRef.current;
+      const out = new Float32Array(total);
+      let o = 0;
+      for (const a of chunksRef.current) {
+        out.set(a, o);
+        o += a.length;
+      }
+      return out;
+    })();
 
     // Choose resampler
     let resampled: Float32Array;
