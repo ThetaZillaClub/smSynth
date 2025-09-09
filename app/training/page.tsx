@@ -39,7 +39,7 @@ export default function Training() {
    typeof pitch === "number"
      ? (() => {
          const { name, octave, cents } = hzToNoteName(pitch, 440, { useSharps: true, octaveAnchor: "A" });
-         const dispOct = octave + 1;
+         const dispOct = octave;
          const sign = cents > 0 ? "+" : "";
          return `${name}${dispOct} ${sign}${cents}¢`;
        })()

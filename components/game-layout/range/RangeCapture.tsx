@@ -269,7 +269,7 @@ export default function RangeCapture({
    capturedHz != null
      ? (() => {
          const n = hzToNoteName(capturedHz, a4Hz, { useSharps: true, octaveAnchor: "A" });
-         const dispOct = n.octave + 1;
+         const dispOct = n.octave;
          return `${n.name}${dispOct} • ${capturedHz.toFixed(1)} Hz`;
        })()
      : "—";

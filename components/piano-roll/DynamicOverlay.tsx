@@ -117,7 +117,7 @@ export default function DynamicOverlay({
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
  const { octave } = midiToNoteName(midi, { useSharps: true, octaveAnchor: "A" });
- ctx.fillText(`C${octave + 1}`, 4, centerY);
+ ctx.fillText(`C${octave}`, 4, centerY);
       }
     }
 
@@ -145,7 +145,7 @@ export default function DynamicOverlay({
       const minHForText = 14;
       if (drawW >= minWForText && h >= minHForText) {
  const { name, octave } = midiToNoteName(n.midi, { useSharps: true, octaveAnchor: "A" });
- const label = `${name}${octave + 1}`;
+ const label = `${name}${octave}`;
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI";
         ctx.textAlign = "center";
