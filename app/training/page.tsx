@@ -13,16 +13,21 @@ import { buildPhraseFromRangeDiatonic } from "@/utils/phrase/diatonic";
 
 type Step = "low" | "high" | "play";
 
-// Keep this consistent with PianoRoll/DynamicOverlay defaults
 const LEAD_IN_SEC = 1.5;
-
-// deterministic lyric seed per take
-const makeSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] >>> 0;
-
-// app build/version if you have one injected at build time
+const CONF_THRESHOLD = 0.5;
+const MIN_NOISE_FRAMES = 10;
 const APP_BUILD = process.env.NEXT_PUBLIC_APP_BUILD ?? "dev";
 
-/** Fixed-FPS trace collector */
+const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : NaN);
+const median = (a: number[]) => {
+  if (!a.length) return NaN;
+  const s = [...a].sort((x, y) => x - y);
+  const i = Math.floor(s.length / 2);
+  return s.length % 2 ? s[i] : (s[i - 1] + s[i]) / 2;
+};
+const dbfs = (rms: number) => 20 * Math.log10(rms + 1e-12);
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
 function useFixedFpsTrace(enabled: boolean, fps = 60) {
   const [hzArr, setHzArr] = useState<(number | null)[]>([]);
   const [confArr, setConfArr] = useState<number[]>([]);
@@ -30,32 +35,27 @@ function useFixedFpsTrace(enabled: boolean, fps = 60) {
 
   const latestHzRef = useRef<number | null>(null);
   const latestConfRef = useRef(0);
+  const latestRmsRef = useRef<number>(-120);
 
-  // expose setters so parent can feed latest values without re-rendering the timer
   const setLatest = useCallback((hz: number | null, conf: number) => {
     latestHzRef.current = hz;
     latestConfRef.current = conf;
   }, []);
 
   useEffect(() => {
-    if (!enabled) {
-      setHzArr([]);
-      setConfArr([]);
-      setRmsDbArr([]);
-      return;
-    }
+    if (!enabled) return;
     const dt = 1000 / fps;
 
     const onRms = (e: Event) => {
-      // dispatched in usePitchDetection pushAudio
       const db = (e as CustomEvent).detail?.db ?? -120;
-      setRmsDbArr((prev) => [...prev, db]);
+      latestRmsRef.current = db;
     };
 
     window.addEventListener("audio-rms", onRms as any);
     const id = setInterval(() => {
       setHzArr((prev) => [...prev, latestHzRef.current]);
       setConfArr((prev) => [...prev, latestConfRef.current]);
+      setRmsDbArr((prev) => [...prev, latestRmsRef.current]);
     }, dt);
 
     return () => {
@@ -64,7 +64,17 @@ function useFixedFpsTrace(enabled: boolean, fps = 60) {
     };
   }, [enabled, fps]);
 
-  return { hzArr, confArr, rmsDbArr, setLatest, reset: () => { setHzArr([]); setConfArr([]); setRmsDbArr([]);} };
+  return {
+    hzArr,
+    confArr,
+    rmsDbArr,
+    setLatest,
+    reset: () => {
+      setHzArr([]);
+      setConfArr([]);
+      setRmsDbArr([]);
+    },
+  };
 }
 
 export default function Training() {
@@ -72,7 +82,6 @@ export default function Training() {
   const [lowHz, setLowHz] = useState<number | null>(null);
   const [highHz, setHighHz] = useState<number | null>(null);
 
-  // mic always on (range + play)
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true,
     fps: 60,
@@ -81,14 +90,10 @@ export default function Training() {
     centsTolerance: 3,
   });
 
-  // play/scroll state
   const [running, setRunning] = useState(false);
   const [activeWord, setActiveWord] = useState<number>(-1);
-
-  // lyric strategy
   const [lyricStrategy] = useState<"mixed" | "stableVowel">("mixed");
 
-  // stop scrolling unless we're in play
   useEffect(() => {
     if (step !== "play") setRunning(false);
   }, [step]);
@@ -102,7 +107,6 @@ export default function Training() {
           return `${name}${octave} ${sign}${cents}¢`;
         })()
       : "—";
-
   const micText = error ? `Mic error: ${String(error)}` : isReady ? "Mic ready" : "Starting mic…";
 
   const phrase: Phrase | null = useMemo(() => {
@@ -112,19 +116,17 @@ export default function Training() {
     return null;
   }, [step, lowHz, highHz]);
 
-  // words sized to the phrase (stable during a play session), deterministic seed per take
   const [words, setWords] = useState<string[] | null>(null);
-  const lyricSeedRef = useRef<number>(makeSeed());
+  const lyricSeedRef = useRef<number>(crypto.getRandomValues(new Uint32Array(1))[0]! >>> 0);
   useEffect(() => {
     if (step === "play" && phrase) {
-      lyricSeedRef.current = makeSeed(); // refresh for each new play session
+      lyricSeedRef.current = crypto.getRandomValues(new Uint32Array(1))[0]! >>> 0;
       setWords(makeWordLyric(phrase.notes.length, lyricStrategy, lyricSeedRef.current));
     } else {
       setWords(null);
     }
   }, [step, phrase, lyricStrategy]);
 
-  // ---------- recording + pitch trace ----------
   const {
     isRecording,
     start: startRec,
@@ -133,55 +135,52 @@ export default function Training() {
     wavUrl,
     durationSec,
     clear,
-    startedAtMs,   // precise start
-    endedAtMs,     // precise end
+    startedAtMs,
+    endedAtMs,
     sampleRateOut,
-    // Added device/env + metrics + PCM
     deviceSampleRateHz,
     workletBufferSize,
     baseLatencySec,
-    metrics,           // { rmsDb, maxAbs, clippedPct }
+    metrics,
     numSamplesOut,
-    pcm24k,            // Float32Array | null
+    pcm24k,
   } = useWavRecorder({ sampleRateOut: 24000 });
 
-  // fixed-fps trace collector at 60fps during recording
   const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 60);
-
-  // keep latest pitch/conf in the fixed-fps collector
   useEffect(() => {
     setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0);
   }, [pitch, confidence, setLatest]);
 
-  // Track the "play" epoch (overlay also starts its clock on the same transition)
+  // Capture the moment the user hits Start so the overlay can animate instantly
   const playEpochMsRef = useRef<number | null>(null);
   useEffect(() => {
-    if (running) playEpochMsRef.current = performance.now();
+    if (running && playEpochMsRef.current == null) {
+      playEpochMsRef.current = performance.now();
+    }
+    if (!running) {
+      playEpochMsRef.current = null;
+    }
   }, [running]);
 
-  // Auto-stop after phrase duration (lead-in + small tail)
+  // Auto-stop after phrase completes (lead-in + phrase + small tail)
   useEffect(() => {
     if (!phrase || !running) return;
     const tail = 0.4;
-    const t = setTimeout(() => {
-      setRunning(false);
-    }, Math.max(0, (LEAD_IN_SEC + phrase.durationSec + tail) * 1000));
+    const t = setTimeout(() => setRunning(false), Math.max(0, (LEAD_IN_SEC + phrase.durationSec + tail) * 1000));
     return () => clearTimeout(t);
   }, [phrase, running]);
 
-  // start/stop recording in sync with play
+  // Toggle recorder in step=play based on running flag
   const recLockRef = useRef({ starting: false, stopping: false });
   useEffect(() => {
     (async () => {
-      // Start
       if (step === "play" && running && !isRecording && !recLockRef.current.starting) {
         recLockRef.current.starting = true;
-        resetFixed(); // reset fixed-fps buffers
+        resetFixed();
         await startRec();
         recLockRef.current.starting = false;
         return;
       }
-      // Stop
       if (isRecording && !running && !recLockRef.current.stopping) {
         recLockRef.current.stopping = true;
         await stopRec();
@@ -194,63 +193,111 @@ export default function Training() {
   const sessionIdRef = useRef<string>(crypto.randomUUID());
   const takeIdRef = useRef<string>("");
 
-  // Build + expose metadata JSON when a take finishes
+  // We DO NOT infer gender here. Wire from the pre-screen later.
+  const gender_label: "male" | "female" | null = null;
+
+  // ---- TS-safe view over PCM (handles ArrayBufferLike / SAB) ----
+  const pcmView: Float32Array | null = useMemo(() => {
+    if (!pcm24k) return null;
+    try {
+      const buf = (pcm24k as any).buffer as ArrayBuffer;
+      const offset = (pcm24k as any).byteOffset ?? 0;
+      const length = (pcm24k as any).length ?? 0;
+      return new Float32Array(buf, offset * 4, length);
+    } catch {
+      return pcm24k as unknown as Float32Array;
+    }
+  }, [pcm24k]);
+
+  // JSON blob URL (no dependency on metaUrl itself to avoid loops)
   const [metaUrl, setMetaUrl] = useState<string | null>(null);
+  const prevMetaUrlRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!wavBlob || !phrase || !words) return;
 
     if (!takeIdRef.current) takeIdRef.current = crypto.randomUUID();
 
-    if (metaUrl) {
-      URL.revokeObjectURL(metaUrl);
-      setMetaUrl(null);
-    }
-
-    // Phones aligned 1:1 with words
     const phones = words.map((w) => getPhonemeForWord(w));
-
-    // Musical-time onsets/offsets
     const note_onsets_sec = phrase.notes.map((n) => n.startSec);
     const note_offsets_sec = phrase.notes.map((n) => n.startSec + n.durSec);
 
-    // Alignment into recording
+    // Drift between UI-start and recorder-start
     const playStartMs = playEpochMsRef.current ?? null;
     const recStartMs = startedAtMs ?? null;
+    const driftSec = playStartMs != null && recStartMs != null ? (playStartMs - recStartMs) / 1000 : 0;
 
-    const first_note_at_rec_sec =
-      playStartMs != null && recStartMs != null ? LEAD_IN_SEC + (playStartMs - recStartMs) / 1000 : LEAD_IN_SEC;
-
+    const first_note_at_rec_sec = LEAD_IN_SEC + driftSec;
     const first_note_at_sample = Math.max(0, Math.round(first_note_at_rec_sec * sampleRateOut));
     const note_onsets_samples = note_onsets_sec.map((t) => first_note_at_sample + Math.round(t * sampleRateOut));
     const note_offsets_samples = note_offsets_sec.map((t) => first_note_at_sample + Math.round(t * sampleRateOut));
 
-    // QC metrics (lead-in noise, voiced ratio, simple pass/fail)
-    const leadSamples = Math.min(numSamplesOut ?? 0, Math.round(LEAD_IN_SEC * sampleRateOut));
+    // Features from traces
+    const fps = 60;
+    const frameTimesSec = Array.from({ length: rmsDbArr.length }, (_, i) => i / fps);
+    const noiseFrameIdx = frameTimesSec.map((t, i) => (t < first_note_at_rec_sec ? i : -1)).filter((i) => i >= 0);
+    const voicedIdx = hzArr
+      .map((hz, i) => (hz != null && (confArr[i] ?? 0) >= CONF_THRESHOLD ? i : -1))
+      .filter((i) => i >= 0);
+
+    const noiseDbFrames = noiseFrameIdx.length >= MIN_NOISE_FRAMES ? noiseFrameIdx.map((i) => rmsDbArr[i]) : [];
     let noiseDb = -120;
-    if (pcm24k && leadSamples > 32) {
-      let sum = 0;
-      for (let i = 0; i < leadSamples; i++) sum += pcm24k[i] * pcm24k[i];
-      const rms = Math.sqrt(sum / leadSamples);
-      noiseDb = 20 * Math.log10(rms + 1e-12);
+    if (noiseDbFrames.length) {
+      noiseDb = mean(noiseDbFrames);
+    } else if (rmsDbArr.length) {
+      const sorted = [...rmsDbArr].sort((a, b) => a - b);
+      const p10 = sorted[Math.max(0, Math.floor(sorted.length * 0.1) - 1)] ?? sorted[0];
+      noiseDb = p10;
     }
-    const voicedCount = hzArr.filter((h) => h != null).length;
-    const voicedRatio = hzArr.length ? voicedCount / hzArr.length : 0;
+
+    const voicedRmsDb = voicedIdx.map((i) => rmsDbArr[i]).filter((x) => isFinite(x));
+    const rms_dbfs_voiced = voicedRmsDb.length ? mean(voicedRmsDb) : -120;
+    const snr_db_voiced = rms_dbfs_voiced - noiseDb;
+
+    const f0_voiced = voicedIdx.map((i) => hzArr[i] as number).filter((x) => isFinite(x) && x > 0);
+    const f0_avg = f0_voiced.length ? mean(f0_voiced) : null;
+    const f0_med = f0_voiced.length ? median(f0_voiced) : null;
+
+    // per-note RMS from PCM
+    const note_rms_dbfs: number[] = [];
+    if (pcmView && note_onsets_samples.length === note_offsets_samples.length) {
+      for (let k = 0; k < note_onsets_samples.length; k++) {
+        const s0 = clamp(note_onsets_samples[k], 0, pcmView.length);
+        const s1 = clamp(note_offsets_samples[k], 0, pcmView.length);
+        const L = Math.max(0, s1 - s0);
+        if (L < 8) { note_rms_dbfs.push(-120); continue; }
+        let sumSq = 0;
+        for (let i = s0; i < s1; i++) sumSq += pcmView[i]! * pcmView[i]!;
+        note_rms_dbfs.push(dbfs(Math.sqrt(sumSq / L)));
+      }
+    }
+
+    const clippedPct = metrics?.clippedPct ?? 0;
+    const classifyVolume = (r: number, s: number, c: number) => {
+      if (c >= 0.5) return "loud";
+      if (s >= 18 && r >= -22) return "loud";
+      if (s >= 12 && r >= -28) return "normal";
+      return "soft";
+    };
+    const volume_label = classifyVolume(rms_dbfs_voiced, snr_db_voiced, clippedPct);
+
+    const pitch_label = f0_med == null ? null : (f0_med < 180 ? "low" : "high");
 
     const peaks = metrics?.maxAbs ?? 0;
-    const rmsDb = metrics?.rmsDb ?? -120;
-    const clippedPct = metrics?.clippedPct ?? 0;
-
-    // super simple acceptance gate (tune later)
+    const recRmsDb = metrics?.rmsDb ?? -120;
+    const reasons: string[] = [];
+    if (voicedIdx.length === 0) reasons.push("no_voiced_frames");
+    if (snr_db_voiced < 8) reasons.push("low_snr");
+    if (clippedPct >= 0.5) reasons.push("heavy_clipping");
     const passed =
       clippedPct < 0.1 &&
-      rmsDb > -35 &&
-      (rmsDb - noiseDb) >= 18 && // SNR ≥ 18 dB
-      voicedRatio >= 0.4;
+      recRmsDb > -35 &&
+      snr_db_voiced >= 12 &&
+      (voicedIdx.length / Math.max(1, rmsDbArr.length)) >= 0.4 &&
+      reasons.length === 0;
 
-    // targets
     const targets_hz = phrase.notes.map((n) => midiToHz(n.midi, 440));
 
-    // Build v2 take JSON
     const takeV2 = {
       version: 2,
       ids: {
@@ -258,14 +305,11 @@ export default function Training() {
         session_id: sessionIdRef.current,
         subject_id: null as string | null,
       },
-
       created_at: new Date().toISOString(),
-
       app: {
         build: APP_BUILD,
         platform: { user_agent: (typeof navigator !== "undefined" ? navigator.userAgent : "") },
       },
-
       audio: {
         wav: {
           sample_rate_hz: sampleRateOut,
@@ -279,7 +323,6 @@ export default function Training() {
         },
         processing: { downmix: "avg", resample: "linear" },
       },
-
       prompt: {
         scale: "major",
         a4_hz: 440,
@@ -290,16 +333,32 @@ export default function Training() {
         lyric_strategy: lyricStrategy,
         lyric_seed: lyricSeedRef.current,
       },
-
+      controls: {
+        volume_label,
+        pitch_label,
+        gender_label,
+      },
+      features: {
+        volume: {
+          rms_dbfs_voiced,
+          snr_db_voiced,
+          note_rms_dbfs,
+          method: "60fps_rms_trace voiced-only; pre-first-note RMS as noise reference",
+          conf_threshold: CONF_THRESHOLD,
+        },
+        f0: {
+          avg_hz_voiced: f0_avg,
+          median_hz_voiced: f0_med,
+          conf_threshold: CONF_THRESHOLD,
+        },
+      },
       phrase,
       targets_hz,
-
       lyric: {
         words,
         phones,
         align: "one_word_per_note" as const,
       },
-
       timing: {
         first_note_at_sec: first_note_at_sample / sampleRateOut,
         first_note_at_sample,
@@ -308,36 +367,32 @@ export default function Training() {
         note_onsets_samples,
         note_offsets_samples,
       },
-
       pitch: {
         algorithm: "SwiftF0",
         model: "model.onnx",
-        // minimal echo of model config; you can inline full swiftf0-config if you like
         trace: {
           fps: 60,
           start_at_sec: 0,
           hz: hzArr,
           conf: confArr,
         },
-        rms_db_trace: rmsDbArr, // optional, helpful for denoising research
+        rms_db_trace: rmsDbArr,
       },
-
       qc: {
         peak_abs: peaks,
-        rms_dbfs: rmsDb,
+        rms_dbfs: recRmsDb,
         noise_floor_dbfs: noiseDb,
-        snr_db: rmsDb - noiseDb,
+        snr_db: recRmsDb - noiseDb,
+        snr_db_voiced,
         clipped_pct: clippedPct,
-        voiced_ratio: voicedRatio,
+        voiced_ratio: voicedIdx.length / Math.max(1, rmsDbArr.length),
         passed,
-        reasons: [] as string[],
+        reasons,
       },
-
       files: {
         wav: "take.wav",
         json: "take.json",
       },
-
       sanity: {
         notes_count: phrase.notes.length,
         words_count: words.length,
@@ -346,18 +401,24 @@ export default function Training() {
         phones_match_notes: phones.length === phrase.notes.length,
         first_note_at_sample_gte0: first_note_at_sample >= 0,
         pitch_trace_lengths_match: hzArr.length === confArr.length,
+        rms_trace_aligned: hzArr.length === rmsDbArr.length,
+        voiced_frames_count: voicedIdx.length,
       },
     };
 
     const blob = new Blob([JSON.stringify(takeV2, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
+    if (prevMetaUrlRef.current) URL.revokeObjectURL(prevMetaUrlRef.current);
+    prevMetaUrlRef.current = url;
     setMetaUrl(url);
 
-    // prepare for next take id
     takeIdRef.current = "";
 
     return () => {
-      URL.revokeObjectURL(url);
+      if (prevMetaUrlRef.current) {
+        URL.revokeObjectURL(prevMetaUrlRef.current);
+        prevMetaUrlRef.current = null;
+      }
     };
   }, [
     wavBlob,
@@ -372,33 +433,30 @@ export default function Training() {
     rmsDbArr,
     metrics,
     numSamplesOut,
-    pcm24k,
+    pcmView,
     lowHz,
     highHz,
+    lyricStrategy,
   ]);
-
-  // ---------- END recording ----------
 
   return (
     <GameLayout
       title="Training"
       micText={micText}
       error={error}
-      // play controls
       running={running}
       onToggle={() => setRunning((r) => !r)}
-      // stage & lyrics (only show lyrics in play)
       phrase={phrase}
       lyrics={step === "play" && words ? words : undefined}
       activeLyricIndex={step === "play" ? activeWord : -1}
       onActiveNoteChange={(idx) => setActiveWord(idx)}
-      // bottom stats
       pitchText={pitchText}
       noteText={noteText}
       confidence={confidence}
-      // live pitch for the roll overlay
       livePitchHz={typeof pitch === "number" ? pitch : null}
-      confThreshold={0.5}
+      confThreshold={CONF_THRESHOLD}
+      // >>> This is the key line so the overlay starts:
+      startAtMs={startedAtMs ?? playEpochMsRef.current ?? null}
     >
       {step === "low" && (
         <RangeCapture
@@ -406,7 +464,7 @@ export default function Training() {
           active
           pitchHz={typeof pitch === "number" ? pitch : null}
           confidence={confidence}
-          confThreshold={0.5}
+          confThreshold={CONF_THRESHOLD}
           bpm={60}
           beatsRequired={1}
           centsWindow={75}
@@ -424,7 +482,7 @@ export default function Training() {
           active
           pitchHz={typeof pitch === "number" ? pitch : null}
           confidence={confidence}
-          confThreshold={0.5}
+          confThreshold={CONF_THRESHOLD}
           bpm={60}
           beatsRequired={1}
           centsWindow={75}
@@ -432,12 +490,11 @@ export default function Training() {
           onConfirm={(hz) => {
             setHighHz(hz);
             setStep("play");
-            setRunning(false); // user must click Start
+            setRunning(false);
           }}
         />
       )}
 
-      {/* Recorder UI strip (appears during/after takes) */}
       {step === "play" && (
         <div className="mt-2 grid gap-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
           <div className="flex items-center justify-between text-sm">
@@ -461,19 +518,14 @@ export default function Training() {
                 </a>
               )}
               {wavUrl && (
-                <button
-                  className="px-2 py-1 border rounded"
-                  onClick={() => {
-                    clear();
-                  }}
-                >
+                <button className="px-2 py-1 border rounded" onClick={() => clear()}>
                   Clear
                 </button>
               )}
             </div>
           </div>
           <div className="text-xs opacity-70">
-            First note begins at ≈{LEAD_IN_SEC.toFixed(2)}s after Play (exact in JSON).
+            First note is aligned precisely in the JSON; noise is measured before that point.
           </div>
         </div>
       )}

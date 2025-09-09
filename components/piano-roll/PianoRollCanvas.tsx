@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getMidiRange, PR_COLORS } from "./scale";
 import DynamicOverlay from "./DynamicOverlay";
 import type { Phrase as PhraseT, Note as NoteT } from "./types";
@@ -17,8 +17,13 @@ type Props = {
   confidence?: number;
   confThreshold?: number;
 
-  leadInSec?: number;   // new: delay before first note arrives
-  a4Hz?: number;        // optional, default 440
+  /** delay before first note arrives */
+  leadInSec?: number;
+  /** tuning reference */
+  a4Hz?: number;
+
+  /** Recorder anchor in ms; keeps overlay in sync with capture engine */
+  startAtMs?: number | null;
 };
 
 export default function PianoRollCanvas({
@@ -31,11 +36,12 @@ export default function PianoRollCanvas({
   confThreshold = 0.5,
   leadInSec = 1.5,
   a4Hz = 440,
+  startAtMs = null,
 }: Props) {
   const { minMidi, maxMidi } = useMemo(() => getMidiRange(phrase, 2), [phrase]);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState<number | null>(null); // ← start unknown to avoid an early, wrong-sized draw
+  const [width, setWidth] = useState<number | null>(null); // start unknown to avoid an early, wrong-sized draw
 
   // Measure immediately after mount, then track with RO
   useLayoutEffect(() => {
@@ -84,6 +90,7 @@ export default function PianoRollCanvas({
           confThreshold={confThreshold}
           leadInSec={leadInSec}
           a4Hz={a4Hz}
+          startAtMs={startAtMs}
         />
       )}
     </div>

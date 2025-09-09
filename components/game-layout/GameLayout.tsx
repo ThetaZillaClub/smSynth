@@ -26,6 +26,9 @@ type LayoutProps = {
   livePitchHz?: number | null;
   confThreshold?: number;
 
+  /** Recorder anchor in ms since epoch/performance time; keeps overlay in sync with audio engine */
+  startAtMs?: number | null;
+
   children?: React.ReactNode;
   onActiveNoteChange?: (idx: number) => void;
 };
@@ -44,6 +47,7 @@ export default function GameLayout({
   confidence,
   livePitchHz,
   confThreshold = 0.5,
+  startAtMs = null,
   children,
   onActiveNoteChange,
 }: LayoutProps) {
@@ -96,6 +100,7 @@ export default function GameLayout({
               livePitchHz={livePitchHz}
               confidence={confidence}
               confThreshold={confThreshold}
+              startAtMs={startAtMs}
             />
           </div>
 

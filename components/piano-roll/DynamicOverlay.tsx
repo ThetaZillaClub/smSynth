@@ -20,28 +20,26 @@ type Props = {
   confThreshold?: number;
   a4Hz?: number;
 
+  /** Pre-roll lead-in duration (seconds) */
   leadInSec?: number;
+
+  /** Recorder anchor in ms; when provided, overlay time is (now - startAtMs) */
+  startAtMs?: number | null;
 };
 
-// Simple MIDI → name helper (A4=440 semantics not needed for note spelling)
-// Simple MIDI → name helper (A-based octave numbering: octave increments at A)
+// MIDI → name helper with A-based octave numbering (octave changes at A)
 function midiToNameAOctave(m: number, useSharps = true) {
   const SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   const FLAT  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
   const names = useSharps ? SHARP : FLAT;
 
-  const pc = ((m % 12) + 12) % 12;     // pitch class 0..11
+  const pc = ((m % 12) + 12) % 12;
   const name = names[pc];
 
-  // base (C-based) octave
-  let octave = Math.floor(m / 12) - 1;
-
-  // shift up by 1 for A/A#/B (pc >= 9) to make octave change happen at A
-  if (pc >= 9) octave += 1;
-
+  let octave = Math.floor(m / 12) - 1; // C-based
+  if (pc >= 9) octave += 1;            // shift so change happens at A
   return `${name}${octave}`;
 }
-
 
 export default function DynamicOverlay({
   width,
@@ -60,10 +58,14 @@ export default function DynamicOverlay({
   a4Hz = 440,
 
   leadInSec = 1.5,
+  startAtMs = null,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
+
+  // Fallback baseline when an external start isn't provided (e.g., preview mode)
   const startRef = useRef<number | null>(null);
+
   const lastActiveRef = useRef<number>(-1);
   const pointsRef = useRef<Array<{ t: number; midi: number }>>([]);
 
@@ -71,9 +73,12 @@ export default function DynamicOverlay({
     const cnv = canvasRef.current;
     if (!cnv) return;
 
+    // if we're running but don't yet have the recorder anchor, wait (prevents pre-roll skew)
+    if (running && startAtMs == null) return;
+
     const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
-    // Ensure backing store matches CSS pixels exactly → prevents any stretch
+    // Ensure backing store matches CSS pixels exactly → prevents stretch / oval artefacts
     const wantW = Math.round(width * dpr);
     const wantH = Math.round(height * dpr);
     if (cnv.width !== wantW) cnv.width = wantW;
@@ -87,8 +92,9 @@ export default function DynamicOverlay({
     const anchorX = Math.max(0, Math.min(width * anchorRatio, width - 1));
     const pxPerSec = (width - anchorX) / Math.max(0.001, windowSec);
 
-    const t0 = startRef.current ?? nowMs;
-    const tNow = running ? (nowMs - t0) / 1000 : 0;
+    // Choose time base: recorder anchor if given, else internal baseline
+    const baseMs = startAtMs ?? (startRef.current ?? nowMs);
+    const tNow = running ? (nowMs - baseMs) / 1000 : 0;
 
     const tView = tNow - leadInSec;
     const headTime = tView;
@@ -146,18 +152,17 @@ export default function DynamicOverlay({
       ctx.lineWidth = 1;
       ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, drawW, Math.round(h));
 
-// label inside note (centered)
-const minWForText = 28;
-const minHForText = 14;
-if (drawW >= minWForText && h >= minHForText) {
-  const label = midiToNameAOctave(n.midi, true); // ← A-based octave numbering
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(label, Math.round(x) + drawW / 2, Math.round(y) + h / 2);
-}
-
+      // label inside note (centered)
+      const minWForText = 28;
+      const minHForText = 14;
+      if (drawW >= minWForText && h >= minHForText) {
+        const label = midiToNameAOctave(n.midi, true);
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, Math.round(x) + drawW / 2, Math.round(y) + h / 2);
+      }
 
       // choose "active" by the playhead's musical time (aligns lyrics & dot)
       const nextStart = phrase.notes[i + 1]?.startSec ?? (n.startSec + n.durSec);
@@ -243,17 +248,26 @@ if (drawW >= minWForText && h >= minHForText) {
       ctx.strokeStyle = PR_COLORS.dotStroke;
       ctx.stroke();
     }
-  }, [width, height, phrase, running, minMidi, maxMidi, windowSec, anchorRatio, onActiveNoteChange, leadInSec]);
+  }, [
+    width, height, phrase, running,
+    minMidi, maxMidi, windowSec, anchorRatio,
+    onActiveNoteChange, leadInSec, startAtMs
+  ]);
 
   // keep draw stable across renders
   const drawRef = useRef(draw);
   useEffect(() => { drawRef.current = draw; }, [draw]);
 
-  // RAF loop
+  // RAF loop — wait for startAtMs when running
   useEffect(() => {
+    if (running && startAtMs == null) {
+      // draw a static frame (no motion) while waiting for anchor
+      drawRef.current(performance.now());
+      return;
+    }
     if (running) {
       if (startRef.current == null) {
-        startRef.current = performance.now();
+        startRef.current = performance.now(); // fallback baseline
         pointsRef.current = [];
       }
       const step = (ts: number) => {
@@ -266,20 +280,24 @@ if (drawW >= minWForText && h >= minHForText) {
       rafRef.current = null;
       startRef.current = null;
       drawRef.current(performance.now());
+      lastActiveRef.current = -1;
+      pointsRef.current = [];
     }
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [running]);
+  }, [running, startAtMs]);
 
-  // append live pitch samples (timestamped in engine time tNow)
+  // append live pitch samples aligned to the same time base
   useEffect(() => {
     if (!running) return;
     if (!livePitchHz || confidence < (confThreshold ?? 0.5)) return;
-    if (startRef.current == null) return;
 
-    const tNow = (performance.now() - startRef.current) / 1000;
+    const baseMs = startAtMs ?? startRef.current;
+    if (baseMs == null) return;
+
+    const tNow = (performance.now() - baseMs) / 1000;
     const midi = hzToMidi(livePitchHz, a4Hz);
     if (!isFinite(midi)) return;
 
@@ -289,7 +307,7 @@ if (drawW >= minWForText && h >= minHForText) {
     if (pointsRef.current.length > 2000) {
       pointsRef.current = pointsRef.current.filter(p => p.t >= keepFrom);
     }
-  }, [running, livePitchHz, confidence, confThreshold, a4Hz, windowSec]);
+  }, [running, livePitchHz, confidence, confThreshold, a4Hz, windowSec, startAtMs]);
 
   return (
     <canvas

@@ -11,6 +11,9 @@ type Props = {
   livePitchHz?: number | null;
   confidence?: number;
   confThreshold?: number;
+
+  /** Recorder anchor in ms; used to align overlay time with audio engine */
+  startAtMs?: number | null;
 };
 
 export default function GameStage({
@@ -21,6 +24,7 @@ export default function GameStage({
   livePitchHz = null,
   confidence = 0,
   confThreshold = 0.5,
+  startAtMs = null,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [fillH, setFillH] = useState<number>(height ?? 320);
@@ -57,6 +61,7 @@ export default function GameStage({
         confidence={confidence}
         confThreshold={confThreshold}
         leadInSec={1.5}
+        startAtMs={startAtMs}
       />
     </div>
   );
