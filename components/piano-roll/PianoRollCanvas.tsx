@@ -1,33 +1,29 @@
 "use client";
-import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { getMidiRange, PR_COLORS } from "./scale";
-import DynamicOverlay from "./DynamicOverlay";
-import type { Phrase as PhraseT, Note as NoteT } from "./types";
 
-export type Note = NoteT;
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import DynamicOverlay from "./DynamicOverlay";
+import type { Phrase as PhraseT } from "./types";
+
+/** Re-export so upstream can import { type Phrase } from this file */
 export type Phrase = PhraseT;
 
 type Props = {
-  height?: number;
-  phrase: Phrase;
+  /** Fixed height in CSS pixels (wrapper provides this). */
+  height: number;
+  phrase: Phrase | null;
   running: boolean;
   onActiveNoteChange?: (idx: number) => void;
-
   livePitchHz?: number | null;
   confidence?: number;
   confThreshold?: number;
-
-  /** delay before first note arrives */
   leadInSec?: number;
-  /** tuning reference */
-  a4Hz?: number;
-
-  /** Recorder anchor in ms; keeps overlay in sync with capture engine */
   startAtMs?: number | null;
+  /** Lyric words aligned 1:1 with phrase.notes (optional) */
+  lyrics?: string[];
 };
 
 export default function PianoRollCanvas({
-  height = 280,
+  height,
   phrase,
   running,
   onActiveNoteChange,
@@ -35,64 +31,82 @@ export default function PianoRollCanvas({
   confidence = 0,
   confThreshold = 0.5,
   leadInSec = 1.5,
-  a4Hz = 440,
   startAtMs = null,
+  lyrics,
 }: Props) {
-  const { minMidi, maxMidi } = useMemo(() => getMidiRange(phrase, 2), [phrase]);
+  const hostRef = useRef<HTMLDivElement | null>(null);
 
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState<number | null>(null); // start unknown to avoid an early, wrong-sized draw
+  // Render the canvas only after we have a real measured width
+  const [width, setWidth] = useState<number | null>(null);
 
-  // Measure immediately after mount, then track with RO
+  // Measure width responsively (sync + RAF + ResizeObserver for robustness)
   useLayoutEffect(() => {
-    const el = wrapRef.current;
+    const el = hostRef.current;
     if (!el) return;
 
-    // initial measure
-    setWidth(el.clientWidth || 0);
+    const measure = () => {
+      const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
+      if (w && w !== width) setWidth(w);
+    };
 
-    const ro = new ResizeObserver(() => {
-      setWidth(el.clientWidth || 0);
-    });
+    // Synchronous first read
+    measure();
+    // One-frame-later read in case flex/layout hasn’t settled
+    const raf = requestAnimationFrame(measure);
+    // Keep in sync on resizes
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [minMidi, maxMidi] = useMemo<[number, number]>(() => {
+    if (!phrase || !phrase.notes.length) return [60 - 6, 60 + 6]; // default around middle C
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const n of phrase.notes) {
+      if (n.midi < lo) lo = n.midi;
+      if (n.midi > hi) hi = n.midi;
+    }
+    // Add a little headroom top/bottom
+    lo = Math.floor(lo - 2);
+    hi = Math.ceil(hi + 2);
+    if (lo >= hi) hi = lo + 1;
+    return [lo, hi];
+  }, [phrase]);
+
+  // If no phrase, we still reserve vertical space so layout doesn’t jump
+  if (!phrase || phrase.notes.length === 0) {
+    return <div ref={hostRef} className="relative w-full" style={{ height }} />;
+  }
+
   return (
-    <div
-      ref={wrapRef}
-      style={{
-        width: "100%",
-        height,
-        position: "relative",
-        display: "block",
-        borderRadius: 10,
-        boxShadow: "0 2px 12px rgba(0,0,0,.12)",
-        overflow: "hidden",
-        background: PR_COLORS.bg,
-      }}
-    >
-      {/* Don't draw the overlay until we have a real width to prevent oval artefacts */}
-      {width != null && width > 0 && (
+    <div ref={hostRef} className="relative w-full" style={{ height }}>
+      {/* Only render when we have a non-zero width to avoid the 1px “squished” first frame */}
+      {width && width > 4 ? (
         <DynamicOverlay
           width={width}
           height={height}
           phrase={phrase}
           running={running}
+          onActiveNoteChange={onActiveNoteChange}
           minMidi={minMidi}
           maxMidi={maxMidi}
-          onActiveNoteChange={onActiveNoteChange}
           windowSec={4}
-          anchorRatio={0.10}
-          // live pitch line + preroll
+          anchorRatio={0.1}
           livePitchHz={livePitchHz}
           confidence={confidence}
           confThreshold={confThreshold}
+          a4Hz={440}
           leadInSec={leadInSec}
-          a4Hz={a4Hz}
           startAtMs={startAtMs}
+          lyrics={lyrics}
         />
-      )}
+      ) : null}
     </div>
   );
 }

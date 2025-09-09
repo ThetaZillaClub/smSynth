@@ -71,7 +71,7 @@ export default function GameLayout({
 
       {/* BODY fills remaining height */}
       {!showPlay ? (
-        /* ---- CAPTURE MODE (no phrase): center Range Finder vertically, stats at bottom ---- */
+        /* ---- CAPTURE MODE ---- */
         <div className="w-full flex-1 flex flex-col min-h-0">
           <div className="flex-1 min-h-0 flex items-center justify-center px-6 mt-2">
             <div className="w-full max-w-7xl">{children}</div>
@@ -89,9 +89,9 @@ export default function GameLayout({
           </div>
         </div>
       ) : (
-        /* ---- PLAY MODE (phrase exists): full-width stage, then optional lyrics/children, stats at bottom ---- */
+        /* ---- PLAY MODE ---- */
         <div className="w-full flex-1 flex flex-col gap-4 min-h-0 pb-4">
-          {/* Full-width stage with a little space below the header */}
+          {/* Stage */}
           <div className="w-full flex-1 min-h-0 px-0 md:px-6 mt-2">
             <GameStage
               phrase={phrase ?? null}
@@ -101,6 +101,7 @@ export default function GameLayout({
               confidence={confidence}
               confThreshold={confThreshold}
               startAtMs={startAtMs}
+              lyrics={lyrics}
             />
           </div>
 

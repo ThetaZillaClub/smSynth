@@ -14,6 +14,9 @@ type Props = {
 
   /** Recorder anchor in ms; used to align overlay time with audio engine */
   startAtMs?: number | null;
+
+  /** Lyric words aligned 1:1 with phrase.notes (optional) */
+  lyrics?: string[];
 };
 
 export default function GameStage({
@@ -25,6 +28,7 @@ export default function GameStage({
   confidence = 0,
   confThreshold = 0.5,
   startAtMs = null,
+  lyrics,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [fillH, setFillH] = useState<number>(height ?? 320);
@@ -62,6 +66,7 @@ export default function GameStage({
         confThreshold={confThreshold}
         leadInSec={1.5}
         startAtMs={startAtMs}
+        lyrics={lyrics}
       />
     </div>
   );

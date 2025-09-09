@@ -23,7 +23,11 @@ export default function Training() {
   const [highHz, setHighHz] = useState<number | null>(null);
 
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
-    enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
+    enabled: true,
+    fps: 50,
+    minDb: -45,
+    smoothing: 2,
+    centsTolerance: 3,
   });
 
   const [running, setRunning] = useState(false);
@@ -35,15 +39,18 @@ export default function Training() {
   }, [step]);
 
   const pitchText = typeof pitch === "number" ? `${pitch.toFixed(1)} Hz` : "—";
- const noteText =
-   typeof pitch === "number"
-     ? (() => {
-         const { name, octave, cents } = hzToNoteName(pitch, 440, { useSharps: true, octaveAnchor: "A" });
-         const dispOct = octave;
-         const sign = cents > 0 ? "+" : "";
-         return `${name}${dispOct} ${sign}${cents}¢`;
-       })()
-     : "—";
+  const noteText =
+    typeof pitch === "number"
+      ? (() => {
+          const { name, octave, cents } = hzToNoteName(pitch, 440, {
+            useSharps: true,
+            octaveAnchor: "A",
+          });
+          const dispOct = octave;
+          const sign = cents > 0 ? "+" : "";
+          return `${name}${dispOct} ${sign}${cents}¢`;
+        })()
+      : "—";
   const micText = error ? `Mic error: ${String(error)}` : isReady ? "Mic ready" : "Starting mic…";
 
   const phrase: Phrase | null = useMemo(() => {
@@ -65,9 +72,23 @@ export default function Training() {
   }, [step, phrase, lyricStrategy]);
 
   const {
-    isRecording, start: startRec, stop: stopRec, wavBlob, wavUrl, durationSec, clear,
-    startedAtMs, endedAtMs, sampleRateOut, deviceSampleRateHz, workletBufferSize,
-    baseLatencySec, metrics, numSamplesOut, pcm16k, resampleMethod,
+    isRecording,
+    start: startRec,
+    stop: stopRec,
+    wavBlob,
+    wavUrl,
+    durationSec,
+    clear,
+    startedAtMs,
+    endedAtMs,
+    sampleRateOut,
+    deviceSampleRateHz,
+    workletBufferSize,
+    baseLatencySec,
+    metrics,
+    numSamplesOut,
+    pcm16k,
+    resampleMethod,
   } = useWavRecorder({ sampleRateOut: 16000 });
 
   const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 50);
@@ -95,7 +116,10 @@ export default function Training() {
   useEffect(() => {
     if (!phrase || !running) return;
     const tail = 0.4;
-    const t = setTimeout(() => setRunning(false), Math.max(0, (LEAD_IN_SEC + phrase.durationSec + tail) * 1000));
+    const t = setTimeout(
+      () => setRunning(false),
+      Math.max(0, (LEAD_IN_SEC + phrase.durationSec + tail) * 1000)
+    );
     return () => clearTimeout(t);
   }, [phrase, running]);
 
@@ -195,9 +219,21 @@ export default function Training() {
       }
     };
   }, [
-    wavBlob, phrase, words, durationSec, startedAtMs, sampleRateOut,
-    hzArr, confArr, rmsDbArr, metrics, numSamplesOut, pcmView,
-    lowHz, highHz, lyricStrategy
+    wavBlob,
+    phrase,
+    words,
+    durationSec,
+    startedAtMs,
+    sampleRateOut,
+    hzArr,
+    confArr,
+    rmsDbArr,
+    metrics,
+    numSamplesOut,
+    pcmView,
+    lowHz,
+    highHz,
+    lyricStrategy,
   ]);
 
   return (
@@ -229,7 +265,10 @@ export default function Training() {
           beatsRequired={1}
           centsWindow={75}
           a4Hz={440}
-          onConfirm={(hz) => { setLowHz(hz); setStep("high"); }}
+          onConfirm={(hz) => {
+            setLowHz(hz);
+            setStep("high");
+          }}
         />
       )}
 
@@ -264,8 +303,16 @@ export default function Training() {
               )}
             </div>
             <div className="flex gap-2">
-              {wavUrl && <a className="underline" href={wavUrl} download="take.wav">Download WAV</a>}
-              {metaUrl && <a className="underline" href={metaUrl} download="take.json">Download JSON</a>}
+              {wavUrl && (
+                <a className="underline" href={wavUrl} download="take.wav">
+                  Download WAV
+                </a>
+              )}
+              {metaUrl && (
+                <a className="underline" href={metaUrl} download="take.json">
+                  Download JSON
+                </a>
+              )}
               {wavUrl && (
                 <button className="px-2 py-1 border rounded" onClick={() => clear()}>
                   Clear
