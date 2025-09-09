@@ -8,16 +8,16 @@ type Metrics = { rmsDb: number; maxAbs: number; clippedPct: number };
 /**
  * Lightweight WAV recorder using the same AudioWorklet module as pitch detection.
  * - Always records MONO
- * - Encodes to 16-bit PCM WAV at `sampleRateOut` (default 24000)
+ * - Encodes to 16-bit PCM WAV at `sampleRateOut` (default 16000)
  * - Keeps everything on the client (Blob + object URL)
  * - Exposes high-precision start/end timestamps (performance.now() ms)
- * - Exposes simple QC metrics and the resampled PCM (24 kHz) for analytics
+ * - Exposes simple QC metrics and the resampled PCM (e.g., 16 kHz) for analytics
  */
 export default function useWavRecorder(opts?: {
-  sampleRateOut?: number; // default 24000
+  sampleRateOut?: number; // default 16000
   bufferSizeMin?: number; // minimum processor buffer size in samples @ device SR (defaults to 1024)
 }) {
-  const sampleRateOut = opts?.sampleRateOut ?? 24000;
+  const sampleRateOut = opts?.sampleRateOut ?? 16000;
   const bufferSizeMin = Math.max(256, opts?.bufferSizeMin ?? 1024);
 
   const [isRecording, setIsRecording] = useState(false);
@@ -34,7 +34,10 @@ export default function useWavRecorder(opts?: {
 
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [numSamplesOut, setNumSamplesOut] = useState<number | null>(null);
-  const [pcm24k, setPcm24k] = useState<Float32Array | null>(null);
+
+  // Expose the resampled PCM (e.g., 16k) and the method used to get there
+  const [pcm16k, setPcm16k] = useState<Float32Array | null>(null);
+  const [resampleMethod, setResampleMethod] = useState<"fir-decimate" | "linear">("linear");
 
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -75,6 +78,56 @@ export default function useWavRecorder(opts?: {
     for (const a of arrays) { out.set(a, o); o += a.length; }
     return out;
   };
+
+  // FIR design: Hann-windowed low-pass (cutoff normalized to fs)
+  const designLowpassFIR = (numTaps: number, cutoffNormFs: number) => {
+    // cutoffNormFs in (0, 0.5]; e.g., 0.15 => 0.15 * fs
+    const N = numTaps | 0;
+    const M = N - 1;
+    const h = new Float32Array(N);
+    const sinc = (x: number) => (x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x));
+    for (let n = 0; n < N; n++) {
+      const k = n - M / 2;
+      const w = 0.5 * (1 - Math.cos((2 * Math.PI * n) / M)); // Hann
+      h[n] = 2 * cutoffNormFs * sinc(2 * cutoffNormFs * k) * w;
+    }
+    // normalize gain at DC
+    let sum = 0;
+    for (let i = 0; i < N; i++) sum += h[i]!;
+    if (sum !== 0) {
+      for (let i = 0; i < N; i++) h[i]! /= sum;
+    }
+    return h;
+  };
+
+  // Efficient FIR decimator for 48k -> 16k (M=3). Otherwise, fall back to linear.
+  const decimate48kTo16kFIR = (() => {
+    // New Nyquist = 8 kHz. Choose cutoff a bit under that (e.g., 7 kHz).
+    // cutoffNormFs = 7000 / 48000 ≈ 0.1458
+    const TAPS = designLowpassFIR(63, 7000 / 48000);
+    const L = TAPS.length;
+    const HALF = (L - 1) >> 1;
+
+    return (x: Float32Array) => {
+      // take every 3rd sample after convolving
+      const M = 3;
+      // use valid region [HALF, x.length - HALF)
+      const lastCenter = x.length - HALF - 1;
+      const estLen = Math.max(0, Math.floor((lastCenter - HALF) / M) + 1);
+      const y = new Float32Array(estLen);
+      let yi = 0;
+
+      for (let center = HALF; center <= lastCenter; center += M) {
+        let acc = 0;
+        const base = center - HALF;
+        for (let k = 0; k < L; k++) {
+          acc += x[base + k]! * TAPS[k]!;
+        }
+        y[yi++] = acc;
+      }
+      return yi < y.length ? y.subarray(0, yi) : y;
+    };
+  })();
 
   const resampleLinear = (buffer: Float32Array, srcRate: number, dstRate: number) => {
     if (srcRate === dstRate) return buffer.slice(0);
@@ -133,7 +186,8 @@ export default function useWavRecorder(opts?: {
     setEndedAtMs(null);
     setMetrics(null);
     setNumSamplesOut(null);
-    setPcm24k(null);
+    setPcm16k(null);
+    setResampleMethod("linear");
 
     const AC: typeof AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
     const ctx = new AC({ sampleRate: 48000 });
@@ -160,7 +214,7 @@ export default function useWavRecorder(opts?: {
 
     // choose buffer size similar to pitch hook
     const deviceSR = ctx.sampleRate || 48000;
-    const minBuf = (deviceSR / 24000) * 256;
+    const minBuf = (deviceSR / sampleRateOut) * 256; // scale with actual output SR
     let bufferSize = 1024;
     while (bufferSize < Math.max(bufferSizeMin, minBuf)) bufferSize *= 2;
     setWorkletBufferSize(bufferSize);
@@ -202,7 +256,7 @@ export default function useWavRecorder(opts?: {
     mic.connect(node);
     setStartedAtMs(performance.now()); // mark the moment audio is flowing to our node
     setIsRecording(true);
-  }, [isRecording, wavUrl, bufferSizeMin]);
+  }, [isRecording, wavUrl, bufferSizeMin, sampleRateOut]);
 
   const stop = useCallback(async (): Promise<{ blob: Blob; url: string; durationSec: number } | null> => {
     if (!isRecording) return null;
@@ -213,7 +267,17 @@ export default function useWavRecorder(opts?: {
 
     const deviceSR = deviceSrRef.current;
     const mono = concat(chunksRef.current, totalRef.current);
-    const resampled = resampleLinear(mono, deviceSR, sampleRateOut);
+
+    // Choose resampler
+    let resampled: Float32Array;
+    if (deviceSR === 48000 && sampleRateOut === 16000) {
+      resampled = decimate48kTo16kFIR(mono);
+      setResampleMethod("fir-decimate");
+    } else {
+      resampled = resampleLinear(mono, deviceSR, sampleRateOut);
+      setResampleMethod("linear");
+    }
+
     const blob = encodeWavPCM16(resampled, sampleRateOut);
     const url = URL.createObjectURL(blob);
     setWavBlob(blob);
@@ -225,7 +289,7 @@ export default function useWavRecorder(opts?: {
     const dur = N / sampleRateOut;
     setDurationSec(dur);
     setNumSamplesOut(N);
-    setPcm24k(resampled);
+    setPcm16k(resampled);
 
     // metrics (computed at device SR) → convert to dBFS scale (identical for float)
     const m = metricsRef.current;
@@ -251,7 +315,8 @@ export default function useWavRecorder(opts?: {
     setEndedAtMs(null);
     setMetrics(null);
     setNumSamplesOut(null);
-    setPcm24k(null);
+    setPcm16k(null);
+    setResampleMethod("linear");
   }, [wavUrl]);
 
   return {
@@ -272,6 +337,9 @@ export default function useWavRecorder(opts?: {
     baseLatencySec,
     metrics,
     numSamplesOut,
-    pcm24k,
+
+    // analytics buffer + provenance
+    pcm16k,
+    resampleMethod,
   };
 }

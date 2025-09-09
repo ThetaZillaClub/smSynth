@@ -28,7 +28,7 @@ const median = (a: number[]) => {
 const dbfs = (rms: number) => 20 * Math.log10(rms + 1e-12);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-function useFixedFpsTrace(enabled: boolean, fps = 60) {
+function useFixedFpsTrace(enabled: boolean, fps = 50) {
   const [hzArr, setHzArr] = useState<(number | null)[]>([]);
   const [confArr, setConfArr] = useState<number[]>([]);
   const [rmsDbArr, setRmsDbArr] = useState<number[]>([]);
@@ -84,7 +84,7 @@ export default function Training() {
 
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true,
-    fps: 60,
+    fps: 50,
     minDb: -45,
     smoothing: 2,
     centsTolerance: 3,
@@ -143,15 +143,16 @@ export default function Training() {
     baseLatencySec,
     metrics,
     numSamplesOut,
-    pcm24k,
-  } = useWavRecorder({ sampleRateOut: 24000 });
+    pcm16k,
+    resampleMethod,
+  } = useWavRecorder({ sampleRateOut: 16000 });
 
-  const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 60);
+  const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 50);
   useEffect(() => {
     setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0);
   }, [pitch, confidence, setLatest]);
 
-  // Capture the moment the user hits Start so the overlay can animate instantly
+  // Capture the moment the user hits Start so the overlay can animate instantly (UI anchor)
   const playEpochMsRef = useRef<number | null>(null);
   useEffect(() => {
     if (running && playEpochMsRef.current == null) {
@@ -160,6 +161,16 @@ export default function Training() {
     if (!running) {
       playEpochMsRef.current = null;
     }
+  }, [running]);
+
+  // Smooth toggle: set anchor immediately on click, don't rebase to recorder later
+  const handleToggle = useCallback(() => {
+    if (!running) {
+      if (playEpochMsRef.current == null) playEpochMsRef.current = performance.now();
+    } else {
+      playEpochMsRef.current = null;
+    }
+    setRunning((r) => !r);
   }, [running]);
 
   // Auto-stop after phrase completes (lead-in + phrase + small tail)
@@ -198,16 +209,16 @@ export default function Training() {
 
   // ---- TS-safe view over PCM (handles ArrayBufferLike / SAB) ----
   const pcmView: Float32Array | null = useMemo(() => {
-    if (!pcm24k) return null;
+    if (!pcm16k) return null;
     try {
-      const buf = (pcm24k as any).buffer as ArrayBuffer;
-      const offset = (pcm24k as any).byteOffset ?? 0;
-      const length = (pcm24k as any).length ?? 0;
+      const buf = (pcm16k as any).buffer as ArrayBuffer;
+      const offset = (pcm16k as any).byteOffset ?? 0;
+      const length = (pcm16k as any).length ?? 0;
       return new Float32Array(buf, offset * 4, length);
     } catch {
-      return pcm24k as unknown as Float32Array;
+      return pcm16k as unknown as Float32Array;
     }
-  }, [pcm24k]);
+  }, [pcm16k]);
 
   // JSON blob URL (no dependency on metaUrl itself to avoid loops)
   const [metaUrl, setMetaUrl] = useState<string | null>(null);
@@ -233,7 +244,7 @@ export default function Training() {
     const note_offsets_samples = note_offsets_sec.map((t) => first_note_at_sample + Math.round(t * sampleRateOut));
 
     // Features from traces
-    const fps = 60;
+    const fps = 50;
     const frameTimesSec = Array.from({ length: rmsDbArr.length }, (_, i) => i / fps);
     const noiseFrameIdx = frameTimesSec.map((t, i) => (t < first_note_at_rec_sec ? i : -1)).filter((i) => i >= 0);
     const voicedIdx = hzArr
@@ -287,12 +298,12 @@ export default function Training() {
     const recRmsDb = metrics?.rmsDb ?? -120;
     const reasons: string[] = [];
     if (voicedIdx.length === 0) reasons.push("no_voiced_frames");
-    if (snr_db_voiced < 8) reasons.push("low_snr");
+    if (snr_db_voiced < 6) reasons.push("low_snr"); // lowered from 8 → 6
     if (clippedPct >= 0.5) reasons.push("heavy_clipping");
     const passed =
       clippedPct < 0.1 &&
       recRmsDb > -35 &&
-      snr_db_voiced >= 12 &&
+      snr_db_voiced >= 6 && // lowered from 12 → 6
       (voicedIdx.length / Math.max(1, rmsDbArr.length)) >= 0.4 &&
       reasons.length === 0;
 
@@ -321,7 +332,7 @@ export default function Training() {
           base_latency_sec: baseLatencySec ?? null,
           worklet_buffer: workletBufferSize ?? null,
         },
-        processing: { downmix: "avg", resample: "linear" },
+        processing: { downmix: "avg", resample: resampleMethod },
       },
       prompt: {
         scale: "major",
@@ -343,7 +354,7 @@ export default function Training() {
           rms_dbfs_voiced,
           snr_db_voiced,
           note_rms_dbfs,
-          method: "60fps_rms_trace voiced-only; pre-first-note RMS as noise reference",
+          method: "50fps_rms_trace voiced-only; pre-first-note RMS as noise reference",
           conf_threshold: CONF_THRESHOLD,
         },
         f0: {
@@ -371,7 +382,7 @@ export default function Training() {
         algorithm: "SwiftF0",
         model: "model.onnx",
         trace: {
-          fps: 60,
+          fps: 50,
           start_at_sec: 0,
           hz: hzArr,
           conf: confArr,
@@ -445,7 +456,7 @@ export default function Training() {
       micText={micText}
       error={error}
       running={running}
-      onToggle={() => setRunning((r) => !r)}
+      onToggle={handleToggle}
       phrase={phrase}
       lyrics={step === "play" && words ? words : undefined}
       activeLyricIndex={step === "play" ? activeWord : -1}
@@ -455,8 +466,8 @@ export default function Training() {
       confidence={confidence}
       livePitchHz={typeof pitch === "number" ? pitch : null}
       confThreshold={CONF_THRESHOLD}
-      // >>> This is the key line so the overlay starts:
-      startAtMs={startedAtMs ?? playEpochMsRef.current ?? null}
+      // Keep visuals pinned to UI start time (no re-anchoring to recorder)
+      startAtMs={playEpochMsRef.current}
     >
       {step === "low" && (
         <RangeCapture

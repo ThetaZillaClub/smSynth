@@ -28,7 +28,7 @@ export default function usePitchDetection(
   modelDir: string = "/models/swiftf0",
   opts: PitchDetectionOptions = {}
 ): PitchDetectionState {
-  const { enabled = true, fps = 60, minDb = -40, centsTolerance = 3, smoothing = 1 } = opts;
+  const { enabled = true, fps = 50, minDb = -40, centsTolerance = 3, smoothing = 1 } = opts;
 
   const MIN_INTERVAL = 1000 / fps;
 
