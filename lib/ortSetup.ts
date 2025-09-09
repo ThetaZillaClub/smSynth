@@ -1,20 +1,20 @@
+// lib/ortSetup.ts
 import * as ort from "onnxruntime-web";
 
 /**
  * Call once on the client before creating a session.
- * We don't mute warnings here; we just set sane defaults for WASM perf.
+ * We set sane defaults for WASM perf, but avoid threads unless COI is true.
  */
 export function initOrtEnv() {
   try {
-    // WASM tuning
     if (ort.env.wasm) {
       try {
-        ort.env.wasm.numThreads = Math.min(4, (navigator as any).hardwareConcurrency || 2);
+        const hw = (navigator as any).hardwareConcurrency || 2;
+        const coi = (globalThis as any).crossOriginIsolated === true;
+        // Use threads only when cross-origin isolated; otherwise force 1 to avoid DataCloneError.
+        ort.env.wasm.numThreads = coi ? Math.min(4, hw) : 1;
       } catch {}
-      // ORT will enable SIMD automatically if the build supports it; no need to force here.
     }
-    // Keep default logLevel; we are *fixing* provider mismatch, not hiding it.
-    // You can change to 'warning' later if you want quieter dev logs.
     ort.env.logLevel = "info";
   } catch {
     // ignore – safe defaults

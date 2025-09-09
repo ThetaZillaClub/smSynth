@@ -41,3 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 strategy.md
+train.tsv
+valid.tsv
+English_sen.pkl
+English_word.pkl
+metadata.example.csv
+README-STARTER.md
