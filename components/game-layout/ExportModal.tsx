@@ -2,7 +2,7 @@
 "use client";
 import React from "react";
 
-type TakeLink = { name: string; url: string };
+export type TakeLink = { name: string; url: string };
 
 type Props = {
   open: boolean;
@@ -10,9 +10,25 @@ type Props = {
   tsvName?: string | null;
   takeFiles?: TakeLink[] | null;
   onClose: () => void;
+
+  // NEW: queue controls
+  onQueue?: () => void;
+  queueing?: boolean;
+  queueError?: string | null;
+  jobInfo?: { jobId: string; remoteDir: string; started?: boolean } | null;
 };
 
-export default function ExportModal({ open, tsvUrl, tsvName, takeFiles, onClose }: Props) {
+export default function ExportModal({
+  open,
+  tsvUrl,
+  tsvName,
+  takeFiles,
+  onClose,
+  onQueue,
+  queueing,
+  queueError,
+  jobInfo,
+}: Props) {
   if (!open) return null;
 
   return (
@@ -48,12 +64,34 @@ export default function ExportModal({ open, tsvUrl, tsvName, takeFiles, onClose 
               </ul>
             </div>
           ) : null}
-        </div>
 
-        <div className="mt-4 flex justify-end">
-          <button className="px-3 py-1.5 rounded-md border" onClick={onClose}>
-            Close
-          </button>
+          <div className="pt-2 border-t">
+            <div className="flex items-center justify-between gap-3">
+              <button
+                className="px-3 py-1.5 rounded-md border bg-black text-white disabled:opacity-50"
+                onClick={onQueue}
+                disabled={!onQueue || !tsvUrl || !takeFiles?.length || queueing}
+              >
+                {queueing ? "Uploading…" : "Upload & Queue Training"}
+              </button>
+              <button className="px-3 py-1.5 rounded-md border" onClick={onClose}>
+                Close
+              </button>
+            </div>
+
+            {queueError ? (
+              <p className="mt-2 text-red-600 text-sm break-words">{queueError}</p>
+            ) : null}
+
+            {jobInfo ? (
+              <div className="mt-2 text-sm text-green-700">
+                <div>Queued ✓</div>
+                <div>Job: <code>{jobInfo.jobId}</code></div>
+                <div>Remote dir: <code className="break-all">{jobInfo.remoteDir}</code></div>
+                {jobInfo.started ? <div>Trainer auto-started on node.</div> : <div>Ready to train on node.</div>}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

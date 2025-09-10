@@ -17,6 +17,8 @@ import useSessionPackager from "@/hooks/training/useSessionPackager";
 import useUiRecordTimer from "@/hooks/training/useUiRecordTimer";
 import usePhraseLyrics from "@/hooks/training/usePhraseLyrics";
 
+import useAutoSubmitTraining from "@/hooks/training/useAutoSubmitTraining";
+
 import { hzToNoteName } from "@/utils/pitch/pitchMath";
 import { APP_BUILD, CONF_THRESHOLD } from "@/utils/training/constants";
 
@@ -39,6 +41,7 @@ export default function Training() {
   const modelIdFromQuery = searchParams.get("model_id") || null;
 
   const supabase = useMemo(() => createClient(), []);
+  const { uploadAndQueue } = useAutoSubmitTraining();
 
   // model → subject + gender + model id (for range updates)
   const [modelRowId, setModelRowId] = useState<string | null>(null);
@@ -154,7 +157,7 @@ export default function Training() {
   } = useSessionPackager({
     appBuild: APP_BUILD,
     sessionId: sessionIdRef.current,
-    modelId: modelIdFromQuery ?? undefined, // use model_id in TSV filename
+    modelId: modelIdFromQuery ?? undefined, // use model_id in TSV filename (if present)
   });
 
   // keep latest counts in a ref to avoid stale-closure in timers
@@ -173,6 +176,11 @@ export default function Training() {
   const [looping, setLooping] = useState(false);
   const [loopPhase, setLoopPhase] = useState<"idle" | "record" | "rest">("idle");
   const [activeWord, setActiveWord] = useState<number>(-1);
+
+  // queue state
+  const [queueing, setQueueing] = useState(false);
+  const [queueErr, setQueueErr] = useState<string | null>(null);
+  const [jobInfo, setJobInfo] = useState<{ jobId: string; remoteDir: string; started?: boolean } | null>(null);
 
   // timers/guards
   const recordTimerRef = useRef<number | null>(null);
@@ -210,6 +218,9 @@ export default function Training() {
   useEffect(() => {
     if (step === "play" && lowHz != null && highHz != null) {
       resetSession();
+      setQueueErr(null);
+      setJobInfo(null);
+      setQueueing(false);
       finalizedOnceRef.current = false;
       curTakeIdRef.current = null;
       resetPhraseLyrics();
@@ -443,7 +454,7 @@ export default function Training() {
       traces: { hzArr, confArr, rmsDbArr, fps: 50 },
       audio: {
         sampleRateOut: sr,
-        // Use the exact post-slice/pad length for precise accounting
+        // exact post-slice/pad length for precise accounting
         numSamplesOut: outLen,
         durationSec: outDur,
         deviceSampleRateHz: deviceSampleRateHz ?? 48000,
@@ -469,12 +480,39 @@ export default function Training() {
       subjectId: subjectId ?? undefined,
     });
     curTakeIdRef.current = null;
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wavBlob]); // internals captured via refs/state in the hook
+  }, [wavBlob]);
 
   // cleanup timers on unmount
   useEffect(() => () => { clearTimers(); }, [clearTimers]);
+
+  // Upload & Queue click
+  const handleQueue = useCallback(async () => {
+    try {
+      if (!tsvUrl || !tsvName || !takeUrls?.length) return;
+      setQueueErr(null);
+      setQueueing(true);
+      setJobInfo(null);
+
+      // Prefer ?model_id, else fallback to latest model row id
+      const chosenModelId = modelIdFromQuery ?? modelRowId;
+
+      const res = await uploadAndQueue({
+        modelId: chosenModelId,
+        subjectId,
+        genderLabel,
+        sessionId: sessionIdRef.current,
+        tsvUrl,
+        tsvName,
+        takeFiles: takeUrls,
+      });
+      setJobInfo({ jobId: res.jobId, remoteDir: res.remoteDir, started: res.started });
+    } catch (e: any) {
+      setQueueErr(e?.message || String(e));
+    } finally {
+      setQueueing(false);
+    }
+  }, [modelIdFromQuery, modelRowId, subjectId, genderLabel, tsvUrl, tsvName, takeUrls, uploadAndQueue]);
 
   const statusText =
     loopPhase === "record"
@@ -569,6 +607,11 @@ export default function Training() {
         tsvName={tsvName ?? undefined}
         takeFiles={takeUrls ?? undefined}
         onClose={() => setShowExport(false)}
+        // Queue controls
+        onQueue={handleQueue}
+        queueing={queueing}
+        queueError={queueErr}
+        jobInfo={jobInfo}
       />
     </>
   );
