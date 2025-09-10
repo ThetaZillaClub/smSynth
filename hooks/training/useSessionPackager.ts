@@ -4,8 +4,8 @@
 import { useCallback, useRef, useState } from "react";
 import type { Phrase } from "@/components/piano-roll/types";
 import { buildTakeV2 } from "@/utils/take/buildTakeV2";
-import { buildSessionV2 } from "@/utils/take/buildSessionV2";
-import { concatFloat32, encodeWavPCM16 } from "@/utils/audio/wav";
+import { encodeWavPCM16 } from "@/utils/audio/wav";
+import { buildDatasetTsv } from "@/utils/tsv/buildDatasetTsv";
 
 type Traces = { hzArr: (number | null)[]; confArr: number[]; rmsDbArr: number[]; fps: number };
 type AudioMeta = {
@@ -32,8 +32,12 @@ type PromptMeta = {
 type TimingMeta = { playStartMs: number | null; recStartMs: number | null };
 type ControlsMeta = { genderLabel: "male" | "female" | null };
 
-export default function useSessionPackager(opts: { appBuild: string; sessionId: string }) {
-  const { appBuild, sessionId } = opts;
+export default function useSessionPackager(opts: {
+  appBuild: string;
+  sessionId: string;
+  modelId?: string | null; // for unique TSV filename
+}) {
+  const { appBuild, sessionId, modelId } = opts;
 
   // counts for guard/UI
   const [packagedCount, setPackagedCount] = useState(0);
@@ -44,13 +48,19 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
   const sampleCountsRef = useRef<number[]>([]);
   const takesRef = useRef<any[]>([]);
 
-  // Per-take snapshots to avoid races (takeId -> { phrase, words })
+  // Per-take snapshots (takeId -> { phrase, words })
   const pendingRef = useRef<Map<string, { phrase: Phrase; words: string[] }>>(new Map());
 
   // export urls
-  const [sessionWavUrl, setSessionWavUrl] = useState<string | null>(null);
-  const [sessionJsonUrl, setSessionJsonUrl] = useState<string | null>(null);
+  const [tsvUrl, setTsvUrl] = useState<string | null>(null);
+  const [tsvName, setTsvName] = useState<string | null>(null);
+  const [takeUrls, setTakeUrls] = useState<{ name: string; url: string }[] | null>(null);
   const [showExport, setShowExport] = useState(false);
+
+  const revokeExportUrls = useCallback(() => {
+    if (tsvUrl) URL.revokeObjectURL(tsvUrl);
+    if (takeUrls) for (const t of takeUrls) URL.revokeObjectURL(t.url);
+  }, [tsvUrl, takeUrls]);
 
   /** Clear everything for a brand-new session */
   const resetSession = useCallback(() => {
@@ -60,17 +70,16 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
     sampleCountsRef.current = [];
     takesRef.current = [];
     pendingRef.current.clear();
-    if (sessionWavUrl) URL.revokeObjectURL(sessionWavUrl);
-    if (sessionJsonUrl) URL.revokeObjectURL(sessionJsonUrl);
-    setSessionWavUrl(null);
-    setSessionJsonUrl(null);
+    revokeExportUrls();
+    setTsvUrl(null);
+    setTsvName(null);
+    setTakeUrls(null);
     setShowExport(false);
-  }, [sessionWavUrl, sessionJsonUrl]);
+  }, [revokeExportUrls]);
 
-  /** Called at the start of a record window to snapshot UI content and mark one in-flight take */
+  /** Called at the start of a record window: snapshot UI content and mark one in-flight take */
   const beginTake = useCallback((phrase: Phrase, words: string[]) => {
     const takeId = crypto.randomUUID();
-    // snapshot (clone shallowly to avoid later mutations)
     const snapshot = {
       phrase: JSON.parse(JSON.stringify(phrase)) as Phrase,
       words: [...words],
@@ -84,20 +93,18 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
   const completeTakeFromBlob = useCallback(
     (
       takeId: string,
-      wavBlob: Blob | null,
+      _wavBlob: Blob | null,
       data: {
         traces: Traces;
         audio: AudioMeta;
         prompt: PromptMeta;
         timing: TimingMeta;
         controls: ControlsMeta;
-        /** NEW: put your subject label (creator_display_name) here */
         subjectId?: string;
       }
     ) => {
-      if (!wavBlob) return;
       const snap = pendingRef.current.get(takeId);
-      if (!snap) return; // unknown or already handled
+      if (!snap) return;
 
       const { phrase, words } = snap;
 
@@ -113,7 +120,7 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
         controls: data.controls,
       });
 
-      // aggregate PCM + take
+      // keep PCM for per-take WAV export
       const pcmView = data.audio.pcmView;
       if (pcmView && pcmView.length) {
         pcmChunksRef.current.push(new Float32Array(pcmView)); // copy
@@ -122,6 +129,7 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
         pcmChunksRef.current.push(new Float32Array(0));
         sampleCountsRef.current.push(0);
       }
+
       takesRef.current.push(take);
       pendingRef.current.delete(takeId);
 
@@ -131,31 +139,49 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
     [appBuild, sessionId]
   );
 
-  /** Build combined WAV + JSON and surface URLs */
+  /** Build per-take WAVs + final PromptSinger TSV (NO JSON/TG needed) and surface URLs */
   const finalizeSession = useCallback((sampleRateHz: number) => {
-    if (!takesRef.current.length) {
+    const N = takesRef.current.length;
+    if (!N) {
       setShowExport(false);
-      return { wavUrl: null, jsonUrl: null };
+      return { tsvUrl: null, takeUrls: null, tsvName: null };
     }
-    const merged = concatFloat32(pcmChunksRef.current);
-    const wavBlobFinal = encodeWavPCM16(merged, sampleRateHz);
-    const wavUrlFinal = URL.createObjectURL(wavBlobFinal);
-    setSessionWavUrl(wavUrlFinal);
 
-    const sessionJson = buildSessionV2({
-      sessionId,
-      appBuild,
-      sampleRateHz,
-      takes: takesRef.current,
-      takeSampleLengths: sampleCountsRef.current,
-    });
-    const jsonBlob = new Blob([JSON.stringify(sessionJson, null, 2)], { type: "application/json" });
-    const jsonUrlFinal = URL.createObjectURL(jsonBlob);
-    setSessionJsonUrl(jsonUrlFinal);
+    // 1) Per-take WAVs and names
+    const perTake: { name: string; url: string }[] = [];
+    const itemNames: string[] = [];
+    const audioPaths: string[] = [];
+    for (let i = 0; i < N; i++) {
+      const pcm = pcmChunksRef.current[i] ?? new Float32Array(0);
+      const wavBlob = encodeWavPCM16(pcm, sampleRateHz);
+      const item = `${sessionId}__take_${String(i).padStart(2, "0")}`;
+      const name = `${item}.wav`;
+      const url = URL.createObjectURL(wavBlob);
+      perTake.push({ name, url });
+      itemNames.push(item);
+      audioPaths.push(name); // relative path inside the export bundle
+    }
+    setTakeUrls(perTake);
 
+    // 2) Build TSV rows directly from take JSON (phones per frame + f0 fields)
+    const rows = takesRef.current.map((take, i) => ({
+      take,
+      itemName: itemNames[i]!,
+      audioPath: audioPaths[i]!,
+    }));
+    const tsvText = buildDatasetTsv(rows);
+
+    // 3) Name TSV with model_id (if present) for uniqueness
+    const fname = `dataset${modelId ? `.${modelId}` : ""}.tsv`;
+    const tsvBlob = new Blob([tsvText], { type: "text/tab-separated-values" });
+    const tsvUrlFinal = URL.createObjectURL(tsvBlob);
+
+    setTsvName(fname);
+    setTsvUrl(tsvUrlFinal);
     setShowExport(true);
-    return { wavUrl: wavUrlFinal, jsonUrl: jsonUrlFinal };
-  }, [appBuild, sessionId]);
+
+    return { tsvUrl: tsvUrlFinal, takeUrls: perTake, tsvName: fname };
+  }, [modelId, sessionId]);
 
   return {
     // counts
@@ -173,7 +199,8 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
     // export modal state
     showExport,
     setShowExport,
-    sessionWavUrl,
-    sessionJsonUrl,
+    tsvUrl,
+    tsvName,
+    takeUrls,
   };
 }

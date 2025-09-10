@@ -98,31 +98,64 @@ export default function Training() {
   const [highHz, setHighHz] = useState<number | null>(null);
 
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
-    enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
+    enabled: true,
+    fps: 50,
+    minDb: -45,
+    smoothing: 2,
+    centsTolerance: 3,
   });
 
   // phrase + lyrics
-  const { phrase, words, reset: resetPhraseLyrics, advance: advancePhraseLyrics, getLyricSeed } =
-    usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: NOTE_DUR_SEC });
+  const {
+    phrase,
+    words,
+    reset: resetPhraseLyrics,
+    advance: advancePhraseLyrics,
+    getLyricSeed,
+  } = usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: NOTE_DUR_SEC });
 
   // recorder + traces
   const {
-    isRecording, start: startRec, stop: stopRec, wavBlob, durationSec, startedAtMs,
-    sampleRateOut, deviceSampleRateHz, workletBufferSize, baseLatencySec,
-    metrics, numSamplesOut, pcm16k, resampleMethod,
+    isRecording,
+    start: startRec,
+    stop: stopRec,
+    wavBlob,
+    durationSec,
+    startedAtMs,
+    sampleRateOut,
+    deviceSampleRateHz,
+    workletBufferSize,
+    baseLatencySec,
+    metrics,
+    numSamplesOut,
+    pcm16k,
+    resampleMethod,
   } = useWavRecorder({ sampleRateOut: 16000 });
 
   const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 50);
-  useEffect(() => { setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0); },
-    [pitch, confidence, setLatest]);
+  useEffect(() => {
+    setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0);
+  }, [pitch, confidence, setLatest]);
 
-  // session packager
+  // session packager (TSV + per-take WAVs)
   const sessionIdRef = useRef<string>(crypto.randomUUID());
   const {
-    packagedCount, inFlight,
-    beginTake, completeTakeFromBlob, resetSession, finalizeSession,
-    showExport, setShowExport, sessionWavUrl, sessionJsonUrl,
-  } = useSessionPackager({ appBuild: APP_BUILD, sessionId: sessionIdRef.current });
+    packagedCount,
+    inFlight,
+    beginTake,
+    completeTakeFromBlob,
+    resetSession,
+    finalizeSession,
+    showExport,
+    setShowExport,
+    tsvUrl,
+    tsvName,
+    takeUrls,
+  } = useSessionPackager({
+    appBuild: APP_BUILD,
+    sessionId: sessionIdRef.current,
+    modelId: modelIdFromQuery ?? undefined, // use model_id in TSV filename
+  });
 
   // keep latest counts in a ref to avoid stale-closure in timers
   const countsRef = useRef({ packagedCount: 0, inFlight: 0 });
@@ -145,8 +178,14 @@ export default function Training() {
   const recordTimerRef = useRef<number | null>(null);
   const restTimerRef = useRef<number | null>(null);
   const clearTimers = useCallback(() => {
-    if (recordTimerRef.current != null) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
-    if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
+    if (recordTimerRef.current != null) {
+      clearTimeout(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    if (restTimerRef.current != null) {
+      clearTimeout(restTimerRef.current);
+      restTimerRef.current = null;
+    }
   }, []);
 
   // guard time window
@@ -225,7 +264,7 @@ export default function Training() {
     [modelRowId, supabase]
   );
 
-  // finalize once all in-flight packages complete — prevents ghost/missing takes
+  // finalize once all in-flight packages complete
   const finalizeWhenReady = useCallback(() => {
     if (finalizedOnceRef.current) return;
     const poll = () => {
@@ -242,7 +281,6 @@ export default function Training() {
     poll();
   }, [finalizeSession, sampleRateOut]);
 
-  // --- keep this above the REST effect to avoid TS2448/2454 ---
   const startRecordPhase = useCallback(() => {
     if (lowHz == null || highHz == null || !phrase || !words) return;
 
@@ -250,7 +288,9 @@ export default function Training() {
     const elapsed = sessionStartMsRef.current ? (performance.now() - sessionStartMsRef.current) / 1000 : 0;
 
     if (nowCounts.packagedCount + nowCounts.inFlight >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
-      setLooping(false); setRunning(false); setLoopPhase("idle");
+      setLooping(false);
+      setRunning(false);
+      setLoopPhase("idle");
       clearTimers();
       finalizeWhenReady();
       return;
@@ -261,12 +301,14 @@ export default function Training() {
     setLoopPhase("record");
     setRunning(true);
   }, [lowHz, highHz, phrase, words, clearTimers, beginTake, finalizeWhenReady]);
-  // --- /keep ---
 
   // EXACT end of record window
   useEffect(() => {
     if (loopPhase !== "record") {
-      if (recordTimerRef.current != null) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
+      if (recordTimerRef.current != null) {
+        clearTimeout(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
       return;
     }
     if (isRecording && startedAtMs != null && recordTimerRef.current == null) {
@@ -275,7 +317,9 @@ export default function Training() {
       recordTimerRef.current = window.setTimeout(() => {
         if (!recLockRef.current.stopping) {
           recLockRef.current.stopping = true;
-          void stopRec().finally(() => { recLockRef.current.stopping = false; });
+          void stopRec().finally(() => {
+            recLockRef.current.stopping = false;
+          });
         }
         setRunning(false);
         setActiveWord(-1);
@@ -288,7 +332,10 @@ export default function Training() {
   // REST → next take (gated until inFlight === 0)
   useEffect(() => {
     if (loopPhase !== "rest" || !looping) {
-      if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
+      if (restTimerRef.current != null) {
+        clearTimeout(restTimerRef.current);
+        restTimerRef.current = null;
+      }
       return;
     }
     if (!isRecording && restTimerRef.current == null) {
@@ -430,7 +477,13 @@ export default function Training() {
   useEffect(() => () => { clearTimers(); }, [clearTimers]);
 
   const statusText =
-    loopPhase === "record" ? (isRecording ? "Recording…" : "Playing…") : loopPhase === "rest" && looping ? "Breather…" : "Idle";
+    loopPhase === "record"
+      ? isRecording
+        ? "Recording…"
+        : "Playing…"
+      : loopPhase === "rest" && looping
+      ? "Breather…"
+      : "Idle";
 
   const micReady = isReady && !error;
 
@@ -452,7 +505,7 @@ export default function Training() {
         confidence={confidence}
         livePitchHz={typeof pitch === "number" ? pitch : null}
         confThreshold={CONF_THRESHOLD}
-        startAtMs={isRecording ? (startedAtMs ?? null) : null}
+        startAtMs={isRecording ? startedAtMs ?? null : null}
         leadInSec={TRAIN_LEAD_IN_SEC}
       >
         {step === "low" && (
@@ -468,10 +521,9 @@ export default function Training() {
             a4Hz={440}
             onConfirm={(hz) => {
               setLowHz(hz);
-              // format note label using hzToNoteName directly
               const { name, octave } = hzToNoteName(hz, 440, { useSharps: true, octaveAnchor: "A" });
               const label = `${name}${octave}`;
-              void updateRange("low", label); // fire & forget
+              void updateRange("low", label);
               setStep("high");
             }}
           />
@@ -490,10 +542,9 @@ export default function Training() {
             a4Hz={440}
             onConfirm={(hz) => {
               setHighHz(hz);
-              // format note label using hzToNoteName directly
               const { name, octave } = hzToNoteName(hz, 440, { useSharps: true, octaveAnchor: "A" });
               const label = `${name}${octave}`;
-              void updateRange("high", label); // fire & forget
+              void updateRange("high", label);
               setStep("play");
             }}
           />
@@ -514,8 +565,9 @@ export default function Training() {
 
       <ExportModal
         open={showExport}
-        wavUrl={sessionWavUrl ?? undefined}
-        jsonUrl={sessionJsonUrl ?? undefined}
+        tsvUrl={tsvUrl ?? undefined}
+        tsvName={tsvName ?? undefined}
+        takeFiles={takeUrls ?? undefined}
         onClose={() => setShowExport(false)}
       />
     </>
