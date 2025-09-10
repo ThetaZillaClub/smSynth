@@ -1,4 +1,4 @@
-import { LoginForm } from "@/components/login-form";
+import { LoginForm } from "@/components/auth/login-form";
 import Link from 'next/link';
 import AuthHeader from "@/components/header/AuthHeader";
 
