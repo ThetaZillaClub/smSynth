@@ -44,12 +44,8 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
   const sampleCountsRef = useRef<number[]>([]);
   const takesRef = useRef<any[]>([]);
 
-  // pinned for current recording window
-  const pinnedPhraseRef = useRef<Phrase | null>(null);
-  const pinnedWordsRef = useRef<string[] | null>(null);
-  const takeIdRef = useRef<string>("");
-
-  const lastPackagedBlobRef = useRef<Blob | null>(null);
+  // Per-take snapshots to avoid races (takeId -> { phrase, words })
+  const pendingRef = useRef<Map<string, { phrase: Phrase; words: string[] }>>(new Map());
 
   // export urls
   const [sessionWavUrl, setSessionWavUrl] = useState<string | null>(null);
@@ -63,10 +59,7 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
     pcmChunksRef.current = [];
     sampleCountsRef.current = [];
     takesRef.current = [];
-    pinnedPhraseRef.current = null;
-    pinnedWordsRef.current = null;
-    takeIdRef.current = "";
-    lastPackagedBlobRef.current = null;
+    pendingRef.current.clear();
     if (sessionWavUrl) URL.revokeObjectURL(sessionWavUrl);
     if (sessionJsonUrl) URL.revokeObjectURL(sessionJsonUrl);
     setSessionWavUrl(null);
@@ -74,19 +67,23 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
     setShowExport(false);
   }, [sessionWavUrl, sessionJsonUrl]);
 
-  /** Called at the start of a record window to pin UI content and mark one in-flight take */
+  /** Called at the start of a record window to snapshot UI content and mark one in-flight take */
   const beginTake = useCallback((phrase: Phrase, words: string[]) => {
     const takeId = crypto.randomUUID();
-    pinnedPhraseRef.current = phrase;
-    pinnedWordsRef.current = words;
-    takeIdRef.current = takeId;
+    // snapshot (clone shallowly to avoid later mutations)
+    const snapshot = {
+      phrase: JSON.parse(JSON.stringify(phrase)) as Phrase,
+      words: [...words],
+    };
+    pendingRef.current.set(takeId, snapshot);
     setInFlight((n) => n + 1);
     return takeId;
   }, []);
 
-  /** Called once wavBlob is available → package one take (de-duped) */
+  /** Called once wavBlob is available → package one take */
   const completeTakeFromBlob = useCallback(
     (
+      takeId: string,
       wavBlob: Blob | null,
       data: {
         traces: Traces;
@@ -98,15 +95,17 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
         subjectId?: string;
       }
     ) => {
-      if (!wavBlob || !pinnedPhraseRef.current || !pinnedWordsRef.current || !takeIdRef.current) return;
-      if (lastPackagedBlobRef.current === wavBlob) return; // de-dupe
-      lastPackagedBlobRef.current = wavBlob;
+      if (!wavBlob) return;
+      const snap = pendingRef.current.get(takeId);
+      if (!snap) return; // unknown or already handled
+
+      const { phrase, words } = snap;
 
       const { take } = buildTakeV2({
-        ids: { sessionId, takeId: takeIdRef.current, subjectId: data.subjectId ?? null },
+        ids: { sessionId, takeId, subjectId: data.subjectId ?? null },
         appBuild,
-        phrase: pinnedPhraseRef.current,
-        words: pinnedWordsRef.current,
+        phrase,
+        words,
         traces: data.traces,
         audio: data.audio,
         prompt: data.prompt,
@@ -124,6 +123,7 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
         sampleCountsRef.current.push(0);
       }
       takesRef.current.push(take);
+      pendingRef.current.delete(takeId);
 
       setPackagedCount((n) => n + 1);
       setInFlight((n) => Math.max(0, n - 1));

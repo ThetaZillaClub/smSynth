@@ -131,6 +131,10 @@ export default function Training() {
     countsRef.current.inFlight = inFlight;
   }, [packagedCount, inFlight]);
 
+  // track current take id & finalization guard
+  const curTakeIdRef = useRef<string | null>(null);
+  const finalizedOnceRef = useRef(false);
+
   // loop flags
   const [running, setRunning] = useState(false);
   const [looping, setLooping] = useState(false);
@@ -167,6 +171,8 @@ export default function Training() {
   useEffect(() => {
     if (step === "play" && lowHz != null && highHz != null) {
       resetSession();
+      finalizedOnceRef.current = false;
+      curTakeIdRef.current = null;
       resetPhraseLyrics();
       sessionStartMsRef.current = performance.now();
     }
@@ -219,6 +225,23 @@ export default function Training() {
     [modelRowId, supabase]
   );
 
+  // finalize once all in-flight packages complete — prevents ghost/missing takes
+  const finalizeWhenReady = useCallback(() => {
+    if (finalizedOnceRef.current) return;
+    const poll = () => {
+      const { inFlight: ifl } = countsRef.current;
+      if (ifl > 0) {
+        setTimeout(poll, 100);
+      } else {
+        if (!finalizedOnceRef.current) {
+          finalizedOnceRef.current = true;
+          finalizeSession(sampleRateOut || 16000);
+        }
+      }
+    };
+    poll();
+  }, [finalizeSession, sampleRateOut]);
+
   // --- keep this above the REST effect to avoid TS2448/2454 ---
   const startRecordPhase = useCallback(() => {
     if (lowHz == null || highHz == null || !phrase || !words) return;
@@ -229,14 +252,15 @@ export default function Training() {
     if (nowCounts.packagedCount + nowCounts.inFlight >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
       setLooping(false); setRunning(false); setLoopPhase("idle");
       clearTimers();
-      finalizeSession(sampleRateOut || 16000);
+      finalizeWhenReady();
       return;
     }
 
-    beginTake(phrase, words);
+    const takeId = beginTake(phrase, words);
+    curTakeIdRef.current = takeId;
     setLoopPhase("record");
     setRunning(true);
-  }, [lowHz, highHz, phrase, words, clearTimers, finalizeSession, beginTake, sampleRateOut]);
+  }, [lowHz, highHz, phrase, words, clearTimers, beginTake, finalizeWhenReady]);
   // --- /keep ---
 
   // EXACT end of record window
@@ -261,7 +285,7 @@ export default function Training() {
     }
   }, [loopPhase, isRecording, startedAtMs, advancePhraseLyrics, stopRec]);
 
-  // REST → next take
+  // REST → next take (gated until inFlight === 0)
   useEffect(() => {
     if (loopPhase !== "rest" || !looping) {
       if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
@@ -271,7 +295,7 @@ export default function Training() {
       const pre = countsRef.current;
       if (pre.packagedCount + pre.inFlight >= MAX_TAKES) return;
 
-      restTimerRef.current = window.setTimeout(() => {
+      restTimerRef.current = window.setTimeout(function tick() {
         restTimerRef.current = null;
 
         const cur = countsRef.current;
@@ -280,13 +304,16 @@ export default function Training() {
           setRunning(false);
           setLoopPhase("idle");
           clearTimers();
-          finalizeSession(sampleRateOut || 16000);
+          finalizeWhenReady();
+        } else if (cur.inFlight > 0) {
+          // Wait for packaging to complete before starting next
+          restTimerRef.current = window.setTimeout(tick, 200);
         } else {
           startRecordPhase();
         }
       }, REST_SEC * 1000);
     }
-  }, [loopPhase, looping, isRecording, clearTimers, finalizeSession, sampleRateOut, startRecordPhase]);
+  }, [loopPhase, looping, isRecording, clearTimers, finalizeWhenReady, startRecordPhase]);
 
   // central cap guard
   useEffect(() => {
@@ -295,9 +322,9 @@ export default function Training() {
       setRunning(false);
       setLoopPhase("idle");
       clearTimers();
-      finalizeSession(sampleRateOut || 16000);
+      finalizeWhenReady();
     }
-  }, [packagedCount, clearTimers, finalizeSession, sampleRateOut]);
+  }, [packagedCount, clearTimers, finalizeWhenReady]);
 
   // play/pause button
   const handleToggle = useCallback(() => {
@@ -311,9 +338,9 @@ export default function Training() {
       clearTimers();
       setRunning(false);
       setLoopPhase("idle");
-      finalizeSession(sampleRateOut || 16000);
+      finalizeWhenReady();
     }
-  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, finalizeSession, sampleRateOut]);
+  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, finalizeWhenReady]);
 
   // stop if phrase disappears
   useEffect(() => {
@@ -323,10 +350,10 @@ export default function Training() {
         clearTimers();
         setRunning(false);
         setLoopPhase("idle");
-        finalizeSession(sampleRateOut || 16000);
+        finalizeWhenReady();
       }
     }
-  }, [step, lowHz, highHz, looping, clearTimers, finalizeSession, sampleRateOut]);
+  }, [step, lowHz, highHz, looping, clearTimers, finalizeWhenReady]);
 
   // package ONE take per wavBlob
   useEffect(() => {
@@ -362,11 +389,15 @@ export default function Training() {
       outDur = srcLen > 0 ? srcLen / sr : durationSec;
     }
 
-    completeTakeFromBlob(wavBlob, {
+    const takeId = curTakeIdRef.current;
+    if (!takeId) return;
+
+    completeTakeFromBlob(takeId, wavBlob, {
       traces: { hzArr, confArr, rmsDbArr, fps: 50 },
       audio: {
         sampleRateOut: sr,
-        numSamplesOut: outLen || (numSamplesOut ?? null),
+        // Use the exact post-slice/pad length for precise accounting
+        numSamplesOut: outLen,
         durationSec: outDur,
         deviceSampleRateHz: deviceSampleRateHz ?? 48000,
         baseLatencySec: baseLatencySec ?? null,
@@ -390,6 +421,7 @@ export default function Training() {
       // use model creator_display_name as subject_id in take.json
       subjectId: subjectId ?? undefined,
     });
+    curTakeIdRef.current = null;
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wavBlob]); // internals captured via refs/state in the hook
