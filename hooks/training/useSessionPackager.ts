@@ -86,19 +86,24 @@ export default function useSessionPackager(opts: { appBuild: string; sessionId: 
 
   /** Called once wavBlob is available → package one take (de-duped) */
   const completeTakeFromBlob = useCallback(
-    (wavBlob: Blob | null, data: {
-      traces: Traces;
-      audio: AudioMeta;
-      prompt: PromptMeta;
-      timing: TimingMeta;
-      controls: ControlsMeta;
-    }) => {
+    (
+      wavBlob: Blob | null,
+      data: {
+        traces: Traces;
+        audio: AudioMeta;
+        prompt: PromptMeta;
+        timing: TimingMeta;
+        controls: ControlsMeta;
+        /** NEW: put your subject label (creator_display_name) here */
+        subjectId?: string;
+      }
+    ) => {
       if (!wavBlob || !pinnedPhraseRef.current || !pinnedWordsRef.current || !takeIdRef.current) return;
       if (lastPackagedBlobRef.current === wavBlob) return; // de-dupe
       lastPackagedBlobRef.current = wavBlob;
 
       const { take } = buildTakeV2({
-        ids: { sessionId, takeId: takeIdRef.current, subjectId: null },
+        ids: { sessionId, takeId: takeIdRef.current, subjectId: data.subjectId ?? null },
         appBuild,
         phrase: pinnedPhraseRef.current,
         words: pinnedWordsRef.current,

@@ -1,7 +1,7 @@
 // components/model-settings/ModelSettingsForm.tsx
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -15,7 +15,7 @@ type Privacy = 'public' | 'private';
 type Gender = 'male' | 'female' | 'other' | 'unspecified';
 
 export default function ModelSettingsForm() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [name, setName] = useState('');
@@ -37,7 +37,6 @@ export default function ModelSettingsForm() {
 
   const looksLikeMissingBucket = (e: unknown) => {
     const msg = (e as { message?: string })?.message?.toLowerCase?.() ?? '';
-    // Common storage error strings when the bucket id is wrong or missing
     return msg.includes('bucket') && msg.includes('not') && msg.includes('found');
   };
 
@@ -57,14 +56,13 @@ export default function ModelSettingsForm() {
         (user.user_metadata?.display_name as string | undefined)?.trim() ||
         (user.email?.split('@')?.[0] || 'Singer');
 
-      // 1) Upload image if present (path: <uid>/<timestamp>_<filename>)
+      // 1) Upload image if present
       let imagePath: string | null = null;
       if (image) {
         const objectName = `${uid}/${Date.now()}_${image.name}`;
-
         const { error: uploadError } = await supabase
           .storage
-          .from('model-images') // ensure bucket id is exactly this
+          .from('model-images')
           .upload(objectName, image, { upsert: false, cacheControl: '3600' });
 
         if (uploadError) {
@@ -78,23 +76,30 @@ export default function ModelSettingsForm() {
         imagePath = objectName;
       }
 
-      // 2) Insert model row (DB default sets uid := auth.uid(), but passing is fine)
-      const { error: insertError } = await supabase.from('models').insert({
-        uid,
-        creator_display_name: displayName,
-        name,
-        gender,
-        privacy,
-        image_path: imagePath,
-      });
+      // 2) Insert model row and RETURN its id
+      const { data: inserted, error: insertError } = await supabase
+        .from('models')
+        .insert({
+          uid,
+          creator_display_name: displayName,
+          name,
+          gender,
+          privacy,
+          image_path: imagePath,
+        })
+        .select('id') // return the id
+        .single();
+
       if (insertError) throw insertError;
 
-      // 3) Reset and redirect
+      // 3) Reset and redirect to training WITH model_id
       setName('');
       setGender('unspecified');
       setPrivacy('private');
       setImage(null);
-      router.push('/training');
+
+      const modelId = inserted?.id;
+      router.push(modelId ? `/training?model_id=${modelId}` : '/training');
     } catch (err: unknown) {
       setError((err as { message?: string })?.message ?? 'Something went wrong.');
     } finally {

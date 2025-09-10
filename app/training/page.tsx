@@ -2,6 +2,9 @@
 "use client";
 
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+
 import GameLayout from "@/components/game-layout/GameLayout";
 import RangeCapture from "@/components/game-layout/range/RangeCapture";
 import TrainingSessionPanel from "@/components/game-layout/TrainingSessionPanel";
@@ -25,7 +28,71 @@ const NOTE_DUR_SEC = 0.5;
 const MAX_TAKES = 24;
 const MAX_SESSION_SEC = 15 * 60;
 
+type ModelRow = {
+  id: string;
+  creator_display_name: string;
+  gender: "male" | "female" | "unspecified" | "other";
+};
+
 export default function Training() {
+  const searchParams = useSearchParams();
+  const modelIdFromQuery = searchParams.get("model_id") || null;
+
+  const supabase = useMemo(() => createClient(), []);
+
+  // model → subject + gender + model id (for range updates)
+  const [modelRowId, setModelRowId] = useState<string | null>(null);
+  const [subjectId, setSubjectId] = useState<string | null>(null); // e.g., "ThetaZilla"
+  const [genderLabel, setGenderLabel] = useState<"male" | "female" | null>(null);
+
+  // fetch model row (by ?model_id, else latest for user)
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        const user = userRes.user;
+        if (!user) return;
+
+        let row: ModelRow | null = null;
+
+        if (modelIdFromQuery) {
+          const { data, error } = await supabase
+            .from("models")
+            .select("id, creator_display_name, gender")
+            .eq("id", modelIdFromQuery)
+            .single();
+          if (error) throw error;
+          row = data as ModelRow;
+        } else {
+          const { data, error } = await supabase
+            .from("models")
+            .select("id, creator_display_name, gender")
+            .eq("uid", user.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (error) throw error;
+          row = (data ?? null) as ModelRow | null;
+        }
+
+        if (row) {
+          setModelRowId(row.id);
+          setSubjectId(row.creator_display_name || null);
+          setGenderLabel(row.gender === "male" || row.gender === "female" ? row.gender : null);
+        } else {
+          setModelRowId(null);
+          setSubjectId(null);
+          setGenderLabel(null);
+        }
+      } catch {
+        setModelRowId(null);
+        setSubjectId(null);
+        setGenderLabel(null);
+      }
+    })();
+  }, [modelIdFromQuery, supabase]);
+
   const [step, setStep] = useState<"low" | "high" | "play">("low");
   const [lowHz, setLowHz] = useState<number | null>(null);
   const [highHz, setHighHz] = useState<number | null>(null);
@@ -138,15 +205,27 @@ export default function Training() {
     }
   }, [pcm16k]);
 
+  // write range_low / range_high to Supabase
+  const updateRange = useCallback(
+    async (which: "low" | "high", label: string) => {
+      if (!modelRowId) return;
+      const payload = which === "low" ? { range_low: label } : { range_high: label };
+      const { error: updErr } = await supabase.from("models").update(payload).eq("id", modelRowId);
+      if (updErr) {
+        // Don't break UX; just log. RLS should protect cross-user writes.
+        console.warn(`[training] Failed to update ${which} range:`, updErr?.message || updErr);
+      }
+    },
+    [modelRowId, supabase]
+  );
+
   // --- keep this above the REST effect to avoid TS2448/2454 ---
-  // start one take (reads latest counts from ref to avoid stale closures)
   const startRecordPhase = useCallback(() => {
     if (lowHz == null || highHz == null || !phrase || !words) return;
 
     const nowCounts = countsRef.current;
     const elapsed = sessionStartMsRef.current ? (performance.now() - sessionStartMsRef.current) / 1000 : 0;
 
-    // guard by session limits using LATEST counts
     if (nowCounts.packagedCount + nowCounts.inFlight >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
       setLooping(false); setRunning(false); setLoopPhase("idle");
       clearTimers();
@@ -154,19 +233,13 @@ export default function Training() {
       return;
     }
 
-    // pin current UI for THIS take & mark inflight
     beginTake(phrase, words);
-
-    // enter record phase; recorder will start shortly; we stop exactly after recStartMs + RECORD_SEC
     setLoopPhase("record");
     setRunning(true);
-  }, [
-    lowHz, highHz, phrase, words,
-    clearTimers, finalizeSession, beginTake, sampleRateOut
-  ]);
+  }, [lowHz, highHz, phrase, words, clearTimers, finalizeSession, beginTake, sampleRateOut]);
   // --- /keep ---
 
-  // EXACT end of record window: stop at startedAtMs + RECORD_SEC
+  // EXACT end of record window
   useEffect(() => {
     if (loopPhase !== "record") {
       if (recordTimerRef.current != null) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
@@ -188,21 +261,19 @@ export default function Training() {
     }
   }, [loopPhase, isRecording, startedAtMs, advancePhraseLyrics, stopRec]);
 
-  // REST countdown → next take (with cap checks using LATEST counts at fire time)
+  // REST → next take
   useEffect(() => {
     if (loopPhase !== "rest" || !looping) {
       if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
       return;
     }
     if (!isRecording && restTimerRef.current == null) {
-      // check before scheduling
       const pre = countsRef.current;
       if (pre.packagedCount + pre.inFlight >= MAX_TAKES) return;
 
       restTimerRef.current = window.setTimeout(() => {
         restTimerRef.current = null;
 
-        // re-check USING LATEST VALUES (fixes ghost take)
         const cur = countsRef.current;
         if (cur.packagedCount + cur.inFlight >= MAX_TAKES) {
           setLooping(false);
@@ -217,7 +288,7 @@ export default function Training() {
     }
   }, [loopPhase, looping, isRecording, clearTimers, finalizeSession, sampleRateOut, startRecordPhase]);
 
-  // central cap guard: when packagedCount hits MAX_TAKES, stop & finalize immediately
+  // central cap guard
   useEffect(() => {
     if (packagedCount >= MAX_TAKES) {
       setLooping(false);
@@ -244,7 +315,7 @@ export default function Training() {
     }
   }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, finalizeSession, sampleRateOut]);
 
-  // if phrase disappears, stop loop
+  // stop if phrase disappears
   useEffect(() => {
     if (step !== "play" || lowHz == null || highHz == null) {
       if (looping) {
@@ -257,13 +328,12 @@ export default function Training() {
     }
   }, [step, lowHz, highHz, looping, clearTimers, finalizeSession, sampleRateOut]);
 
-  // package ONE take per wavBlob (using pinned phrase/words inside the hook)
+  // package ONE take per wavBlob
   useEffect(() => {
     if (!wavBlob) return;
 
-    // Enforce EXACT take length of 8s @ 16k: 8 * 16000 = 128,000 samples
     const sr = sampleRateOut || 16000;
-    const wantSamples = Math.max(0, Math.round(RECORD_SEC * sr)); // 128,000 for 8s
+    const wantSamples = Math.max(0, Math.round(RECORD_SEC * sr));
     const srcLen = pcmView?.length ?? 0;
 
     let outPcm: Float32Array | null = null;
@@ -272,25 +342,21 @@ export default function Training() {
 
     if (pcmView && srcLen > 0) {
       if (srcLen > wantSamples) {
-        // Trim any extra samples (safety against buffer overrun)
         outPcm = pcmView.slice(0, wantSamples);
         outLen = wantSamples;
         outDur = wantSamples / sr;
       } else if (srcLen < wantSamples) {
-        // Zero-pad the tail to hit the exact window length
         const pad = new Float32Array(wantSamples);
         pad.set(pcmView, 0);
         outPcm = pad;
         outLen = wantSamples;
         outDur = wantSamples / sr;
       } else {
-        // Already exact length
         outPcm = pcmView;
         outLen = srcLen;
         outDur = srcLen / sr;
       }
     } else {
-      // No PCM view; fall back to whatever the recorder reported
       outPcm = pcmView || null;
       outLen = srcLen;
       outDur = srcLen > 0 ? srcLen / sr : durationSec;
@@ -320,10 +386,11 @@ export default function Training() {
         scale: "major",
       },
       timing: { playStartMs: startedAtMs ?? null, recStartMs: startedAtMs ?? null },
-      controls: { genderLabel: null },
+      controls: { genderLabel },
+      // use model creator_display_name as subject_id in take.json
+      subjectId: subjectId ?? undefined,
     });
 
-    // rely on packagedCount watcher to finalize at cap
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wavBlob]); // internals captured via refs/state in the hook
 
@@ -333,11 +400,13 @@ export default function Training() {
   const statusText =
     loopPhase === "record" ? (isRecording ? "Recording…" : "Playing…") : loopPhase === "rest" && looping ? "Breather…" : "Idle";
 
+  const micReady = isReady && !error;
+
   return (
     <>
       <GameLayout
         title="Training"
-        micText={micText}
+        micText={micReady ? micText : micText}
         error={error}
         running={running}
         uiRunning={looping}
@@ -365,7 +434,14 @@ export default function Training() {
             beatsRequired={1}
             centsWindow={75}
             a4Hz={440}
-            onConfirm={(hz) => { setLowHz(hz); setStep("high"); }}
+            onConfirm={(hz) => {
+              setLowHz(hz);
+              // format note label using hzToNoteName directly
+              const { name, octave } = hzToNoteName(hz, 440, { useSharps: true, octaveAnchor: "A" });
+              const label = `${name}${octave}`;
+              void updateRange("low", label); // fire & forget
+              setStep("high");
+            }}
           />
         )}
 
@@ -380,7 +456,14 @@ export default function Training() {
             beatsRequired={1}
             centsWindow={75}
             a4Hz={440}
-            onConfirm={(hz) => { setHighHz(hz); setStep("play"); }}
+            onConfirm={(hz) => {
+              setHighHz(hz);
+              // format note label using hzToNoteName directly
+              const { name, octave } = hzToNoteName(hz, 440, { useSharps: true, octaveAnchor: "A" });
+              const label = `${name}${octave}`;
+              void updateRange("high", label); // fire & forget
+              setStep("play");
+            }}
           />
         )}
 
