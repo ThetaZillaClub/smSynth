@@ -55,7 +55,7 @@ export default function DynamicOverlay({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Fallback baseline when an external start isn't provided (e.g., preview mode)
+  // Fallback baseline used only for preview/static draws
   const startRef = useRef<number | null>(null);
 
   const lastActiveRef = useRef<number>(-1);
@@ -63,7 +63,7 @@ export default function DynamicOverlay({
 
   const dpr = useMemo(() => (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1), []);
 
-  // 12px-width cache (massively reduces measureText calls)
+  // 12px-width cache (reduces measureText churn)
   const width12CacheRef = useRef<Map<string, number>>(new Map());
   const getWidth12 = useCallback((ctx: CanvasRenderingContext2D, text: string, bold = false) => {
     const key = (bold ? "b|" : "n|") + text;
@@ -80,10 +80,7 @@ export default function DynamicOverlay({
       const cnv = canvasRef.current;
       if (!cnv) return;
 
-      // if we're running but don't yet have the recorder anchor, wait (prevents pre-roll skew)
-      if (running && startAtMs == null) return;
-
-      // Ensure backing store matches CSS pixels → crisp circles/text
+      // Ensure backing store matches CSS pixels
       const wantW = Math.round(width * dpr);
       const wantH = Math.round(height * dpr);
       if (cnv.width !== wantW) cnv.width = wantW;
@@ -93,23 +90,24 @@ export default function DynamicOverlay({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Layout & time
+      // ----- Time base -----
+      // "Live" only when we're running AND have a real recorder anchor.
+      const isLive = running && startAtMs != null;
+
       const anchorX = Math.max(0, Math.min(width * anchorRatio, width - 1));
       const pxPerSec = (width - anchorX) / Math.max(0.001, windowSec);
 
-      // Choose time base: recorder anchor if given, else internal baseline
-      const baseMs = startAtMs ?? (startRef.current ?? nowMs);
-      const tNow = running ? (nowMs - baseMs) / 1000 : 0;
-
+      // For the brief gap before startAtMs arrives, freeze tNow=0 (no scroll).
+      const tNow = isLive ? (nowMs - (startAtMs as number)) / 1000 : 0;
       const tView = tNow - leadInSec;
       const headTime = tView;
 
-      // clear + bg
+      // ----- Clear + BG -----
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = PR_COLORS.bg;
       ctx.fillRect(0, 0, width, height);
 
-      // horizontal grid + octave labels
+      // ----- Grid -----
       const span = maxMidi - minMidi;
       for (let i = 0; i <= span; i++) {
         const midi = minMidi + i;
@@ -134,7 +132,7 @@ export default function DynamicOverlay({
         }
       }
 
-      // Fast single-row label painter (WORD bold + NOTE light). No per-frame loops.
+      // Text helper
       const drawInlineWordAndNote = (
         x: number,
         y: number,
@@ -147,17 +145,14 @@ export default function DynamicOverlay({
         const available = Math.max(0, w - paddingX * 2);
         if (available < 18 || h < 12) return;
 
-        // Base sizes from cell height
         const wordPx = Math.min(36, Math.max(12, Math.floor(h * 0.52)));
         const notePx = Math.min(12, Math.max(10, Math.floor(h * 0.40)));
 
-        // Predict widths from cached 12px widths (linear scale ≈ good enough)
         const wordW12 = word ? getWidth12(ctx, word, true) : 0;
         const noteW12 = getWidth12(ctx, noteLabel, false);
         const wWord = (wordW12 * wordPx) / 12;
         const wNote = (noteW12 * notePx) / 12;
 
-        // prefer lyric; include note only if it fits with a small gap
         const gap = 6;
         const cx = x + w / 2;
         const cy = y + h / 2;
@@ -167,19 +162,16 @@ export default function DynamicOverlay({
 
         const canShowBoth = word ? wWord + gap + wNote <= available : wNote <= available;
 
-        // If lyric overflows even without the note, approximate ellipsis without extra measures
         let lyricStr = word ?? "";
         let wLyric = wWord;
         if (lyricStr && !canShowBoth && wWord > available) {
-          const avgChar = Math.max(1, wordW12 / Math.max(1, lyricStr.length)); // @12px
+          const avgChar = Math.max(1, wordW12 / Math.max(1, lyricStr.length));
           const maxChars = Math.max(1, Math.floor((available * 12) / (avgChar * wordPx)) - 1);
           lyricStr = lyricStr.slice(0, maxChars) + "…";
-          // recompute width at wordPx (linear scale)
           const ell12 = getWidth12(ctx, lyricStr, true);
           wLyric = (ell12 * wordPx) / 12;
         }
 
-        // draw centered
         const total = lyricStr ? (canShowBoth ? wLyric + gap + (wNote <= available ? wNote : 0) : wLyric) : wNote;
         const startX = cx - total / 2;
 
@@ -198,9 +190,8 @@ export default function DynamicOverlay({
         }
       };
 
-      // Notes (scroll right→left in VIEW time)
-      const visLeft = -64,
-        visRight = width + 64;
+      // ----- Notes (scroll by view time) -----
+      const visLeft = -64, visRight = width + 64;
       let activeIdx = -1;
       for (let i = 0; i < phrase.notes.length; i++) {
         const n = phrase.notes[i];
@@ -210,7 +201,6 @@ export default function DynamicOverlay({
 
         const { y, h } = midiCellRect(n.midi, height, minMidi, maxMidi);
 
-        // block
         ctx.fillStyle = PR_COLORS.noteFill;
         const drawW = Math.max(2, Math.round(w));
         const rx = Math.round(x) + 0.5;
@@ -221,16 +211,11 @@ export default function DynamicOverlay({
         ctx.lineWidth = 1;
         ctx.strokeRect(rx, ry, drawW, rh);
 
-        // label row
-        const minWForText = 24;
-        const minHForText = 14;
-        if (drawW >= minWForText && h >= minHForText) {
+        if (drawW >= 24 && h >= 14) {
           const { name, octave } = midiToNoteName(n.midi, { useSharps: true, octaveAnchor: "A" });
-          const noteLabel = `${name}${octave}`;
-          drawInlineWordAndNote(rx, ry, drawW, rh, lyrics?.[i], noteLabel);
+          drawInlineWordAndNote(rx, ry, drawW, rh, lyrics?.[i], `${name}${octave}`);
         }
 
-        // determine "active" note at playhead
         const nextStart = phrase.notes[i + 1]?.startSec ?? n.startSec + n.durSec;
         if (headTime >= n.startSec && headTime < nextStart) activeIdx = i;
       }
@@ -240,32 +225,21 @@ export default function DynamicOverlay({
         onActiveNoteChange?.(activeIdx);
       }
 
-      // Live pitch curve
-      {
-        const left = tNow - windowSec * 1.1;
-        const right = tNow + 0.25;
-        pointsRef.current = pointsRef.current.filter((p) => p.t >= left && p.t <= right);
-
-        if (pointsRef.current.length > 1) {
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = PR_COLORS.trace;
-          ctx.beginPath();
-          let pen = false;
-          for (const p of pointsRef.current) {
-            const x = anchorX + (p.t - tNow) * pxPerSec;
-            const y = midiToY(p.midi, height, minMidi, maxMidi);
-            if (!pen) {
-              ctx.moveTo(x, y);
-              pen = true;
-            } else {
-              ctx.lineTo(x, y);
-            }
-          }
-          ctx.stroke();
+      // ----- Live pitch curve (only when "live") -----
+      if (isLive && pointsRef.current.length > 1) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = PR_COLORS.trace;
+        ctx.beginPath();
+        let pen = false;
+        for (const p of pointsRef.current) {
+          const x = anchorX + (p.t - tNow) * pxPerSec;
+          const y = midiToY(p.midi, height, minMidi, maxMidi);
+          if (!pen) { ctx.moveTo(x, y); pen = true; } else { ctx.lineTo(x, y); }
         }
+        ctx.stroke();
       }
 
-      // Playhead dot
+      // ----- Playhead dot -----
       const DOT_RADIUS = 7;
       const xGuide = Math.round(anchorX) + 0.5;
       const easeOutCubic = (u: number) => 1 - Math.pow(1 - u, 3);
@@ -283,7 +257,6 @@ export default function DynamicOverlay({
         const curCell = midiCellRect(cur.midi, height, minMidi, maxMidi);
         const yEdgeStart = goingUp ? curCell.y : curCell.y + curCell.h;
         const yStart = yEdgeStart;
-
         const yEnd = midiToYCenter(nxt.midi, height, minMidi, maxMidi);
 
         const dy = yEnd - yStart;
@@ -341,16 +314,11 @@ export default function DynamicOverlay({
     drawRef.current = draw;
   }, [draw]);
 
-  // RAF loop — wait for startAtMs when running
+  // RAF loop — ALWAYS run while "running"; we'll freeze visually until startAtMs is set
   useEffect(() => {
-    if (running && startAtMs == null) {
-      // draw a static frame (no motion) while waiting for anchor
-      drawRef.current(performance.now());
-      return;
-    }
     if (running) {
       if (startRef.current == null) {
-        startRef.current = performance.now(); // fallback baseline
+        startRef.current = performance.now();
         pointsRef.current = [];
       }
       const step = (ts: number) => {
@@ -362,7 +330,7 @@ export default function DynamicOverlay({
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
       startRef.current = null;
-      drawRef.current(performance.now());
+      drawRef.current(performance.now()); // paint a clean static frame
       lastActiveRef.current = -1;
       pointsRef.current = [];
     }
@@ -370,17 +338,15 @@ export default function DynamicOverlay({
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [running, startAtMs]);
+  }, [running]);
 
-  // append live pitch samples aligned to the same time base
+  // Append live pitch samples only when truly "live" (prevents pre-anchor jitter)
   useEffect(() => {
-    if (!running) return;
+    const isLive = running && startAtMs != null;
+    if (!isLive) return;
     if (!livePitchHz || confidence < (confThreshold ?? 0.5)) return;
 
-    const baseMs = startAtMs ?? startRef.current;
-    if (baseMs == null) return;
-
-    const tNow = (performance.now() - baseMs) / 1000;
+    const tNow = (performance.now() - (startAtMs as number)) / 1000;
     const midi = hzToMidi(livePitchHz, a4Hz);
     if (!isFinite(midi)) return;
 

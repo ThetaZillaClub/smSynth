@@ -17,7 +17,7 @@ import usePhraseLyrics from "@/hooks/training/usePhraseLyrics";
 import { hzToNoteName } from "@/utils/pitch/pitchMath";
 import { APP_BUILD, CONF_THRESHOLD } from "@/utils/training/constants";
 
-// timing (kept local; move to constants if you prefer)
+// timing
 const RECORD_SEC = 8;
 const REST_SEC = 8;
 const TRAIN_LEAD_IN_SEC = 1.0;
@@ -34,7 +34,7 @@ export default function Training() {
     enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
   });
 
-  // phrase + lyrics with seeded control
+  // phrase + lyrics
   const { phrase, words, reset: resetPhraseLyrics, advance: advancePhraseLyrics, getLyricSeed } =
     usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: NOTE_DUR_SEC });
 
@@ -49,7 +49,7 @@ export default function Training() {
   useEffect(() => { setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0); },
     [pitch, confidence, setLatest]);
 
-  // session packager (pins phrase/words per take, aggregates PCM, builds export)
+  // session packager
   const sessionIdRef = useRef<string>(crypto.randomUUID());
   const {
     packagedCount, inFlight,
@@ -57,14 +57,20 @@ export default function Training() {
     showExport, setShowExport, sessionWavUrl, sessionJsonUrl,
   } = useSessionPackager({ appBuild: APP_BUILD, sessionId: sessionIdRef.current });
 
+  // keep latest counts in a ref to avoid stale-closure in timers
+  const countsRef = useRef({ packagedCount: 0, inFlight: 0 });
+  useEffect(() => {
+    countsRef.current.packagedCount = packagedCount;
+    countsRef.current.inFlight = inFlight;
+  }, [packagedCount, inFlight]);
+
   // loop flags
   const [running, setRunning] = useState(false);
   const [looping, setLooping] = useState(false);
   const [loopPhase, setLoopPhase] = useState<"idle" | "record" | "rest">("idle");
   const [activeWord, setActiveWord] = useState<number>(-1);
 
-  // anchors & timers
-  const playEpochMsRef = useRef<number | null>(null);
+  // timers/guards
   const recordTimerRef = useRef<number | null>(null);
   const restTimerRef = useRef<number | null>(null);
   const clearTimers = useCallback(() => {
@@ -75,8 +81,8 @@ export default function Training() {
   // guard time window
   const sessionStartMsRef = useRef<number | null>(null);
 
-  // nice wall-clock seconds tied to play anchor
-  const uiRecordSec = useUiRecordTimer(isRecording, playEpochMsRef.current);
+  // nice wall-clock seconds tied to RECORDER start (recStartMs)
+  const uiRecordSec = useUiRecordTimer(isRecording, startedAtMs ?? null);
 
   // mic/pitch text
   const micText = error ? `Mic error: ${String(error)}` : isReady ? "Mic ready" : "Starting mic…";
@@ -96,7 +102,6 @@ export default function Training() {
       resetSession();
       resetPhraseLyrics();
       sessionStartMsRef.current = performance.now();
-      playEpochMsRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, lowHz, highHz]);
@@ -120,20 +125,6 @@ export default function Training() {
     })();
   }, [step, running, isRecording, startRec, stopRec, resetFixed]);
 
-  // REST countdown → next take
-  useEffect(() => {
-    if (loopPhase !== "rest" || !looping) {
-      if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
-      return;
-    }
-    if (!isRecording && restTimerRef.current == null) {
-      restTimerRef.current = window.setTimeout(() => {
-        restTimerRef.current = null;
-        startRecordPhase();
-      }, REST_SEC * 1000);
-    }
-  }, [loopPhase, looping, isRecording]); // startRecordPhase is stable
-
   // TS-safe view over PCM (16k mono)
   const pcmView: Float32Array | null = useMemo(() => {
     if (!pcm16k) return null;
@@ -147,15 +138,17 @@ export default function Training() {
     }
   }, [pcm16k]);
 
-  // start one take
+  // --- keep this above the REST effect to avoid TS2448/2454 ---
+  // start one take (reads latest counts from ref to avoid stale closures)
   const startRecordPhase = useCallback(() => {
     if (lowHz == null || highHz == null || !phrase || !words) return;
 
-    // guard by session limits
+    const nowCounts = countsRef.current;
     const elapsed = sessionStartMsRef.current ? (performance.now() - sessionStartMsRef.current) / 1000 : 0;
-    if (packagedCount + inFlight >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
+
+    // guard by session limits using LATEST counts
+    if (nowCounts.packagedCount + nowCounts.inFlight >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
       setLooping(false); setRunning(false); setLoopPhase("idle");
-      playEpochMsRef.current = null;
       clearTimers();
       finalizeSession(sampleRateOut || 16000);
       return;
@@ -164,36 +157,76 @@ export default function Training() {
     // pin current UI for THIS take & mark inflight
     beginTake(phrase, words);
 
-    // anchor overlay to wall-clock
-    playEpochMsRef.current = performance.now();
-
+    // enter record phase; recorder will start shortly; we stop exactly after recStartMs + RECORD_SEC
     setLoopPhase("record");
     setRunning(true);
-
-    // close record window
-    if (recordTimerRef.current != null) clearTimeout(recordTimerRef.current);
-    recordTimerRef.current = window.setTimeout(() => {
-      setRunning(false);
-      setActiveWord(-1);
-      setLoopPhase("rest");
-      // prepare NEXT set for REST display
-      advancePhraseLyrics();
-    }, RECORD_SEC * 1000);
   }, [
     lowHz, highHz, phrase, words,
-    packagedCount, inFlight, clearTimers, finalizeSession,
-    beginTake, advancePhraseLyrics, sampleRateOut
+    clearTimers, finalizeSession, beginTake, sampleRateOut
   ]);
+  // --- /keep ---
 
-  // stop loop fully
-  const stopLoop = useCallback(() => {
-    setLooping(false);
-    clearTimers();
-    setRunning(false);
-    setLoopPhase("idle");
-    playEpochMsRef.current = null;
-    finalizeSession(sampleRateOut || 16000);
-  }, [clearTimers, finalizeSession, sampleRateOut]);
+  // EXACT end of record window: stop at startedAtMs + RECORD_SEC
+  useEffect(() => {
+    if (loopPhase !== "record") {
+      if (recordTimerRef.current != null) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
+      return;
+    }
+    if (isRecording && startedAtMs != null && recordTimerRef.current == null) {
+      const now = performance.now();
+      const delayMs = Math.max(0, RECORD_SEC * 1000 - (now - startedAtMs));
+      recordTimerRef.current = window.setTimeout(() => {
+        if (!recLockRef.current.stopping) {
+          recLockRef.current.stopping = true;
+          void stopRec().finally(() => { recLockRef.current.stopping = false; });
+        }
+        setRunning(false);
+        setActiveWord(-1);
+        setLoopPhase("rest");
+        advancePhraseLyrics(); // prep next while we rest
+      }, delayMs);
+    }
+  }, [loopPhase, isRecording, startedAtMs, advancePhraseLyrics, stopRec]);
+
+  // REST countdown → next take (with cap checks using LATEST counts at fire time)
+  useEffect(() => {
+    if (loopPhase !== "rest" || !looping) {
+      if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
+      return;
+    }
+    if (!isRecording && restTimerRef.current == null) {
+      // check before scheduling
+      const pre = countsRef.current;
+      if (pre.packagedCount + pre.inFlight >= MAX_TAKES) return;
+
+      restTimerRef.current = window.setTimeout(() => {
+        restTimerRef.current = null;
+
+        // re-check USING LATEST VALUES (fixes ghost take)
+        const cur = countsRef.current;
+        if (cur.packagedCount + cur.inFlight >= MAX_TAKES) {
+          setLooping(false);
+          setRunning(false);
+          setLoopPhase("idle");
+          clearTimers();
+          finalizeSession(sampleRateOut || 16000);
+        } else {
+          startRecordPhase();
+        }
+      }, REST_SEC * 1000);
+    }
+  }, [loopPhase, looping, isRecording, clearTimers, finalizeSession, sampleRateOut, startRecordPhase]);
+
+  // central cap guard: when packagedCount hits MAX_TAKES, stop & finalize immediately
+  useEffect(() => {
+    if (packagedCount >= MAX_TAKES) {
+      setLooping(false);
+      setRunning(false);
+      setLoopPhase("idle");
+      clearTimers();
+      finalizeSession(sampleRateOut || 16000);
+    }
+  }, [packagedCount, clearTimers, finalizeSession, sampleRateOut]);
 
   // play/pause button
   const handleToggle = useCallback(() => {
@@ -203,31 +236,77 @@ export default function Training() {
       clearTimers();
       startRecordPhase();
     } else {
-      stopLoop();
+      setLooping(false);
+      clearTimers();
+      setRunning(false);
+      setLoopPhase("idle");
+      finalizeSession(sampleRateOut || 16000);
     }
-  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, stopLoop]);
+  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, finalizeSession, sampleRateOut]);
 
   // if phrase disappears, stop loop
   useEffect(() => {
     if (step !== "play" || lowHz == null || highHz == null) {
-      if (looping) stopLoop();
+      if (looping) {
+        setLooping(false);
+        clearTimers();
+        setRunning(false);
+        setLoopPhase("idle");
+        finalizeSession(sampleRateOut || 16000);
+      }
     }
-  }, [step, lowHz, highHz, looping, stopLoop]);
+  }, [step, lowHz, highHz, looping, clearTimers, finalizeSession, sampleRateOut]);
 
   // package ONE take per wavBlob (using pinned phrase/words inside the hook)
   useEffect(() => {
     if (!wavBlob) return;
+
+    // Enforce EXACT take length of 8s @ 16k: 8 * 16000 = 128,000 samples
+    const sr = sampleRateOut || 16000;
+    const wantSamples = Math.max(0, Math.round(RECORD_SEC * sr)); // 128,000 for 8s
+    const srcLen = pcmView?.length ?? 0;
+
+    let outPcm: Float32Array | null = null;
+    let outLen = srcLen;
+    let outDur = durationSec;
+
+    if (pcmView && srcLen > 0) {
+      if (srcLen > wantSamples) {
+        // Trim any extra samples (safety against buffer overrun)
+        outPcm = pcmView.slice(0, wantSamples);
+        outLen = wantSamples;
+        outDur = wantSamples / sr;
+      } else if (srcLen < wantSamples) {
+        // Zero-pad the tail to hit the exact window length
+        const pad = new Float32Array(wantSamples);
+        pad.set(pcmView, 0);
+        outPcm = pad;
+        outLen = wantSamples;
+        outDur = wantSamples / sr;
+      } else {
+        // Already exact length
+        outPcm = pcmView;
+        outLen = srcLen;
+        outDur = srcLen / sr;
+      }
+    } else {
+      // No PCM view; fall back to whatever the recorder reported
+      outPcm = pcmView || null;
+      outLen = srcLen;
+      outDur = srcLen > 0 ? srcLen / sr : durationSec;
+    }
+
     completeTakeFromBlob(wavBlob, {
       traces: { hzArr, confArr, rmsDbArr, fps: 50 },
       audio: {
-        sampleRateOut,
-        numSamplesOut: numSamplesOut ?? null,
-        durationSec,
+        sampleRateOut: sr,
+        numSamplesOut: outLen || (numSamplesOut ?? null),
+        durationSec: outDur,
         deviceSampleRateHz: deviceSampleRateHz ?? 48000,
         baseLatencySec: baseLatencySec ?? null,
         workletBufferSize: workletBufferSize ?? null,
         resampleMethod,
-        pcmView,
+        pcmView: outPcm,
         metrics: metrics ?? null,
       },
       prompt: {
@@ -240,24 +319,16 @@ export default function Training() {
         lyricSeed: getLyricSeed(),
         scale: "major",
       },
-      timing: { playStartMs: playEpochMsRef.current ?? null, recStartMs: startedAtMs ?? null },
+      timing: { playStartMs: startedAtMs ?? null, recStartMs: startedAtMs ?? null },
       controls: { genderLabel: null },
     });
 
-    // cap guard: stop immediately if we hit max by packaging
-    if (packagedCount + 1 >= MAX_TAKES) {
-      setLooping(false);
-      setRunning(false);
-      setLoopPhase("idle");
-      playEpochMsRef.current = null;
-      clearTimers();
-      finalizeSession(sampleRateOut || 16000);
-    }
+    // rely on packagedCount watcher to finalize at cap
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wavBlob]); // internals captured via refs/state in the hook
 
   // cleanup timers on unmount
-  useEffect(() => stopLoop, [stopLoop]);
+  useEffect(() => () => { clearTimers(); }, [clearTimers]);
 
   const statusText =
     loopPhase === "record" ? (isRecording ? "Recording…" : "Playing…") : loopPhase === "rest" && looping ? "Breather…" : "Idle";
@@ -280,7 +351,7 @@ export default function Training() {
         confidence={confidence}
         livePitchHz={typeof pitch === "number" ? pitch : null}
         confThreshold={CONF_THRESHOLD}
-        startAtMs={playEpochMsRef.current}
+        startAtMs={isRecording ? (startedAtMs ?? null) : null}
         leadInSec={TRAIN_LEAD_IN_SEC}
       >
         {step === "low" && (

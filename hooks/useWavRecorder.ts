@@ -58,12 +58,8 @@ export default function useWavRecorder(opts?: {
   const startingRef = useRef(false);
 
   const cleanup = useCallback(async () => {
-    try {
-      procRef.current?.port?.postMessage("flush");
-    } catch {}
-    try {
-      procRef.current?.disconnect();
-    } catch {}
+    try { procRef.current?.port?.postMessage("flush"); } catch {}
+    try { procRef.current?.disconnect(); } catch {}
     procRef.current = null;
 
     if (streamRef.current) {
@@ -71,26 +67,19 @@ export default function useWavRecorder(opts?: {
       streamRef.current = null;
     }
     if (ctxRef.current) {
-      try {
-        await ctxRef.current.close();
-      } catch {}
+      try { await ctxRef.current.close(); } catch {}
       ctxRef.current = null;
     }
   }, []);
 
   useEffect(() => {
-    return () => {
-      void cleanup();
-    };
+    return () => { void cleanup(); };
   }, [cleanup]);
 
   const concat = (arrays: Float32Array[], total: number) => {
     const out = new Float32Array(total);
     let o = 0;
-    for (const a of arrays) {
-      out.set(a, o);
-      o += a.length;
-    }
+    for (const a of arrays) { out.set(a, o); o += a.length; }
     return out;
   };
 
@@ -115,32 +104,37 @@ export default function useWavRecorder(opts?: {
     return h;
   };
 
-  // Efficient FIR decimator for 48k -> 16k (M=3). Otherwise, fall back to linear.
+  // 48k -> 16k FIR decimator WITH edge padding ("same-length" decimation).
+  // Output length ≈ round(N / 3). Centers at i*3; edges clamp to x[0]/x[N-1].
   const decimate48kTo16kFIR = (() => {
-    // New Nyquist = 8 kHz. Choose cutoff a bit under that (e.g., 7 kHz).
-    // cutoffNormFs = 7000 / 48000 ≈ 0.1458
-    const TAPS = designLowpassFIR(63, 7000 / 48000);
+    const TAPS = designLowpassFIR(63, 7000 / 48000); // ~7 kHz cutoff (below new Nyquist 8k)
     const L = TAPS.length;
     const HALF = (L - 1) >> 1;
+    const M = 3;
 
     return (x: Float32Array) => {
-      // take every 3rd sample after convolving
-      const M = 3;
-      // use valid region [HALF, x.length - HALF)
-      const lastCenter = x.length - HALF - 1;
-      const estLen = Math.max(0, Math.floor((lastCenter - HALF) / M) + 1);
-      const y = new Float32Array(estLen);
-      let yi = 0;
+      const N = x.length;
+      if (N === 0) return new Float32Array(0);
 
-      for (let center = HALF; center <= lastCenter; center += M) {
-        let acc = 0;
+      const yLen = Math.max(1, Math.round(N / M));
+      const y = new Float32Array(yLen);
+
+      const sampleClamped = (idx: number) => {
+        if (idx < 0) return x[0]!;
+        if (idx >= N) return x[N - 1]!;
+        return x[idx]!;
+      };
+
+      for (let i = 0; i < yLen; i++) {
+        const center = i * M;
         const base = center - HALF;
+        let acc = 0;
         for (let k = 0; k < L; k++) {
-          acc += x[base + k]! * TAPS[k]!;
+          acc += sampleClamped(base + k) * TAPS[k]!;
         }
-        y[yi++] = acc;
+        y[i] = acc;
       }
-      return yi < y.length ? y.subarray(0, yi) : y;
+      return y;
     };
   })();
 
@@ -185,9 +179,7 @@ export default function useWavRecorder(opts?: {
       setBaseLatencySec((ctx as any).baseLatency ?? null);
 
       // Load the same worklet module (downmix→mono & transfer buffers)
-      try {
-        await ctx.audioWorklet.addModule("/audio-processor.js");
-      } catch {}
+      try { await ctx.audioWorklet.addModule("/audio-processor.js"); } catch {}
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -247,7 +239,7 @@ export default function useWavRecorder(opts?: {
       };
 
       mic.connect(node);
-      setStartedAtMs(performance.now()); // mark the moment audio is flowing to our node
+      setStartedAtMs(performance.now()); // moment audio is flowing to our node
       setIsRecording(true);
     } finally {
       startingRef.current = false;
@@ -256,9 +248,7 @@ export default function useWavRecorder(opts?: {
 
   const stop = useCallback(async (): Promise<{ blob: Blob; url: string; durationSec: number } | null> => {
     if (!isRecording) return null;
-    try {
-      procRef.current?.port?.postMessage("flush");
-    } catch {}
+    try { procRef.current?.port?.postMessage("flush"); } catch {}
     await new Promise((r) => setTimeout(r, 0)); // let final postMessage arrive
 
     const deviceSR = deviceSrRef.current;
@@ -267,18 +257,18 @@ export default function useWavRecorder(opts?: {
       const total = totalRef.current;
       const out = new Float32Array(total);
       let o = 0;
-      for (const a of chunksRef.current) {
-        out.set(a, o);
-        o += a.length;
-      }
+      for (const a of chunksRef.current) { out.set(a, o); o += a.length; }
       return out;
     })();
 
     // Choose resampler
     let resampled: Float32Array;
     if (deviceSR === 48000 && sampleRateOut === 16000) {
-      resampled = decimate48kTo16kFIR(mono);
+      resampled = decimate48kTo16kFIR(mono); // padded FIR decimator
       setResampleMethod("fir-decimate");
+    } else if (deviceSR === sampleRateOut) {
+      resampled = mono;
+      setResampleMethod("linear");
     } else {
       resampled = resampleLinear(mono, deviceSR, sampleRateOut);
       setResampleMethod("linear");
@@ -290,7 +280,7 @@ export default function useWavRecorder(opts?: {
     setWavUrl(url);
     setIsRecording(false);
 
-    // keep duration based on output rate
+    // duration from output SR
     const N = resampled.length;
     const dur = N / sampleRateOut;
     setDurationSec(dur);
