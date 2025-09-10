@@ -52,7 +52,7 @@ export default function Footer({ className = '' }: { className?: string }) {
             </div>
             <p className="text-xl font-semibold">Train Custom Singing Models</p>
             <p className="text-base">
-              Create copyright-free voices with our gamified app and join the world's largest singing model hub.
+              Create copyright-free AI Singing Models with our gamified app and join the world's largest singing model hub.
             </p>
             {/* social links (text-only) */}
             <ul className="mt-8 flex gap-6 text-lg">

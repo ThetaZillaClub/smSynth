@@ -40,12 +40,11 @@ export default function Hero() {
       className="flex flex-col items-center justify-center text-center py-20 bg-[#f0f0f0] text-[#0f0f0f]"
     >
       <h1 ref={titleRef} className="text-5xl md:text-7xl font-bold mb-4">
-        Unlock Your Voice Revolution
+        Save Your Voice
       </h1>
 
       <p ref={copyRef} className="text-xl md:text-2xl mb-8 max-w-2xl">
-        Train custom singing models, transform raw audio into stunning vocals with prompts. Gamified creation,
-        copyright-free—join the world's largest singing model hub today.
+        Train custom AI Powered vocal models, transform raw audio into stunning vocals with prompts. Join the world's largest singing model hub today.
       </p>
 
       <div ref={ctaRef}>
