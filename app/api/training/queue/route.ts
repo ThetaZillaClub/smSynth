@@ -34,7 +34,9 @@ function readPrivateKey(): string {
 
 const REMOTE_REPO = process.env.TRAIN_REMOTE_REPO_DIR || "/mnt/data1/repos/Prompt-Singer";
 const REMOTE_DATA = process.env.TRAIN_REMOTE_DATA_ROOT || "/mnt/data1/datasets";
-const AUTO_START = String(process.env.AUTO_START || "1").toLowerCase() === "1" || String(process.env.AUTO_START || "").toLowerCase() === "true";
+const AUTO_START =
+  String(process.env.AUTO_START || "1").toLowerCase() === "1" ||
+  String(process.env.AUTO_START || "").toLowerCase() === "true";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -138,6 +140,14 @@ export async function POST(req: NextRequest) {
       const name = key.split("/").pop()!;
       return `curl -fL --retry 3 --create-dirs -o "$BASE/wavs/${name}" '${url}'`;
     }),
+    // --- FIX 1: ensure /mnt/data/datasets resolves to /mnt/data1/datasets
+    `mkdir -p /mnt/data`,
+    `ln -sfn "${REMOTE_DATA.replace(/\/+$/,"")}" "/mnt/data/datasets" || true`,
+    // --- FIX 2: sanitize TSV audio_path -> point at the wavs we just pulled
+    // If header has "audio_path", rewrite that column to "$BASE/wavs/<basename>"
+    // Fallback: also replace absolute /mnt/data/datasets with our REMOTE_DATA root.
+    `awk -vFS='\\t' -vOFS='\\t' -v base="$BASE" 'NR==1{ap=0; for(i=1;i<=NF;i++) if($i=="audio_path") ap=i; print; next} { if(ap){ n=$ap; sub(/^.*\\//,"",n); $ap=base "/wavs/" n } print }' "$BASE/dataset.tsv" > "$BASE/dataset.tsv.tmp" && mv "$BASE/dataset.tsv.tmp" "$BASE/dataset.tsv"`,
+    `sed -i 's|/mnt/data/datasets|${REMOTE_DATA.replace(/\/+$/,"")}|g' "$BASE/dataset.tsv" || true`,
   ];
 
   const trainLines = [
@@ -164,7 +174,7 @@ export async function POST(req: NextRequest) {
     "  --tokens-per-sample 15000 --max-tokens 15000 --update-freq 16 \\",
     '  --fp16 --n-ctx 15000 --user-dir "$REPO/research" \\',
     "  --validate-interval 1 --best-checkpoint-metric loss \\",
-    "  --patience 10 --max-epoch 200 \\",
+    "  --patience 3 --max-epoch 50 \\",
     '  > "$BASE/train.log" 2>&1 < /dev/null &',
     "",
     'echo $! > "$BASE/train.pid"',
@@ -186,7 +196,7 @@ export async function POST(req: NextRequest) {
     "export PYTHONUNBUFFERED=1",
     `export PYTHONPATH="$REPO/research:${pyFallback}"`,
     "",
-    // fetch
+    // fetch + fixups
     ...fetchLines,
     "",
     AUTO_START ? trainLines.join("\n") : 'echo "uploaded_only:1"',

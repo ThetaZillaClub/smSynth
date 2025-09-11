@@ -43,7 +43,7 @@ const BeginJourneyButton: FC = (): JSX.Element => (
       >
         <span className="relative z-10 flex flex-nowrap items-center space-x-1">
           <span className="transition-all duration-500">
-            Start For Free
+            Start Up
           </span>
           {/* Tight play icon (reduced perceived padding + responsive size) */}
           <svg
