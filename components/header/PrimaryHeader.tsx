@@ -112,7 +112,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         ) : (
           <>
             {/* NEW: Models link (only when logged in), placed to the left of "My Account" */}
-            {navLink('/model-library', 'Models')}
+            {navLink('/model-library', 'Model Library')}
 
             {pathname === '/profile' ? (
               <a
@@ -123,7 +123,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
                 My Account
               </a>
             ) : (
-              navLink('/profile', 'My Account')
+              navLink('/profile', 'Model Training')
             )}
             <SignOutButton />
           </>

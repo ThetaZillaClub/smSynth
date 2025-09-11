@@ -487,32 +487,37 @@ export default function Training() {
   useEffect(() => () => { clearTimers(); }, [clearTimers]);
 
   // Upload & Queue click
-  const handleQueue = useCallback(async () => {
-    try {
-      if (!tsvUrl || !tsvName || !takeUrls?.length) return;
-      setQueueErr(null);
-      setQueueing(true);
-      setJobInfo(null);
+const handleQueue = useCallback(async () => {
+  try {
+    if (!tsvUrl || !tsvName || !takeUrls?.length) return;
 
-      // Prefer ?model_id, else fallback to latest model row id
-      const chosenModelId = modelIdFromQuery ?? modelRowId;
-
-      const res = await uploadAndQueue({
-        modelId: chosenModelId,
-        subjectId,
-        genderLabel,
-        sessionId: sessionIdRef.current,
-        tsvUrl,
-        tsvName,
-        takeFiles: takeUrls,
-      });
-      setJobInfo({ jobId: res.jobId, remoteDir: res.remoteDir, started: res.started });
-    } catch (e: any) {
-      setQueueErr(e?.message || String(e));
-    } finally {
-      setQueueing(false);
+    const chosenModelId = modelIdFromQuery ?? modelRowId;
+    if (!chosenModelId) {
+      throw new Error("No model selected. Go to Model Settings to create one, then return to Training.");
     }
-  }, [modelIdFromQuery, modelRowId, subjectId, genderLabel, tsvUrl, tsvName, takeUrls, uploadAndQueue]);
+
+    setQueueErr(null);
+    setQueueing(true);
+    setJobInfo(null);
+
+    const res = await uploadAndQueue({
+      modelId: chosenModelId,
+      subjectId,
+      genderLabel,
+      sessionId: sessionIdRef.current,
+      tsvUrl,
+      tsvName,
+      takeFiles: takeUrls,
+    });
+
+    setJobInfo({ jobId: res.jobId, remoteDir: res.remoteDir, started: res.started });
+  } catch (e: any) {
+    setQueueErr(e?.message || String(e));
+  } finally {
+    setQueueing(false);
+  }
+}, [modelIdFromQuery, modelRowId, subjectId, genderLabel, tsvUrl, tsvName, takeUrls, uploadAndQueue]);
+
 
   const statusText =
     loopPhase === "record"

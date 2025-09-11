@@ -6,10 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 export type TakeLink = { name: string; url: string };
 
 export type UploadAndQueueInput = {
-  modelId: string | null;
+  modelId: string | null;              // must be provided for training
   subjectId: string | null;
   genderLabel: "male" | "female" | null;
-  sessionId: string;
+  sessionId: string;                    // session UUID from the recorder
   tsvUrl: string;
   tsvName: string;
   takeFiles: TakeLink[];
@@ -26,9 +26,7 @@ export default function useAutoSubmitTraining() {
 
     // fetch Blob from object URLs
     const tsvBlob = await (await fetch(tsvUrl)).blob();
-    const wavs = await Promise.all(
-      takes.map(async (t) => ({ name: t.name, blob: await (await fetch(t.url)).blob() }))
-    );
+    const wavs = await Promise.all(takes.map(async (t) => ({ name: t.name, blob: await (await fetch(t.url)).blob() })));
 
     // TSV
     const tsvKey = `${basePath}/${tsvName || "dataset.tsv"}`;
@@ -55,13 +53,13 @@ export default function useAutoSubmitTraining() {
 
   async function queueRemoteJob(payload: {
     bucket: string;
-    basePath: string;
+    basePath: string;   // "<modelId>/<sessionId>"
     tsvKey: string;
     wavKeys: string[];
-    modelId: string | null;
+    modelId: string;
+    sessionId: string;
     subjectId: string | null;
     genderLabel: "male" | "female" | null;
-    sessionId: string;
   }) {
     const res = await fetch("/api/training/queue", {
       method: "POST",
@@ -69,22 +67,26 @@ export default function useAutoSubmitTraining() {
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await res.text());
-    return res.json() as Promise<{ ok: true; jobId: string; remoteDir: string; trainLog?: string; started?: boolean }>;
+    return res.json() as Promise<{ ok: true; jobId: string; remoteDir: string; started?: boolean }>;
   }
 
-  /** Upload TSV+WAVs to Storage → tell GPU node to fetch via signed URLs → (optional) start training */
+  /** Upload TSV+WAVs to Storage → tell GPU node to fetch via signed URLs → start training */
   async function uploadAndQueue(input: UploadAndQueueInput) {
-    const basePath = `${input.modelId ?? "anon"}/${input.sessionId}`;
+    if (!input.modelId) {
+      throw new Error("No model selected. Create a model in Model Settings first.");
+    }
+    const basePath = `${input.modelId}/${input.sessionId}`;
     const { bucket, tsvKey, wavKeys } = await uploadToStorage(basePath, input.tsvUrl, input.tsvName, input.takeFiles);
+
     return queueRemoteJob({
       bucket,
       basePath,
       tsvKey,
       wavKeys,
       modelId: input.modelId,
+      sessionId: input.sessionId,
       subjectId: input.subjectId,
       genderLabel: input.genderLabel,
-      sessionId: input.sessionId,
     });
   }
 
