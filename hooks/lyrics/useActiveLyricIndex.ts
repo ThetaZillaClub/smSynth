@@ -1,8 +1,8 @@
-// hooks/training/useActiveLyricIndex.ts
+// hooks/lyrics/useActiveLyricIndex.ts
 "use client";
 
 import { useEffect, useState } from "react";
-import type { LoopPhase } from "./useTrainingLoop";
+import type { LoopPhase } from "@/hooks/gameplay/usePracticeLoop";
 
 type Opts = {
   step: "low" | "high" | "play";
@@ -14,10 +14,6 @@ type ReturnShape = {
   setActiveIndex: (i: number) => void;
 };
 
-/**
- * Keeps the highlighted lyric index, and auto-clears it whenever we
- * are not actively recording in the "play" step.
- */
 export default function useActiveLyricIndex({ step, loopPhase }: Opts): ReturnShape {
   const [activeIndex, setActiveIndex] = useState<number>(-1);
 

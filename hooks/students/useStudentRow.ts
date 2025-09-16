@@ -1,29 +1,34 @@
-// hooks/training/useTrainingModelRow.ts
+// hooks/students/useStudentRow.ts
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-type ModelRow = {
+// We still read from the "models" table for now.
+// Naming here is student-first; backend renaming comes later.
+type StudentRow = {
   id: string;
   creator_display_name: string;
   gender: "male" | "female" | "unspecified" | "other";
 };
 
 type ReturnShape = {
-  modelRowId: string | null;
-  subjectId: string | null;
+  studentRowId: string | null;
+  studentName: string | null;
   genderLabel: "male" | "female" | null;
   loading: boolean;
   error: string | null;
 };
 
-export default function useTrainingModelRow(opts: { modelIdFromQuery: string | null }): ReturnShape {
-  const { modelIdFromQuery } = opts;
+export default function useStudentRow(opts: {
+  /** Still coming from ?model_id for now (backend change later) */
+  studentIdFromQuery: string | null;
+}): ReturnShape {
+  const { studentIdFromQuery } = opts;
 
   const supabase = useMemo(() => createClient(), []);
-  const [modelRowId, setModelRowId] = useState<string | null>(null);
-  const [subjectId, setSubjectId] = useState<string | null>(null);
+  const [studentRowId, setStudentRowId] = useState<string | null>(null);
+  const [studentName, setStudentName] = useState<string | null>(null);
   const [genderLabel, setGenderLabel] = useState<"male" | "female" | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [err, setErr] = useState<string | null>(null);
@@ -39,23 +44,24 @@ export default function useTrainingModelRow(opts: { modelIdFromQuery: string | n
         const user = userRes.user;
         if (!user) {
           if (!alive) return;
-          setModelRowId(null);
-          setSubjectId(null);
+          setStudentRowId(null);
+          setStudentName(null);
           setGenderLabel(null);
           setLoading(false);
           return;
         }
 
-        let row: ModelRow | null = null;
+        let row: StudentRow | null = null;
 
-        if (modelIdFromQuery) {
+        if (studentIdFromQuery) {
+          // NOTE: still selecting from "models" table
           const { data, error } = await supabase
             .from("models")
             .select("id, creator_display_name, gender")
-            .eq("id", modelIdFromQuery)
+            .eq("id", studentIdFromQuery)
             .single();
           if (error) throw error;
-          row = data as ModelRow;
+          row = data as StudentRow;
         } else {
           const { data, error } = await supabase
             .from("models")
@@ -65,24 +71,24 @@ export default function useTrainingModelRow(opts: { modelIdFromQuery: string | n
             .limit(1)
             .maybeSingle();
           if (error) throw error;
-          row = (data ?? null) as ModelRow | null;
+          row = (data ?? null) as StudentRow | null;
         }
 
         if (!alive) return;
 
         if (row) {
-          setModelRowId(row.id);
-          setSubjectId(row.creator_display_name || null);
+          setStudentRowId(row.id);
+          setStudentName(row.creator_display_name || null);
           setGenderLabel(row.gender === "male" || row.gender === "female" ? row.gender : null);
         } else {
-          setModelRowId(null);
-          setSubjectId(null);
+          setStudentRowId(null);
+          setStudentName(null);
           setGenderLabel(null);
         }
       } catch (e: any) {
         if (!alive) return;
-        setModelRowId(null);
-        setSubjectId(null);
+        setStudentRowId(null);
+        setStudentName(null);
         setGenderLabel(null);
         setErr(e?.message || String(e));
       } finally {
@@ -92,7 +98,7 @@ export default function useTrainingModelRow(opts: { modelIdFromQuery: string | n
     return () => {
       alive = false;
     };
-  }, [modelIdFromQuery, supabase]);
+  }, [studentIdFromQuery, supabase]);
 
-  return { modelRowId, subjectId, genderLabel, loading, error: err };
+  return { studentRowId, studentName, genderLabel, loading, error: err };
 }

@@ -1,4 +1,4 @@
-// hooks/training/useTrainingWindows.ts
+// hooks/timing/usePracticeWindows.ts
 "use client";
 
 import { useMemo, useState } from "react";
@@ -7,15 +7,14 @@ type Opts = {
   searchParams: URLSearchParams;
   defaultOn?: number;
   defaultOff?: number;
-  min?: number;  // lower bound for both windows
-  max?: number;  // upper bound for both windows
+  min?: number;
+  max?: number;
 };
 
 /**
  * Parses ?on=&off= from the current URL once and exposes local state you can tweak in-UI.
- * Keeps page.tsx free of parsing logic while remaining testable.
  */
-export default function useTrainingWindows({
+export default function usePracticeWindows({
   searchParams,
   defaultOn = 8,
   defaultOff = 8,
@@ -33,7 +32,7 @@ export default function useTrainingWindows({
       off: clamp(parsePos(searchParams.get("off")) ?? defaultOff),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // parse only once on mount to avoid URL-driven re-renders
+  }, []); // parse only once
 
   const [windowOnSec, setWindowOnSec] = useState<number>(initial.on);
   const [windowOffSec, setWindowOffSec] = useState<number>(initial.off);

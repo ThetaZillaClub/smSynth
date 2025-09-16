@@ -1,4 +1,4 @@
-// hooks/training/useTakeProcessing.ts
+// hooks/audio/useTakeProcessing.ts
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -14,7 +14,7 @@ type Props = {
 
 type Result = { exactBlob: Blob; exactSamples: number } | null;
 
-/** Local helper — ensures exact take length by padding/truncating the resampled PCM. */
+/** Ensure exact take length by padding/truncating the resampled PCM. */
 function normalizeExactLength(
   pcm: Float32Array | null | undefined,
   sampleRate: number,
@@ -50,7 +50,9 @@ export default function useTakeProcessing({
 }: Props): Result {
   const [lastResult, setLastResult] = useState<Result>(null);
   const cbRef = useRef(onTakeReady);
-  useEffect(() => { cbRef.current = onTakeReady; }, [onTakeReady]);
+  useEffect(() => {
+    cbRef.current = onTakeReady;
+  }, [onTakeReady]);
 
   useEffect(() => {
     if (!wavBlob) return;
@@ -63,7 +65,7 @@ export default function useTakeProcessing({
     setLastResult(result);
     cbRef.current?.(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wavBlob]); // depends only on the signal that a new take exists
+  }, [wavBlob]); // only re-run when a new take appears
 
   return lastResult;
 }

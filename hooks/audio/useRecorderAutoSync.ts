@@ -1,4 +1,4 @@
-// hooks/training/useRecorderAutoSync.ts
+// hooks/audio/useRecorderAutoSync.ts
 "use client";
 
 import { useEffect, useRef } from "react";
@@ -32,13 +32,19 @@ export default function useRecorderAutoSync({
   const onStartedRef = useRef(onStarted);
   const onStoppedRef = useRef(onStopped);
 
-  useEffect(() => { onStartedRef.current = onStarted; }, [onStarted]);
-  useEffect(() => { onStoppedRef.current = onStopped; }, [onStopped]);
+  useEffect(() => {
+    onStartedRef.current = onStarted;
+  }, [onStarted]);
+
+  useEffect(() => {
+    onStoppedRef.current = onStopped;
+  }, [onStopped]);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
+      // If disabled, force stop.
       if (!enabled) {
         if (isRecording && !lockRef.current.stopping) {
           lockRef.current.stopping = true;
@@ -52,6 +58,7 @@ export default function useRecorderAutoSync({
         return;
       }
 
+      // Need to start
       if (shouldRecord && !isRecording && !lockRef.current.starting) {
         lockRef.current.starting = true;
         try {
@@ -63,6 +70,7 @@ export default function useRecorderAutoSync({
         return;
       }
 
+      // Need to stop
       if (!shouldRecord && isRecording && !lockRef.current.stopping) {
         lockRef.current.stopping = true;
         try {
@@ -74,6 +82,8 @@ export default function useRecorderAutoSync({
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [enabled, shouldRecord, isRecording, startRec, stopRec]);
 }

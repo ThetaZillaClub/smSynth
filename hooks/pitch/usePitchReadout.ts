@@ -1,4 +1,4 @@
-// hooks/training/usePitchReadout.ts
+// hooks/pitch/usePitchReadout.ts
 "use client";
 
 import { useMemo } from "react";

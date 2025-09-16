@@ -8,19 +8,26 @@ import GameLayout from "@/components/game-layout/GameLayout";
 import RangeCapture from "@/components/game-layout/range/RangeCapture";
 import TrainingSessionPanel from "@/components/game-layout/TrainingSessionPanel";
 
-import usePitchDetection from "@/hooks/usePitchDetection";
-import useWavRecorder from "@/hooks/useWavRecorder";
-import useUiRecordTimer from "@/hooks/training/useUiRecordTimer";
-import usePhraseLyrics from "@/hooks/training/usePhraseLyrics";
-import useTrainingModelRow from "@/hooks/training/useTrainingModelRow";
-import useRangeUpdater from "@/hooks/training/useRangeUpdater";
-import usePitchReadout from "@/hooks/training/usePitchReadout";
-import useRecorderAutoSync from "@/hooks/training/useRecorderAutoSync";
-import useTakeProcessing from "@/hooks/training/useTakeProcessing";
-import useTrainingWindows from "@/hooks/training/useTrainingWindows";
-import useTrainingLoop from "@/hooks/training/useTrainingLoop";
-import useTrainingSteps from "@/hooks/training/useTrainingSteps";
-import useActiveLyricIndex from "@/hooks/training/useActiveLyricIndex";
+// pitch
+import usePitchDetection from "@/hooks/pitch/usePitchDetection";
+import usePitchReadout from "@/hooks/pitch/usePitchReadout";
+
+// lyrics
+import usePhraseLyrics from "@/hooks/lyrics/usePhraseLyrics";
+import useActiveLyricIndex from "@/hooks/lyrics/useActiveLyricIndex";
+
+// audio
+import useWavRecorder from "@/hooks/audio/useWavRecorder";
+import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
+import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
+
+// gameplay / timing / students / range
+import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
+import usePracticeWindows from "@/hooks/timing/usePracticeWindows";
+import useUiRecordTimer from "@/hooks/timing/useUiRecordTimer";
+import useStudentRow from "@/hooks/students/useStudentRow";
+import useStudentRangeUpdater from "@/hooks/students/useStudentRangeUpdater";
+import useRangeSteps from "@/hooks/range/useRangeSteps";
 
 const TRAIN_LEAD_IN_SEC = 1.0;
 const NOTE_DUR_SEC = 0.5;
@@ -30,10 +37,12 @@ const CONF_THRESHOLD = 0.5;
 
 export default function Training() {
   const searchParams = useSearchParams();
-  const modelIdFromQuery = searchParams.get("model_id") || null;
 
-  // Windows (parse once from URL, editable locally if needed later)
-  const { windowOnSec, windowOffSec } = useTrainingWindows({
+  // Still reading from ?model_id until backend is renamed
+  const studentIdFromQuery = searchParams.get("model_id") || null;
+
+  // time windows (parse once from URL)
+  const { windowOnSec, windowOffSec } = usePracticeWindows({
     searchParams,
     defaultOn: 8,
     defaultOff: 8,
@@ -41,17 +50,17 @@ export default function Training() {
     max: 120,
   });
 
-  // Model row & Supabase range updater
-  const { modelRowId, subjectId, genderLabel } = useTrainingModelRow({ modelIdFromQuery });
-  const updateRange = useRangeUpdater(modelRowId);
+  // student row & range label updater (front-end naming only)
+  const { studentRowId, studentName, genderLabel } = useStudentRow({ studentIdFromQuery });
+  const updateRange = useStudentRangeUpdater(studentRowId);
 
-  // Steps + range confirmations
-  const { step, setStep, lowHz, highHz, canPlay, confirmLow, confirmHigh } = useTrainingSteps({
+  // steps + range confirmations
+  const { step, setStep, lowHz, highHz, canPlay, confirmLow, confirmHigh } = useRangeSteps({
     updateRange,
     a4Hz: 440,
   });
 
-  // Pitch engine + readouts
+  // pitch engine + readouts
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true,
     fps: 50,
@@ -66,17 +75,17 @@ export default function Training() {
     a4Hz: 440,
   });
 
-  // Phrase & lyrics
+  // phrase & lyrics
   const { phrase, words, reset: resetPhraseLyrics, advance: advancePhraseLyrics } =
     usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: NOTE_DUR_SEC });
 
-  // Recorder + UI timer
+  // recorder + UI timer
   const { isRecording, start: startRec, stop: stopRec, wavBlob, startedAtMs, sampleRateOut, pcm16k } =
     useWavRecorder({ sampleRateOut: 16000 });
   const uiRecordSec = useUiRecordTimer(isRecording, startedAtMs ?? null);
 
-  // Loop state machine
-  const loop = useTrainingLoop({
+  // loop state machine
+  const loop = usePracticeLoop({
     step,
     lowHz,
     highHz,
@@ -92,7 +101,7 @@ export default function Training() {
     onEnterPlay: resetPhraseLyrics,
   });
 
-  // Auto-sync recorder with loop's intent
+  // start/stop recorder based on loop intent
   useRecorderAutoSync({
     enabled: step === "play",
     shouldRecord: loop.shouldRecord,
@@ -101,7 +110,7 @@ export default function Training() {
     stopRec,
   });
 
-  // Sample-perfect WAV post-processing
+  // per-take WAV post-processing
   useTakeProcessing({
     wavBlob,
     sampleRateOut,
@@ -110,8 +119,8 @@ export default function Training() {
     onTakeReady: ({ exactBlob, exactSamples }) => {
       // eslint-disable-next-line no-console
       console.log("[musicianship] take ready", {
-        modelRowId,
-        subjectId,
+        studentRowId,
+        studentName,
         genderLabel,
         windowOnSec,
         windowOffSec,
@@ -123,7 +132,7 @@ export default function Training() {
     },
   });
 
-  // Active lyric highlight (auto-clears when not recording in play step)
+  // active lyric highlight
   const { activeIndex, setActiveIndex } = useActiveLyricIndex({
     step,
     loopPhase: loop.loopPhase,

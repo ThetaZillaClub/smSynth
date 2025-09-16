@@ -1,4 +1,4 @@
-// hooks/training/useUiRecordTimer.ts
+// hooks/timing/useUiRecordTimer.ts
 "use client";
 
 import { useEffect, useState } from "react";

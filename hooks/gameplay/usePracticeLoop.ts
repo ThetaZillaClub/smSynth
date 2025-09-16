@@ -1,4 +1,4 @@
-// hooks/training/useTrainingLoop.ts
+// hooks/gameplay/usePracticeLoop.ts
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,13 +32,13 @@ type ReturnShape = {
   looping: boolean;
   loopPhase: LoopPhase;
   takeCount: number;
-  shouldRecord: boolean;      // Feed this to useRecorderAutoSync
+  shouldRecord: boolean;
   statusText: string;
-  toggle: () => void;         // Play/Pause
-  clearAll: () => void;       // emergency stop
+  toggle: () => void;
+  clearAll: () => void;
 };
 
-export default function useTrainingLoop({
+export default function usePracticeLoop({
   step,
   lowHz,
   highHz,
@@ -69,14 +69,12 @@ export default function useTrainingLoop({
   }, []);
 
   const sessionStartMsRef = useRef<number | null>(null);
-
   const canPlay = step === "play" && lowHz != null && highHz != null;
   const hasPhrase = !!phrase && !!words;
 
-  /** Reset when entering "play" with valid bounds. */
+  // reset when entering play with valid bounds
   useEffect(() => {
     if (!canPlay) return;
-    // entering play or bounds changed -> reset session
     setTakeCount(0);
     clearTimers();
     setLooping(false);
@@ -104,7 +102,7 @@ export default function useTrainingLoop({
     setRunning(true);
   }, [canPlay, hasPhrase, maxTakes, maxSessionSec, clearTimers]);
 
-  /** Exact end of record window when recorder has actually started. */
+  // exact end of record window
   useEffect(() => {
     if (loopPhase !== "record") {
       if (recordTimerRef.current != null) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
@@ -114,7 +112,7 @@ export default function useTrainingLoop({
       const now = performance.now();
       const delayMs = Math.max(0, windowOnSec * 1000 - (now - startedAtMs));
       recordTimerRef.current = window.setTimeout(() => {
-        setRunning(false);    // request recorder stop (via shouldRecord -> useRecorderAutoSync)
+        setRunning(false);
         setLoopPhase("rest");
         onAdvancePhrase();
         setTakeCount((n) => n + 1);
@@ -122,7 +120,7 @@ export default function useTrainingLoop({
     }
   }, [loopPhase, isRecording, startedAtMs, windowOnSec, onAdvancePhrase]);
 
-  /** Rest window -> next take (if still looping). */
+  // rest -> next take (if looping)
   useEffect(() => {
     if (loopPhase !== "rest" || !looping) {
       if (restTimerRef.current != null) { clearTimeout(restTimerRef.current); restTimerRef.current = null; }
@@ -144,7 +142,7 @@ export default function useTrainingLoop({
     }
   }, [loopPhase, looping, isRecording, startRecordPhase, windowOffSec, maxTakes, clearTimers]);
 
-  /** Safety cap. */
+  // cap guard
   useEffect(() => {
     if (takeCount >= maxTakes) {
       setLooping(false);
@@ -154,7 +152,7 @@ export default function useTrainingLoop({
     }
   }, [takeCount, maxTakes, clearTimers]);
 
-  /** Stop if phrase disappears or canPlay becomes false. */
+  // stop if cannot play
   useEffect(() => {
     if (!canPlay) {
       if (looping) {
@@ -166,7 +164,7 @@ export default function useTrainingLoop({
     }
   }, [canPlay, looping, clearTimers]);
 
-  /** Public controls */
+  // public controls
   const toggle = useCallback(() => {
     if (!canPlay) return;
     if (!looping) {
@@ -188,7 +186,7 @@ export default function useTrainingLoop({
     setLoopPhase("idle");
   }, [clearTimers]);
 
-  /** Derived */
+  // derived
   const statusText = useMemo(() => {
     return loopPhase === "record"
       ? (isRecording ? "Recording…" : "Playing…")
@@ -197,7 +195,7 @@ export default function useTrainingLoop({
       : "Idle";
   }, [loopPhase, looping, isRecording]);
 
-  // Cleanup
+  // cleanup
   useEffect(() => () => { clearTimers(); }, [clearTimers]);
 
   return {

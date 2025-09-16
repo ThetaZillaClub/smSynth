@@ -1,4 +1,4 @@
-// hooks/training/useTrainingSteps.ts
+// hooks/range/useRangeSteps.ts
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
@@ -22,7 +22,7 @@ type ReturnShape = {
   confirmHigh: (hz: number) => void;
 };
 
-export default function useTrainingSteps({
+export default function useRangeSteps({
   updateRange,
   a4Hz = 440,
 }: Opts): ReturnShape {
@@ -35,10 +35,7 @@ export default function useTrainingSteps({
   const confirmLow = useCallback(
     (hz: number) => {
       setLowHz(hz);
-      const { name, octave } = hzToNoteName(hz, a4Hz, {
-        useSharps: true,
-        octaveAnchor: "A",
-      });
+      const { name, octave } = hzToNoteName(hz, a4Hz, { useSharps: true, octaveAnchor: "A" });
       const label = `${name}${octave}`;
       void updateRange("low", label);
       setStep("high");
@@ -49,10 +46,7 @@ export default function useTrainingSteps({
   const confirmHigh = useCallback(
     (hz: number) => {
       setHighHz(hz);
-      const { name, octave } = hzToNoteName(hz, a4Hz, {
-        useSharps: true,
-        octaveAnchor: "A",
-      });
+      const { name, octave } = hzToNoteName(hz, a4Hz, { useSharps: true, octaveAnchor: "A" });
       const label = `${name}${octave}`;
       void updateRange("high", label);
       setStep("play");
