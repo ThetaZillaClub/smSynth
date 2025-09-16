@@ -1,3 +1,4 @@
+// components/game-layout/range/RangeCapture.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
@@ -9,8 +10,6 @@ type Props = {
   active: boolean;
 
   pitchHz: number | null | undefined;
-  confidence: number;
-  confThreshold?: number; // present but not used for gating here (hook already gates)
 
   bpm?: number;             // default 60
   beatsRequired?: number;   // default 1 (≈1 second at 60 BPM)
@@ -24,8 +23,6 @@ export default function RangeCapture({
   mode,
   active,
   pitchHz,
-  confidence,
-  confThreshold = 0.5,
   bpm = 60,
   beatsRequired = 1,
   centsWindow = 75,
@@ -265,15 +262,14 @@ export default function RangeCapture({
   // Use visualSec for both bar and counter
   const progressPct = Math.max(0, Math.min(100, (visualSec / targetSec) * 100));
 
- const display =
-   capturedHz != null
-     ? (() => {
-         const n = hzToNoteName(capturedHz, a4Hz, { useSharps: true, octaveAnchor: "A" });
-         const dispOct = n.octave;
-         return `${n.name}${dispOct} • ${capturedHz.toFixed(1)} Hz`;
-       })()
-     : "—";
-
+  const display =
+    capturedHz != null
+      ? (() => {
+          const n = hzToNoteName(capturedHz, a4Hz, { useSharps: true, octaveAnchor: "A" });
+          const dispOct = n.octave;
+          return `${n.name}${dispOct} • ${capturedHz.toFixed(1)} Hz`;
+        })()
+      : "—";
 
   return (
     <div className="w-full max-w-5xl rounded-md border border-[#d2d2d2] bg-[#ebebeb] p-6">

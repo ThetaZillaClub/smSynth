@@ -8,27 +8,23 @@ import { createClient } from "@/lib/supabase/client";
 import GameLayout from "@/components/game-layout/GameLayout";
 import RangeCapture from "@/components/game-layout/range/RangeCapture";
 import TrainingSessionPanel from "@/components/game-layout/TrainingSessionPanel";
-import ExportModal from "@/components/game-layout/ExportModal";
 
 import usePitchDetection from "@/hooks/usePitchDetection";
 import useWavRecorder from "@/hooks/useWavRecorder";
-import useFixedFpsTrace from "@/hooks/useFixedFpsTrace";
-import useSessionPackager from "@/hooks/training/useSessionPackager";
 import useUiRecordTimer from "@/hooks/training/useUiRecordTimer";
 import usePhraseLyrics from "@/hooks/training/usePhraseLyrics";
 
-import useAutoSubmitTraining from "@/hooks/training/useAutoSubmitTraining";
-
 import { hzToNoteName } from "@/utils/pitch/pitchMath";
-import { APP_BUILD, CONF_THRESHOLD } from "@/utils/training/constants";
+import { encodeWavPCM16 } from "@/utils/audio/wav";
 
-// timing
-const RECORD_SEC = 8;
-const REST_SEC = 8;
+// Defaults (can be overridden via ?on=&off=)
+const DEFAULT_ON_SEC = 8;
+const DEFAULT_OFF_SEC = 8;
 const TRAIN_LEAD_IN_SEC = 1.0;
 const NOTE_DUR_SEC = 0.5;
 const MAX_TAKES = 24;
 const MAX_SESSION_SEC = 15 * 60;
+const CONF_THRESHOLD = 0.5;
 
 type ModelRow = {
   id: string;
@@ -36,16 +32,44 @@ type ModelRow = {
   gender: "male" | "female" | "unspecified" | "other";
 };
 
+// Ensure exact take length by padding/truncating the resampled PCM
+function normalizeExactLength(
+  pcm: Float32Array | null,
+  sampleRate: number,
+  targetSec: number
+): { pcmExact: Float32Array; numSamples: number } {
+  const Nwant = Math.max(0, Math.round(targetSec * sampleRate));
+  if (!pcm || pcm.length === 0) {
+    return { pcmExact: new Float32Array(Nwant), numSamples: Nwant };
+  }
+  if (pcm.length === Nwant) {
+    return { pcmExact: pcm, numSamples: Nwant };
+  }
+  if (pcm.length > Nwant) {
+    return { pcmExact: pcm.slice(0, Nwant), numSamples: Nwant };
+  }
+  const out = new Float32Array(Nwant);
+  out.set(pcm, 0);
+  return { pcmExact: out, numSamples: Nwant };
+}
+
 export default function Training() {
   const searchParams = useSearchParams();
   const modelIdFromQuery = searchParams.get("model_id") || null;
 
-  const supabase = useMemo(() => createClient(), []);
-  const { uploadAndQueue } = useAutoSubmitTraining();
+  // Configurable window (query overrides for quick playtesting)
+  const parsePos = (v: string | null) => {
+    const n = v ? Number(v) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const windowOnSec = parsePos(searchParams.get("on")) ?? DEFAULT_ON_SEC;
+  const windowOffSec = parsePos(searchParams.get("off")) ?? DEFAULT_OFF_SEC;
 
-  // model → subject + gender + model id (for range updates)
+  const supabase = useMemo(() => createClient(), []);
+
+  // model → subject + gender + model id (for range updates / later repurposing)
   const [modelRowId, setModelRowId] = useState<string | null>(null);
-  const [subjectId, setSubjectId] = useState<string | null>(null); // e.g., "ThetaZilla"
+  const [subjectId, setSubjectId] = useState<string | null>(null);
   const [genderLabel, setGenderLabel] = useState<"male" | "female" | null>(null);
 
   // fetch model row (by ?model_id, else latest for user)
@@ -114,62 +138,21 @@ export default function Training() {
     words,
     reset: resetPhraseLyrics,
     advance: advancePhraseLyrics,
-    getLyricSeed,
   } = usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: NOTE_DUR_SEC });
 
-  // recorder + traces
+  // recorder
   const {
     isRecording,
     start: startRec,
     stop: stopRec,
     wavBlob,
-    durationSec,
     startedAtMs,
     sampleRateOut,
-    deviceSampleRateHz,
-    workletBufferSize,
-    baseLatencySec,
-    metrics,
-    numSamplesOut,
     pcm16k,
-    resampleMethod,
   } = useWavRecorder({ sampleRateOut: 16000 });
 
-  const { hzArr, confArr, rmsDbArr, setLatest, reset: resetFixed } = useFixedFpsTrace(isRecording, 50);
-  useEffect(() => {
-    setLatest(typeof pitch === "number" ? pitch : null, confidence ?? 0);
-  }, [pitch, confidence, setLatest]);
-
-  // session packager (TSV + per-take WAVs)
-  const sessionIdRef = useRef<string>(crypto.randomUUID());
-  const {
-    packagedCount,
-    inFlight,
-    beginTake,
-    completeTakeFromBlob,
-    resetSession,
-    finalizeSession,
-    showExport,
-    setShowExport,
-    tsvUrl,
-    tsvName,
-    takeUrls,
-  } = useSessionPackager({
-    appBuild: APP_BUILD,
-    sessionId: sessionIdRef.current,
-    modelId: modelIdFromQuery ?? undefined, // use model_id in TSV filename (if present)
-  });
-
-  // keep latest counts in a ref to avoid stale-closure in timers
-  const countsRef = useRef({ packagedCount: 0, inFlight: 0 });
-  useEffect(() => {
-    countsRef.current.packagedCount = packagedCount;
-    countsRef.current.inFlight = inFlight;
-  }, [packagedCount, inFlight]);
-
-  // track current take id & finalization guard
-  const curTakeIdRef = useRef<string | null>(null);
-  const finalizedOnceRef = useRef(false);
+  // wall-clock seconds tied to RECORDER start
+  const uiRecordSec = useUiRecordTimer(isRecording, startedAtMs ?? null);
 
   // loop flags
   const [running, setRunning] = useState(false);
@@ -177,10 +160,12 @@ export default function Training() {
   const [loopPhase, setLoopPhase] = useState<"idle" | "record" | "rest">("idle");
   const [activeWord, setActiveWord] = useState<number>(-1);
 
-  // queue state
-  const [queueing, setQueueing] = useState(false);
-  const [queueErr, setQueueErr] = useState<string | null>(null);
-  const [jobInfo, setJobInfo] = useState<{ jobId: string; remoteDir: string; started?: boolean } | null>(null);
+  // take count + elapsed guard
+  const [takeCount, setTakeCount] = useState(0);
+  const countsRef = useRef({ takeCount: 0 });
+  useEffect(() => {
+    countsRef.current.takeCount = takeCount;
+  }, [takeCount]);
 
   // timers/guards
   const recordTimerRef = useRef<number | null>(null);
@@ -196,11 +181,8 @@ export default function Training() {
     }
   }, []);
 
-  // guard time window
+  // session window guard
   const sessionStartMsRef = useRef<number | null>(null);
-
-  // nice wall-clock seconds tied to RECORDER start (recStartMs)
-  const uiRecordSec = useUiRecordTimer(isRecording, startedAtMs ?? null);
 
   // mic/pitch text
   const micText = error ? `Mic error: ${String(error)}` : isReady ? "Mic ready" : "Starting mic…";
@@ -214,15 +196,14 @@ export default function Training() {
         })()
       : "—";
 
-  // on enter play: reset session + phrase/lyrics
+  // on enter play: reset session state
   useEffect(() => {
     if (step === "play" && lowHz != null && highHz != null) {
-      resetSession();
-      setQueueErr(null);
-      setJobInfo(null);
-      setQueueing(false);
-      finalizedOnceRef.current = false;
-      curTakeIdRef.current = null;
+      setTakeCount(0);
+      clearTimers();
+      setLooping(false);
+      setRunning(false);
+      setLoopPhase("idle");
       resetPhraseLyrics();
       sessionStartMsRef.current = performance.now();
     }
@@ -235,7 +216,6 @@ export default function Training() {
     (async () => {
       if (step === "play" && running && !isRecording && !recLockRef.current.starting) {
         recLockRef.current.starting = true;
-        resetFixed();
         await startRec();
         recLockRef.current.starting = false;
         return;
@@ -246,20 +226,7 @@ export default function Training() {
         recLockRef.current.stopping = false;
       }
     })();
-  }, [step, running, isRecording, startRec, stopRec, resetFixed]);
-
-  // TS-safe view over PCM (16k mono)
-  const pcmView: Float32Array | null = useMemo(() => {
-    if (!pcm16k) return null;
-    try {
-      const buf = (pcm16k as any).buffer as ArrayBuffer;
-      const offset = (pcm16k as any).byteOffset ?? 0;
-      const length = (pcm16k as any).length ?? 0;
-      return new Float32Array(buf, offset * 4, length);
-    } catch {
-      return (pcm16k as unknown) as Float32Array;
-    }
-  }, [pcm16k]);
+  }, [step, running, isRecording, startRec, stopRec]);
 
   // write range_low / range_high to Supabase
   const updateRange = useCallback(
@@ -267,53 +234,27 @@ export default function Training() {
       if (!modelRowId) return;
       const payload = which === "low" ? { range_low: label } : { range_high: label };
       const { error: updErr } = await supabase.from("models").update(payload).eq("id", modelRowId);
-      if (updErr) {
-        // Don't break UX; just log. RLS should protect cross-user writes.
-        console.warn(`[training] Failed to update ${which} range:`, updErr?.message || updErr);
-      }
+      if (updErr) console.warn(`[training] Failed to update ${which} range:`, updErr?.message || updErr);
     },
     [modelRowId, supabase]
   );
 
-  // finalize once all in-flight packages complete
-  const finalizeWhenReady = useCallback(() => {
-    if (finalizedOnceRef.current) return;
-    const poll = () => {
-      const { inFlight: ifl } = countsRef.current;
-      if (ifl > 0) {
-        setTimeout(poll, 100);
-      } else {
-        if (!finalizedOnceRef.current) {
-          finalizedOnceRef.current = true;
-          finalizeSession(sampleRateOut || 16000);
-        }
-      }
-    };
-    poll();
-  }, [finalizeSession, sampleRateOut]);
-
   const startRecordPhase = useCallback(() => {
     if (lowHz == null || highHz == null || !phrase || !words) return;
 
-    const nowCounts = countsRef.current;
     const elapsed = sessionStartMsRef.current ? (performance.now() - sessionStartMsRef.current) / 1000 : 0;
-
-    if (nowCounts.packagedCount + nowCounts.inFlight >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
+    if (countsRef.current.takeCount >= MAX_TAKES || elapsed >= MAX_SESSION_SEC) {
       setLooping(false);
       setRunning(false);
       setLoopPhase("idle");
       clearTimers();
-      finalizeWhenReady();
       return;
     }
-
-    const takeId = beginTake(phrase, words);
-    curTakeIdRef.current = takeId;
     setLoopPhase("record");
     setRunning(true);
-  }, [lowHz, highHz, phrase, words, clearTimers, beginTake, finalizeWhenReady]);
+  }, [lowHz, highHz, phrase, words, clearTimers]);
 
-  // EXACT end of record window
+  // EXACT end of record window (aligned to recorder start)
   useEffect(() => {
     if (loopPhase !== "record") {
       if (recordTimerRef.current != null) {
@@ -324,7 +265,7 @@ export default function Training() {
     }
     if (isRecording && startedAtMs != null && recordTimerRef.current == null) {
       const now = performance.now();
-      const delayMs = Math.max(0, RECORD_SEC * 1000 - (now - startedAtMs));
+      const delayMs = Math.max(0, windowOnSec * 1000 - (now - startedAtMs));
       recordTimerRef.current = window.setTimeout(() => {
         if (!recLockRef.current.stopping) {
           recLockRef.current.stopping = true;
@@ -338,9 +279,9 @@ export default function Training() {
         advancePhraseLyrics(); // prep next while we rest
       }, delayMs);
     }
-  }, [loopPhase, isRecording, startedAtMs, advancePhraseLyrics, stopRec]);
+  }, [loopPhase, isRecording, startedAtMs, advancePhraseLyrics, stopRec, windowOnSec]);
 
-  // REST → next take (gated until inFlight === 0)
+  // REST → next take
   useEffect(() => {
     if (loopPhase !== "rest" || !looping) {
       if (restTimerRef.current != null) {
@@ -350,39 +291,30 @@ export default function Training() {
       return;
     }
     if (!isRecording && restTimerRef.current == null) {
-      const pre = countsRef.current;
-      if (pre.packagedCount + pre.inFlight >= MAX_TAKES) return;
-
+      if (countsRef.current.takeCount >= MAX_TAKES) return;
       restTimerRef.current = window.setTimeout(function tick() {
         restTimerRef.current = null;
-
-        const cur = countsRef.current;
-        if (cur.packagedCount + cur.inFlight >= MAX_TAKES) {
+        if (countsRef.current.takeCount >= MAX_TAKES) {
           setLooping(false);
           setRunning(false);
           setLoopPhase("idle");
           clearTimers();
-          finalizeWhenReady();
-        } else if (cur.inFlight > 0) {
-          // Wait for packaging to complete before starting next
-          restTimerRef.current = window.setTimeout(tick, 200);
         } else {
           startRecordPhase();
         }
-      }, REST_SEC * 1000);
+      }, windowOffSec * 1000);
     }
-  }, [loopPhase, looping, isRecording, clearTimers, finalizeWhenReady, startRecordPhase]);
+  }, [loopPhase, looping, isRecording, clearTimers, startRecordPhase, windowOffSec]);
 
-  // central cap guard
+  // cap guard
   useEffect(() => {
-    if (packagedCount >= MAX_TAKES) {
+    if (takeCount >= MAX_TAKES) {
       setLooping(false);
       setRunning(false);
       setLoopPhase("idle");
       clearTimers();
-      finalizeWhenReady();
     }
-  }, [packagedCount, clearTimers, finalizeWhenReady]);
+  }, [takeCount, clearTimers]);
 
   // play/pause button
   const handleToggle = useCallback(() => {
@@ -396,9 +328,8 @@ export default function Training() {
       clearTimers();
       setRunning(false);
       setLoopPhase("idle");
-      finalizeWhenReady();
     }
-  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase, finalizeWhenReady]);
+  }, [looping, step, lowHz, highHz, clearTimers, startRecordPhase]);
 
   // stop if phrase disappears
   useEffect(() => {
@@ -408,133 +339,47 @@ export default function Training() {
         clearTimers();
         setRunning(false);
         setLoopPhase("idle");
-        finalizeWhenReady();
       }
     }
-  }, [step, lowHz, highHz, looping, clearTimers, finalizeWhenReady]);
+  }, [step, lowHz, highHz, looping, clearTimers]);
 
-  // package ONE take per wavBlob
+  // When a take finishes, bump count and produce sample-perfect WAV
   useEffect(() => {
     if (!wavBlob) return;
+    setTakeCount((n) => n + 1);
 
+    // Sample-perfect post-processing (pad/truncate to exact windowOnSec at output SR)
     const sr = sampleRateOut || 16000;
-    const wantSamples = Math.max(0, Math.round(RECORD_SEC * sr));
-    const srcLen = pcmView?.length ?? 0;
+    const { pcmExact, numSamples } = normalizeExactLength(pcm16k, sr, windowOnSec);
+    const exactBlob = encodeWavPCM16(pcmExact, sr);
 
-    let outPcm: Float32Array | null = null;
-    let outLen = srcLen;
-    let outDur = durationSec;
-
-    if (pcmView && srcLen > 0) {
-      if (srcLen > wantSamples) {
-        outPcm = pcmView.slice(0, wantSamples);
-        outLen = wantSamples;
-        outDur = wantSamples / sr;
-      } else if (srcLen < wantSamples) {
-        const pad = new Float32Array(wantSamples);
-        pad.set(pcmView, 0);
-        outPcm = pad;
-        outLen = wantSamples;
-        outDur = wantSamples / sr;
-      } else {
-        outPcm = pcmView;
-        outLen = srcLen;
-        outDur = srcLen / sr;
-      }
-    } else {
-      outPcm = pcmView || null;
-      outLen = srcLen;
-      outDur = srcLen > 0 ? srcLen / sr : durationSec;
-    }
-
-    const takeId = curTakeIdRef.current;
-    if (!takeId) return;
-
-    completeTakeFromBlob(takeId, wavBlob, {
-      traces: { hzArr, confArr, rmsDbArr, fps: 50 },
-      audio: {
-        sampleRateOut: sr,
-        // exact post-slice/pad length for precise accounting
-        numSamplesOut: outLen,
-        durationSec: outDur,
-        deviceSampleRateHz: deviceSampleRateHz ?? 48000,
-        baseLatencySec: baseLatencySec ?? null,
-        workletBufferSize: workletBufferSize ?? null,
-        resampleMethod,
-        pcmView: outPcm,
-        metrics: metrics ?? null,
-      },
-      prompt: {
-        a4Hz: 440,
-        lowHz: lowHz ?? null,
-        highHz: highHz ?? null,
-        leadInSec: TRAIN_LEAD_IN_SEC,
-        bpm: 120,
-        lyricStrategy: "mixed",
-        lyricSeed: getLyricSeed(),
-        scale: "major",
-      },
-      timing: { playStartMs: startedAtMs ?? null, recStartMs: startedAtMs ?? null },
-      controls: { genderLabel },
-      // use model creator_display_name as subject_id in take.json
-      subjectId: subjectId ?? undefined,
+    // eslint-disable-next-line no-console
+    console.log("[musicianship] take ready", {
+      modelRowId,
+      subjectId,
+      genderLabel,
+      windowOnSec,
+      windowOffSec,
+      sampleRateOut: sr,
+      exactSamples: numSamples,
+      wavBytesRaw: (wavBlob as Blob).size,
+      wavBytesExact: exactBlob.size,
     });
-    curTakeIdRef.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wavBlob]);
+  }, [wavBlob, sampleRateOut, pcm16k, windowOnSec, windowOffSec, modelRowId, subjectId, genderLabel]);
 
   // cleanup timers on unmount
   useEffect(() => () => { clearTimers(); }, [clearTimers]);
 
-  // Upload & Queue click
-const handleQueue = useCallback(async () => {
-  try {
-    if (!tsvUrl || !tsvName || !takeUrls?.length) return;
-
-    const chosenModelId = modelIdFromQuery ?? modelRowId;
-    if (!chosenModelId) {
-      throw new Error("No model selected. Go to Model Settings to create one, then return to Training.");
-    }
-
-    setQueueErr(null);
-    setQueueing(true);
-    setJobInfo(null);
-
-    const res = await uploadAndQueue({
-      modelId: chosenModelId,
-      subjectId,
-      genderLabel,
-      sessionId: sessionIdRef.current,
-      tsvUrl,
-      tsvName,
-      takeFiles: takeUrls,
-    });
-
-    setJobInfo({ jobId: res.jobId, remoteDir: res.remoteDir, started: res.started });
-  } catch (e: any) {
-    setQueueErr(e?.message || String(e));
-  } finally {
-    setQueueing(false);
-  }
-}, [modelIdFromQuery, modelRowId, subjectId, genderLabel, tsvUrl, tsvName, takeUrls, uploadAndQueue]);
-
-
   const statusText =
-    loopPhase === "record"
-      ? isRecording
-        ? "Recording…"
-        : "Playing…"
-      : loopPhase === "rest" && looping
-      ? "Breather…"
-      : "Idle";
-
-  const micReady = isReady && !error;
+    loopPhase === "record" ? (isRecording ? "Recording…" : "Playing…")
+    : loopPhase === "rest" && looping ? "Breather…"
+    : "Idle";
 
   return (
     <>
       <GameLayout
         title="Training"
-        micText={micReady ? micText : micText}
+        micText={micText}
         error={error}
         running={running}
         uiRunning={looping}
@@ -556,8 +401,6 @@ const handleQueue = useCallback(async () => {
             mode="low"
             active
             pitchHz={typeof pitch === "number" ? pitch : null}
-            confidence={confidence}
-            confThreshold={CONF_THRESHOLD}
             bpm={60}
             beatsRequired={1}
             centsWindow={75}
@@ -577,8 +420,6 @@ const handleQueue = useCallback(async () => {
             mode="high"
             active
             pitchHz={typeof pitch === "number" ? pitch : null}
-            confidence={confidence}
-            confThreshold={CONF_THRESHOLD}
             bpm={60}
             beatsRequired={1}
             centsWindow={75}
@@ -597,27 +438,14 @@ const handleQueue = useCallback(async () => {
           <TrainingSessionPanel
             statusText={statusText}
             isRecording={isRecording}
-            uiRecordSec={Math.min(uiRecordSec, RECORD_SEC)}
-            recordSec={RECORD_SEC}
-            restSec={REST_SEC}
+            uiRecordSec={Math.min(uiRecordSec, windowOnSec)}
+            recordSec={windowOnSec}
+            restSec={windowOffSec}
             maxTakes={MAX_TAKES}
             maxSessionSec={MAX_SESSION_SEC}
           />
         )}
       </GameLayout>
-
-      <ExportModal
-        open={showExport}
-        tsvUrl={tsvUrl ?? undefined}
-        tsvName={tsvName ?? undefined}
-        takeFiles={takeUrls ?? undefined}
-        onClose={() => setShowExport(false)}
-        // Queue controls
-        onQueue={handleQueue}
-        queueing={queueing}
-        queueError={queueErr}
-        jobInfo={jobInfo}
-      />
     </>
   );
 }
