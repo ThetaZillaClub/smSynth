@@ -1,8 +1,9 @@
+// components/piano-roll/PianoRollCanvas.tsx
 "use client";
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import DynamicOverlay from "./DynamicOverlay";
-import type { Phrase as PhraseT } from "./types";
+import type { Phrase as PhraseT } from "@/utils/piano-roll/types";
 
 /** Re-export so upstream can import { type Phrase } from this file */
 export type Phrase = PhraseT;

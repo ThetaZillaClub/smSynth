@@ -1,9 +1,10 @@
+// components/piano-roll/DynamicOverlay.tsx
 "use client";
 
 import React, { useEffect, useRef, useCallback, useMemo } from "react";
-import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS } from "./scale";
+import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS } from "@/utils/piano-roll/scale";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
-import type { Phrase } from "./types";
+import type { Phrase } from "@/utils/piano-roll/types";
 
 type Props = {
   width: number;
@@ -121,8 +122,8 @@ export default function DynamicOverlay({
         ctx.stroke();
 
         if (isC) {
-          const cell = midiCellRect(midi, height, minMidi, maxMidi);
-          const centerY = cell.y + cell.h / 2;
+          const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
+          const centerY = y + h / 2;
           ctx.fillStyle = PR_COLORS.label;
           ctx.font = "11px ui-sans-serif, system-ui, -apple-system, Segoe UI";
           ctx.textAlign = "left";
