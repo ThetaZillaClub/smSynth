@@ -1,52 +1,41 @@
-// components/game-layout/training/TrainingGame.tsx
+// components/training/TrainingGame.tsx
 "use client";
 
 import React from "react";
-import { useSearchParams } from "next/navigation";
 
 import GameLayout from "./layout/GameLayout";
 import RangeCapture from "./layout/range/RangeCapture";
 import TrainingSessionPanel from "./layout/session/TrainingSessionPanel";
 
-// hooks (unchanged locations)
+// hooks
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import usePhraseLyrics from "@/hooks/lyrics/usePhraseLyrics";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
 import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
-import usePracticeWindows from "@/hooks/timing/usePracticeWindows";
 import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRangeUpdater from "@/hooks/students/useStudentRangeUpdater";
 import useRangeSteps from "./layout/range/useRangeSteps";
 
+import useTransport from "@/hooks/transport/useTransport";
+import { secondsPerBeat, beatsToSeconds, barsToBeats } from "@/utils/time/tempo";
+
 type Props = {
   title?: string;
+  /** Optional: if you're rendering this on a student page, pass the studentId here instead of using query. */
+  studentId?: string | null;
 };
 
-const TRAIN_LEAD_IN_SEC = 1.0;
-const NOTE_DUR_SEC = 0.5;
 const MAX_TAKES = 24;
 const MAX_SESSION_SEC = 15 * 60;
 const CONF_THRESHOLD = 0.5;
 
-export default function TrainingGame({ title = "Training" }: Props) {
-  const searchParams = useSearchParams();
-
-  // Still reading from ?model_id until backend is renamed
-  const studentIdFromQuery = searchParams.get("model_id") || null;
-
-  // time windows (parse once from URL)
-  const { windowOnSec, windowOffSec } = usePracticeWindows({
-    searchParams,
-    defaultOn: 8,
-    defaultOff: 8,
-    min: 1,
-    max: 120,
-  });
-
+export default function TrainingGame({ title = "Training", studentId = null }: Props) {
   // student row & range label updater (front-end naming only)
-  const { studentRowId, studentName, genderLabel } = useStudentRow({ studentIdFromQuery });
+  const { studentRowId, studentName, genderLabel } = useStudentRow({
+    studentIdFromQuery: studentId,
+  });
   const updateRange = useStudentRangeUpdater(studentRowId);
 
   // steps + range confirmations
@@ -54,6 +43,13 @@ export default function TrainingGame({ title = "Training" }: Props) {
     updateRange,
     a4Hz: 440,
   });
+
+  // global transport (SPA state)
+  const { bpm, ts, leadBeats, restBars } = useTransport();
+  const secPerBeat = secondsPerBeat(bpm, ts.den);
+  const leadInSec = beatsToSeconds(leadBeats, bpm, ts.den);
+  const restBeats = barsToBeats(restBars, ts.num);
+  const restSec = beatsToSeconds(restBeats, bpm, ts.den);
 
   // pitch engine
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
@@ -65,9 +61,9 @@ export default function TrainingGame({ title = "Training" }: Props) {
   });
   const liveHz = typeof pitch === "number" ? pitch : null;
 
-  // phrase & lyrics
+  // phrase & lyrics — baseline: one note per beat (rhythm generator can swap in later)
   const { phrase, words, reset: resetPhraseLyrics, advance: advancePhraseLyrics } =
-    usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: NOTE_DUR_SEC });
+    usePhraseLyrics({ lowHz, highHz, lyricStrategy: "mixed", noteDurSec: secPerBeat });
 
   // recorder
   const {
@@ -80,6 +76,11 @@ export default function TrainingGame({ title = "Training" }: Props) {
     pcm16k,
   } = useWavRecorder({ sampleRateOut: 16000 });
 
+  // exercise length = phrase length; total take = lead-in + phrase
+  const phraseSec =
+    (phrase?.durationSec && Number.isFinite(phrase.durationSec) ? phrase.durationSec : secPerBeat * 8);
+  const totalTakeSec = leadInSec + phraseSec;
+
   // loop state machine
   const loop = usePracticeLoop({
     step,
@@ -87,8 +88,8 @@ export default function TrainingGame({ title = "Training" }: Props) {
     highHz,
     phrase,
     words,
-    windowOnSec,
-    windowOffSec,
+    windowOnSec: totalTakeSec,    // record through count-in + phrase (we trim the head)
+    windowOffSec: restSec,        // musical rest based on TS & BPM
     maxTakes: MAX_TAKES,
     maxSessionSec: MAX_SESSION_SEC,
     isRecording,
@@ -106,20 +107,25 @@ export default function TrainingGame({ title = "Training" }: Props) {
     stopRec,
   });
 
-  // per-take WAV post-processing
+  // per-take WAV post-processing (trim off the musical count-in)
   useTakeProcessing({
     wavBlob,
     sampleRateOut,
     pcm16k,
-    windowOnSec,
+    windowOnSec: phraseSec,
+    trimHeadSec: leadInSec,
     onTakeReady: ({ exactBlob, exactSamples }) => {
       // eslint-disable-next-line no-console
       console.log("[musicianship] take ready", {
         studentRowId,
         studentName,
         genderLabel,
-        windowOnSec,
-        windowOffSec,
+        bpm,
+        ts: `${ts.num}/${ts.den}`,
+        leadBeats,
+        restBars,
+        exportSeconds: phraseSec,
+        restSeconds: restSec,
         sampleRateOut: sampleRateOut || 16000,
         exactSamples,
         wavBytesRaw: (wavBlob as Blob)?.size,
@@ -150,7 +156,7 @@ export default function TrainingGame({ title = "Training" }: Props) {
       confidence={confidence}
       confThreshold={CONF_THRESHOLD}
       startAtMs={startMs}
-      leadInSec={TRAIN_LEAD_IN_SEC}
+      leadInSec={leadInSec} // visual musical count-in
       /** For internal hooks */
       isReady={isReady}
       step={step}
@@ -158,11 +164,12 @@ export default function TrainingGame({ title = "Training" }: Props) {
     >
       {isRangeStep && (
         <RangeCapture
+          key={`range-${step}`}   // force a fresh mount per step → instant reset
           mode={step as "low" | "high"}
           active
           pitchHz={liveHz}
-          bpm={60}
-          beatsRequired={1}
+          /** keep range capture at a fixed 1.0s hold, independent of transport BPM/TS */
+          holdSec={1}
           centsWindow={75}
           a4Hz={440}
           onConfirm={rangeConfirm}
@@ -174,10 +181,15 @@ export default function TrainingGame({ title = "Training" }: Props) {
           statusText={loop.statusText}
           isRecording={isRecording}
           startedAtMs={startedAtMs ?? null}
-          recordSec={windowOnSec}
-          restSec={windowOffSec}
+          recordSec={totalTakeSec}     // shows count-in + phrase
+          restSec={restSec}            // musical rest shown in UI
           maxTakes={MAX_TAKES}
           maxSessionSec={MAX_SESSION_SEC}
+          // musical transport for richer display
+          bpm={bpm}
+          ts={ts}
+          leadBeats={leadBeats}
+          restBars={restBars}
         />
       )}
     </GameLayout>

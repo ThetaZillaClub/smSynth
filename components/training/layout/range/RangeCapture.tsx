@@ -11,10 +11,14 @@ type Props = {
 
   pitchHz: number | null | undefined;
 
+  /** OPTIONAL: fixed hold time in seconds (overrides bpm/beatsRequired if provided). */
+  holdSec?: number;
+
+  /** Musical alternative (used only if holdSec is not provided) */
   bpm?: number;             // default 60
   beatsRequired?: number;   // default 1 (≈1 second at 60 BPM)
-  centsWindow?: number;     // tolerance for "stable hold", DEFAULT 75¢
 
+  centsWindow?: number;     // tolerance for "stable hold", DEFAULT 75¢
   a4Hz?: number;            // default 440
   onConfirm: (capturedHz: number) => void;
 };
@@ -23,14 +27,21 @@ export default function RangeCapture({
   mode,
   active,
   pitchHz,
+
+  holdSec,
+
   bpm = 60,
   beatsRequired = 1,
+
   centsWindow = 75,
   a4Hz = 440,
   onConfirm,
 }: Props) {
   /* ------------------- timing/targets ------------------- */
-  const targetSec = useMemo(() => (60 / bpm) * beatsRequired, [bpm, beatsRequired]);
+  const targetSec = useMemo(
+    () => (typeof holdSec === "number" && isFinite(holdSec) && holdSec > 0 ? holdSec : (60 / bpm) * beatsRequired),
+    [holdSec, bpm, beatsRequired]
+  );
 
   // Captured value + which mode it belongs to
   const [capturedHz, setCapturedHz] = useState<number | null>(null);
@@ -104,6 +115,8 @@ export default function RangeCapture({
     setCapturedHz(null);
     setCompleted(false);
     setCapturedFor(null);
+    completedRef.current = false;
+    capturedForRef.current = null;
   };
 
   const moveTowards = (cur: number, tgt: number, maxDelta: number) => {
@@ -134,21 +147,12 @@ export default function RangeCapture({
     setVisualSec(next);
   };
 
-  /* ----------- soft transition reset on mode change ----- */
-  // Start a fresh attempt for the new step, without touching prior completion.
+  /* ----------- hard reset on mode change (fresh take) --- */
   useEffect(() => {
-    // Clear progress & anchor/buffer so we don't insta-complete on step change.
-    holdSecRef.current = 0;
-    visualSecRef.current = 0;
-    setVisualSec(0);
-
-    baseHzRef.current = null;
-    anchorAgeSecRef.current = 0;
-    insideRef.current = false;
-    unvoicedGapSecRef.current = 0;
-    outsideGapSecRef.current = 0;
-    bufRef.current.length = 0;
-    // Note: capturedHz/completed/capturedFor are intentionally preserved.
+    // Fully clear prior completion + progress so the next note starts at 0%.
+    hardReset();
+    // Note: captured value is not carried over between steps by design.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   /* ----------------------- RAF tick --------------------- */
@@ -297,7 +301,11 @@ export default function RangeCapture({
     mode === "low"
       ? "Step 1 — Sing your lowest comfortable note"
       : "Step 2 — Sing your highest comfortable note";
-  const sub = "Hold it steadily for 1 beat (≈1 second).";
+
+  const sub =
+    typeof holdSec === "number" && isFinite(holdSec) && holdSec > 0
+      ? `Hold it steadily for ${holdSec.toFixed(0)} second${holdSec === 1 ? "" : "s"}.`
+      : `Hold it steadily for ${beatsRequired} beat${beatsRequired === 1 ? "" : "s"} (≈${targetSec.toFixed(1)} second${targetSec === 1 ? "" : "s"}).`;
 
   // Use visualSec for both bar and counter
   const progressPct = Math.max(0, Math.min(100, (visualSec / targetSec) * 100));
