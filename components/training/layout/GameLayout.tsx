@@ -1,14 +1,17 @@
+// components/training/layout/GameLayout.tsx
 "use client";
 import React from "react";
-import GameHeader from "./GameHeader";
-import GameStage from "./GameStage";
-import GameStats from "./GameStats";
-import GameLyrics from "./GameLyrics";
-import { type Phrase } from "@/components/piano-roll/PianoRollCanvas";
+import GameHeader from "./header/GameHeader";
+import GameStage from "./piano-roll/GameStage";
+import GameStats from "./stats/GameStats";
+import GameLyrics from "./lyrics/GameLyrics";
+import useActiveLyricIndex from "./lyrics/useActiveLyricIndex";
+import { type Phrase } from "./piano-roll/PianoRollCanvas";
+// Use a relative import here to avoid alias resolution issues
+import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
 
 type LayoutProps = {
   title: string;
-  micText: string;
   error?: string | null;
 
   /** Drives the stage/recorder only */
@@ -18,13 +21,10 @@ type LayoutProps = {
   phrase?: Phrase | null;
 
   lyrics?: string[];
-  activeLyricIndex?: number;
 
-  pitchText: string;
-  noteText: string;
-  confidence: number;
-
+  /** Live analysis */
   livePitchHz?: number | null;
+  confidence: number;
   confThreshold?: number;
 
   /** Recorder anchor in ms since epoch/performance time; keeps overlay in sync with audio engine */
@@ -36,31 +36,42 @@ type LayoutProps = {
   /** UI-only “running” flag used for the header label; lets us show Pause during rest */
   uiRunning?: boolean;
 
+  /** Inputs for header/stats readouts */
+  isReady?: boolean;
+
+  /** Step/loop are used by internal lyric highlighting */
+  step: "low" | "high" | "play";
+  loopPhase: LoopPhase;
+
   children?: React.ReactNode;
-  onActiveNoteChange?: (idx: number) => void;
 };
 
 export default function GameLayout({
   title,
-  micText,
   error,
   running,
   onToggle,
   phrase,
   lyrics,
-  activeLyricIndex = -1,
-  pitchText,
-  noteText,
-  confidence,
+
   livePitchHz,
+  confidence,
   confThreshold = 0.5,
   startAtMs = null,
   leadInSec = 1.5,
   uiRunning,
+
+  isReady = false,
+
+  step,
+  loopPhase,
+
   children,
-  onActiveNoteChange,
 }: LayoutProps) {
   const showPlay = !!phrase;
+
+  // Co-located highlight state: resets outside of record phase
+  const { activeIndex, setActiveIndex } = useActiveLyricIndex({ step, loopPhase });
 
   return (
     <main className="min-h-dvh h-dvh flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
@@ -69,12 +80,12 @@ export default function GameLayout({
         <div className="w-full max-w-7xl">
           <GameHeader
             title={title}
-            micText={micText}
-            error={error}
             showPlay={showPlay}
-            /** show Pause while looping, even in rest phase */
             running={uiRunning ?? running}
             onToggle={onToggle}
+            livePitchHz={livePitchHz}
+            isReady={isReady}
+            error={error}
           />
         </div>
       </div>
@@ -90,8 +101,9 @@ export default function GameLayout({
           <div className="w-full flex justify-center px-6 pb-4">
             <div className="w-full max-w-7xl">
               <GameStats
-                pitchText={pitchText}
-                noteText={noteText}
+                livePitchHz={livePitchHz}
+                isReady={isReady}
+                error={error}
                 confidence={confidence}
                 confThreshold={confThreshold}
               />
@@ -106,7 +118,7 @@ export default function GameLayout({
             <GameStage
               phrase={phrase ?? null}
               running={running}
-              onActiveNoteChange={onActiveNoteChange}
+              onActiveNoteChange={setActiveIndex}
               livePitchHz={livePitchHz}
               confidence={confidence}
               confThreshold={confThreshold}
@@ -119,7 +131,7 @@ export default function GameLayout({
           {phrase && lyrics && lyrics.length ? (
             <div className="w-full flex justify-center px-6">
               <div className="w-full max-w-7xl">
-                <GameLyrics words={lyrics} activeIndex={activeLyricIndex} />
+                <GameLyrics words={lyrics} activeIndex={activeIndex} />
               </div>
             </div>
           ) : null}
@@ -133,8 +145,9 @@ export default function GameLayout({
           <div className="w-full flex justify-center px-6">
             <div className="w-full max-w-7xl">
               <GameStats
-                pitchText={pitchText}
-                noteText={noteText}
+                livePitchHz={livePitchHz}
+                isReady={isReady}
+                error={error}
                 confidence={confidence}
                 confThreshold={confThreshold}
               />

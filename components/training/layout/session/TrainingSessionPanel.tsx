@@ -1,11 +1,12 @@
-// components/game-layout/TrainingSessionPanel.tsx
+// components/game-layout/session/TrainingSessionPanel.tsx
 "use client";
 import React from "react";
+import useUiRecordTimer from "./useUiRecordTimer";
 
 type Props = {
   statusText: string;
   isRecording: boolean;
-  uiRecordSec: number;
+  startedAtMs: number | null;
   recordSec: number;
   restSec: number;
   maxTakes: number;
@@ -15,18 +16,21 @@ type Props = {
 export default function TrainingSessionPanel({
   statusText,
   isRecording,
-  uiRecordSec,
+  startedAtMs,
   recordSec,
   restSec,
   maxTakes,
   maxSessionSec,
 }: Props) {
+  const uiRecordSec = useUiRecordTimer(isRecording, startedAtMs);
+  const uiRecordClamped = Math.min(uiRecordSec, recordSec);
+
   return (
     <div className="mt-2 grid gap-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
       <div className="flex items-center justify-between text-sm">
         <div>
           <span className="font-semibold">{statusText}</span>
-          {isRecording && <span className="ml-2 opacity-70">{uiRecordSec.toFixed(2)}s</span>}
+          {isRecording && <span className="ml-2 opacity-70">{uiRecordClamped.toFixed(2)}s</span>}
         </div>
       </div>
       <div className="text-xs opacity-70">

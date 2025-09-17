@@ -1,4 +1,4 @@
-// hooks/lyrics/useActiveLyricIndex.ts
+// components/game-layout/lyrics/useActiveLyricIndex.ts
 "use client";
 
 import { useEffect, useState } from "react";

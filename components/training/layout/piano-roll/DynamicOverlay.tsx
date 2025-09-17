@@ -2,9 +2,8 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback, useMemo } from "react";
-import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS } from "@/utils/piano-roll/scale";
+import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS, type Phrase } from "@/utils/piano-roll/scale";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
-import type { Phrase } from "@/utils/piano-roll/types";
 
 type Props = {
   width: number;

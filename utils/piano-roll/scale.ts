@@ -1,10 +1,14 @@
 // utils/piano-roll/scale.ts
 
-// math
+// --- Types (moved here from types.ts) ---
+export type Note = { midi: number; startSec: number; durSec: number };
+export type Phrase = { durationSec: number; notes: Note[] };
+
+// --- math ---
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export function getMidiRange(
-  phrase: { notes: { midi: number }[] },
+  phrase: Phrase,
   pad: number = 2
 ): { minMidi: number; maxMidi: number } {
   let mn = Infinity;
@@ -41,7 +45,7 @@ export function midiCellRect(midi: number, H: number, minMidi: number, maxMidi: 
   return { y: Math.min(yTop, yBot), h: Math.abs(yBot - yTop) };
 }
 
-// theme (aligned to site colors)
+// --- theme (aligned to site colors) ---
 export const PR_COLORS = {
   bg: "#ebebeb",
   gridMinor: "rgba(15,15,15,0.08)",

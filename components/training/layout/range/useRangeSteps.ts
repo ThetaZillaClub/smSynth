@@ -1,4 +1,4 @@
-// hooks/range/useRangeSteps.ts
+// components/game-layout/range/useRangeSteps.ts
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
@@ -22,10 +22,7 @@ type ReturnShape = {
   confirmHigh: (hz: number) => void;
 };
 
-export default function useRangeSteps({
-  updateRange,
-  a4Hz = 440,
-}: Opts): ReturnShape {
+export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): ReturnShape {
   const [step, setStep] = useState<Step>("low");
   const [lowHz, setLowHz] = useState<number | null>(null);
   const [highHz, setHighHz] = useState<number | null>(null);

@@ -1,4 +1,4 @@
-// components/game-layout/range/RangeCapture.tsx
+// components/training/layout/range/RangeCapture.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
@@ -32,8 +32,12 @@ export default function RangeCapture({
   /* ------------------- timing/targets ------------------- */
   const targetSec = useMemo(() => (60 / bpm) * beatsRequired, [bpm, beatsRequired]);
 
+  // Captured value + which mode it belongs to
   const [capturedHz, setCapturedHz] = useState<number | null>(null);
   const [completed, setCompleted] = useState(false);
+  const [capturedFor, setCapturedFor] = useState<"low" | "high" | null>(null);
+  const capturedForRef = useRef<"low" | "high" | null>(null);
+  useEffect(() => { capturedForRef.current = capturedFor; }, [capturedFor]);
 
   /* ---------------- latest input refs ------------------- */
   const latestActive = useRef(active);
@@ -69,7 +73,6 @@ export default function RangeCapture({
   const unvoicedGapSecRef = useRef<number>(0);
   const outsideGapSecRef = useRef<number>(0);
 
-  const [frozen, setFrozen] = useState(false);
   const completedRef = useRef(false);
   useEffect(() => { completedRef.current = completed; }, [completed]);
 
@@ -100,7 +103,7 @@ export default function RangeCapture({
     setVisualSec(0);
     setCapturedHz(null);
     setCompleted(false);
-    setFrozen(false);
+    setCapturedFor(null);
   };
 
   const moveTowards = (cur: number, tgt: number, maxDelta: number) => {
@@ -110,20 +113,43 @@ export default function RangeCapture({
   };
 
   const updateVisual = (dt: number) => {
-    // target for the visual: during capture -> holdSec; after capture -> pin to targetSec
-    const logicalTarget = completedRef.current ? latestTargetSec.current : holdSecRef.current;
+    const sameModeComplete =
+      completedRef.current && capturedForRef.current === mode;
+
+    // During an active attempt for THIS mode, lerp toward holdSec.
+    // If THIS mode is completed, pin to full target.
+    const logicalTarget = sameModeComplete ? latestTargetSec.current : holdSecRef.current;
+
     const lerp = Math.min(1, VISUAL_FOLLOW_RATE * dt);
     let next = visualSecRef.current + (logicalTarget - visualSecRef.current) * lerp;
 
-    // make the bar **monotonic non-decreasing** during a capture attempt
-    if (!completedRef.current) next = Math.max(visualSecRef.current, next);
+    // Enforce monotonic increase only while attempting THIS mode
+    const enforceMonotonic = !sameModeComplete &&
+      (capturedForRef.current === mode || capturedForRef.current == null);
+    if (enforceMonotonic) next = Math.max(visualSecRef.current, next);
 
-    // once completed, keep it full
-    if (completedRef.current) next = latestTargetSec.current;
+    if (sameModeComplete) next = latestTargetSec.current;
 
     visualSecRef.current = next;
     setVisualSec(next);
   };
+
+  /* ----------- soft transition reset on mode change ----- */
+  // Start a fresh attempt for the new step, without touching prior completion.
+  useEffect(() => {
+    // Clear progress & anchor/buffer so we don't insta-complete on step change.
+    holdSecRef.current = 0;
+    visualSecRef.current = 0;
+    setVisualSec(0);
+
+    baseHzRef.current = null;
+    anchorAgeSecRef.current = 0;
+    insideRef.current = false;
+    unvoicedGapSecRef.current = 0;
+    outsideGapSecRef.current = 0;
+    bufRef.current.length = 0;
+    // Note: capturedHz/completed/capturedFor are intentionally preserved.
+  }, [mode]);
 
   /* ----------------------- RAF tick --------------------- */
   const tick = (ts: number) => {
@@ -131,10 +157,13 @@ export default function RangeCapture({
     const dt = Math.max(0, (ts - last) / 1000);
     lastTsRef.current = ts;
 
-    // Always keep visual synced first (also when frozen)
+    // Always keep visual synced first
     updateVisual(dt);
 
-    if (!latestActive.current || frozen) return;
+    if (!latestActive.current) return;
+
+    const sameModeComplete =
+      completedRef.current && capturedForRef.current === mode;
 
     const voiced = latestPitch.current != null;
 
@@ -150,7 +179,7 @@ export default function RangeCapture({
         bufRef.current.length = 0;
       }
 
-      if (!completedRef.current && unvoicedGapSecRef.current > UNVOICED_GRACE_SEC) {
+      if (!sameModeComplete && unvoicedGapSecRef.current > UNVOICED_GRACE_SEC) {
         const decay = Math.min(dt * DECAY_RATE, dt);
         holdSecRef.current = Math.max(0, holdSecRef.current - decay);
       }
@@ -166,7 +195,6 @@ export default function RangeCapture({
       insideRef.current = true;
       anchorAgeSecRef.current = 0;
       bufRef.current.length = 0;
-      // no initial kick
     } else {
       anchorAgeSecRef.current += dt;
     }
@@ -175,11 +203,12 @@ export default function RangeCapture({
     const innerWindow = Math.max(0, outerWindow * (1 - HYSTERESIS_GAP));
     const inWarmup = anchorAgeSecRef.current < WARMUP_SEC;
 
+    const centsNow = baseHzRef.current ? centsBetweenHz(hz, baseHzRef.current) : 0;
+
     let isInside = true;
     if (!inWarmup) {
-      const cents = centsBetweenHz(hz, baseHzRef.current as number);
       const wasInside = insideRef.current;
-      isInside = wasInside ? Math.abs(cents) <= outerWindow : Math.abs(cents) <= innerWindow;
+      isInside = wasInside ? Math.abs(centsNow) <= outerWindow : Math.abs(centsNow) <= innerWindow;
     }
     insideRef.current = inWarmup ? true : isInside;
 
@@ -188,7 +217,18 @@ export default function RangeCapture({
       (insideRef.current ? FOLLOW_HZ_INSIDE : CHASE_HZ_OUTSIDE);
     baseHzRef.current = moveTowards(baseHzRef.current as number, hz, rate * dt);
 
-    if (!completedRef.current) {
+    if (!sameModeComplete) {
+      // Optional: quick re-anchor on big leaps before progress builds up
+      if (holdSecRef.current < 0.1) {
+        const centsJump = Math.abs(centsBetweenHz(hz, baseHzRef.current as number));
+        if (centsJump > Math.max(300, latestCentsWindow.current * 3)) {
+          baseHzRef.current = hz;
+          insideRef.current = true;
+          anchorAgeSecRef.current = 0;
+          bufRef.current.length = 0;
+        }
+      }
+
       if (insideRef.current) {
         outsideGapSecRef.current = 0;
         holdSecRef.current = Math.min(latestTargetSec.current, holdSecRef.current + dt);
@@ -212,21 +252,21 @@ export default function RangeCapture({
       }
     }
 
-    // Reached target? Capture & freeze (but do NOT auto-advance).
-    if (!completedRef.current && holdSecRef.current >= latestTargetSec.current) {
+    // Reached target? Capture for THIS mode
+    if (!sameModeComplete && holdSecRef.current >= latestTargetSec.current) {
       const sorted = [...bufRef.current].sort((a, b) => a - b);
       const med = sorted[Math.floor(sorted.length / 2)] ?? hz;
 
       setCapturedHz(med);
       setCompleted(true);
+      setCapturedFor(mode);
       completedRef.current = true;
+      capturedForRef.current = mode;
 
       // Pin logical & visual at full to avoid any backslide.
       holdSecRef.current = latestTargetSec.current;
       visualSecRef.current = latestTargetSec.current;
       setVisualSec(latestTargetSec.current);
-
-      setFrozen(true);
     }
   };
 
@@ -250,7 +290,7 @@ export default function RangeCapture({
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [active]);
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------------------------ UI -------------------------- */
   const title =
@@ -262,12 +302,15 @@ export default function RangeCapture({
   // Use visualSec for both bar and counter
   const progressPct = Math.max(0, Math.min(100, (visualSec / targetSec) * 100));
 
+  // Only show a capture if it belongs to THIS mode
+  const effectiveCapturedHz = capturedFor === mode ? capturedHz : null;
+
   const display =
-    capturedHz != null
+    effectiveCapturedHz != null
       ? (() => {
-          const n = hzToNoteName(capturedHz, a4Hz, { useSharps: true, octaveAnchor: "A" });
+          const n = hzToNoteName(effectiveCapturedHz, a4Hz, { useSharps: true, octaveAnchor: "A" });
           const dispOct = n.octave;
-          return `${n.name}${dispOct} • ${capturedHz.toFixed(1)} Hz`;
+          return `${n.name}${dispOct} • ${effectiveCapturedHz.toFixed(1)} Hz`;
         })()
       : "—";
 
@@ -309,10 +352,10 @@ export default function RangeCapture({
           >
             Try Again
           </button>
-          {completed && (
+          {completed && capturedFor === mode && (
             <button
               type="button"
-              onClick={() => capturedHz != null && onConfirm(capturedHz)}
+              onClick={() => effectiveCapturedHz != null && onConfirm(effectiveCapturedHz)}
               className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] font-medium transition duration-200 hover:opacity-90 active:scale-[0.98]"
             >
               {mode === "low" ? "Confirm Low Note" : "Confirm High Note"}

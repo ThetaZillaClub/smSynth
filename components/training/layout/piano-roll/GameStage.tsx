@@ -1,6 +1,7 @@
 "use client";
 import React, { useLayoutEffect, useRef, useState } from "react";
-import PianoRollCanvas, { type Phrase } from "@/components/piano-roll/PianoRollCanvas";
+import PianoRollCanvas, { type Phrase } from "@/components/training/layout/piano-roll/PianoRollCanvas";
+
 
 type Props = {
   phrase?: Phrase | null;

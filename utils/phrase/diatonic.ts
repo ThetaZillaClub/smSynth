@@ -1,6 +1,6 @@
 // utils/phrase/diatonic.ts
-import { hzToMidi } from "@/utils/pitch/pitchMath";
-import type { Phrase } from "@/components/piano-roll/types";
+import { hzToMidi } from "../pitch/pitchMath";
+import type { Phrase } from "../piano-roll/scale";
 
 export const MAJOR_OFFSETS = [0, 2, 4, 5, 7, 9, 11, 12] as const;
 
@@ -33,7 +33,7 @@ export function buildPhraseFromRangeDiatonicVariant(
   highHz: number,
   a4Hz = 440,
   noteDurSec: number = 0.5,
-  variantSeed?: number // kept for API; unused in smooth walk (could flip initial dir if desired)
+  variantSeed?: number
 ): Phrase {
   const lowM = Math.round(hzToMidi(lowHz, a4Hz));
   const highM = Math.round(hzToMidi(highHz, a4Hz));

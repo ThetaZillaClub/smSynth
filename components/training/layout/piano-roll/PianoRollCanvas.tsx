@@ -3,10 +3,10 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import DynamicOverlay from "./DynamicOverlay";
-import type { Phrase as PhraseT } from "@/utils/piano-roll/types";
+import { getMidiRange, type Phrase } from "@/utils/piano-roll/scale";
 
 /** Re-export so upstream can import { type Phrase } from this file */
-export type Phrase = PhraseT;
+export type { Phrase };
 
 type Props = {
   /** Fixed height in CSS pixels (wrapper provides this). */
@@ -67,17 +67,10 @@ export default function PianoRollCanvas({
 
   const [minMidi, maxMidi] = useMemo<[number, number]>(() => {
     if (!phrase || !phrase.notes.length) return [60 - 6, 60 + 6]; // default around middle C
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const n of phrase.notes) {
-      if (n.midi < lo) lo = n.midi;
-      if (n.midi > hi) hi = n.midi;
-    }
-    // Add a little headroom top/bottom
-    lo = Math.floor(lo - 2);
-    hi = Math.ceil(hi + 2);
-    if (lo >= hi) hi = lo + 1;
-    return [lo, hi];
+    const { minMidi, maxMidi } = getMidiRange(phrase, 2);
+    // ensure at least 1-semitone span
+    if (minMidi >= maxMidi) return [minMidi, minMidi + 1];
+    return [minMidi, maxMidi];
   }, [phrase]);
 
   // If no phrase, we still reserve vertical space so layout doesn’t jump
