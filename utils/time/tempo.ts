@@ -29,22 +29,50 @@ export function barsToBeats(bars: number, num: number): number {
   return Math.max(0, bars) * Math.max(1, num);
 }
 
-/**
- * Flexible lead-in parser:
- *  - "1bar", "2bars"        → bars * tsNum beats
- *  - "3" or "3.5"           → that many beats
- *  - otherwise               → default 1 bar
- */
-export function computeLeadBeats(raw: string | null | undefined, tsNum: number): number {
-  const s = (raw ?? "").trim().toLowerCase();
-  if (!s) return Math.max(1, tsNum);
-  const barMatch = s.match(/^(\d+(?:\.\d+)?)\s*bars?$/);
-  if (barMatch) {
-    const bars = Number(barMatch[1]);
-    return barsToBeats(Number.isFinite(bars) ? bars : 1, tsNum);
+/* ---------------- Musical durations ---------------- */
+
+export type NoteValue =
+  | "whole"
+  | "dotted-half"
+  | "half"
+  | "dotted-quarter"
+  | "triplet-quarter"
+  | "quarter"
+  | "dotted-eighth"
+  | "triplet-eighth"
+  | "eighth"
+  | "dotted-sixteenth"
+  | "triplet-sixteenth"
+  | "sixteenth"
+  | "thirtysecond";
+
+/** Note value length in quarter-note units (quarter=1). */
+export function noteValueInQuarterUnits(v: NoteValue): number {
+  switch (v) {
+    case "whole": return 4;
+    case "dotted-half": return 3;
+    case "half": return 2;
+    case "dotted-quarter": return 1.5;
+    case "triplet-quarter": return 2 / 3;
+    case "quarter": return 1;
+    case "dotted-eighth": return 0.75;
+    case "triplet-eighth": return 1 / 3;
+    case "eighth": return 0.5;
+    case "dotted-sixteenth": return 0.375;
+    case "triplet-sixteenth": return 1 / 6;
+    case "sixteenth": return 0.25;
+    case "thirtysecond": return 0.125;
+    default: return 0.5;
   }
-  const beats = Number(s);
-  if (Number.isFinite(beats) && beats >= 0) return beats;
-  if (s === "bar" || s === "bars") return Math.max(1, tsNum);
-  return Math.max(1, tsNum);
+}
+
+/** Convert a NoteValue to *beats* where a beat == denominator note. */
+export function noteValueToBeats(v: NoteValue, den: number): number {
+  const q = noteValueInQuarterUnits(v);
+  return q * (den / 4); // quarter = den/4 beats
+}
+
+/** Convert a NoteValue to seconds using BPM and time signature denominator. */
+export function noteValueToSeconds(v: NoteValue, bpm: number, den: number): number {
+  return beatsToSeconds(noteValueToBeats(v, den), bpm, den);
 }

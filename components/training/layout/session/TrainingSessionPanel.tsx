@@ -1,4 +1,4 @@
-// components/game-layout/session/TrainingSessionPanel.tsx
+// components/training/layout/session/TrainingSessionPanel.tsx
 "use client";
 import React from "react";
 import useUiRecordTimer from "./useUiRecordTimer";
@@ -23,7 +23,8 @@ type Props = {
   /** Musical transport (for display + calculations) */
   bpm?: number;                 // defaults to 80 if not provided
   ts?: TimeSignature;           // defaults to 4/4 if not provided
-  leadBeats?: number;           // defaults to 1 bar in the current TS
+  /** Lead-in in bars (preferred) */
+  leadBars?: number;
   restBars?: number;            // defaults to 1 bar
 };
 
@@ -40,15 +41,15 @@ export default function TrainingSessionPanel({
 
   bpm = 80,
   ts = { num: 4, den: 4 },
-  leadBeats,
+  leadBars,
   restBars = 1,
 }: Props) {
   // --- derived musical timing ---
   const secPerBeat = secondsPerBeat(bpm, ts.den);
-  const leadBeatsEff = Math.max(0, typeof leadBeats === "number" ? leadBeats : ts.num); // default 1 bar
+  const leadBeatsEff = barsToBeats(typeof leadBars === "number" ? leadBars : 1, ts.num);
   const leadSec = beatsToSeconds(leadBeatsEff, bpm, ts.den);
 
-  // Prefer provided recordSec; otherwise assume 1 bar lead-in + 8-beat phrase
+  // Prefer provided recordSec; otherwise assume lead-in + 8-beat phrase
   const recordSecEff = typeof recordSec === "number" && isFinite(recordSec)
     ? recordSec
     : leadSec + beatsToSeconds(8, bpm, ts.den);
@@ -88,7 +89,7 @@ export default function TrainingSessionPanel({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
         <InfoChip
           label="Lead-in"
-          primary={`${fmtBeats(leadBeatsEff)} beats`}
+          primary={`${fmtBeats(leadBeatsEff)} beats (${leadBars ?? 1} bar${(leadBars ?? 1) === 1 ? "" : "s"})`}
           secondary={fmtSec(leadSec)}
         />
         <InfoChip

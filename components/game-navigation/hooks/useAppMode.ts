@@ -1,7 +1,7 @@
 // components/game-navigation/hooks/useAppMode.ts
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 
 export type ExerciseId =
   | "range-setup"
@@ -14,58 +14,70 @@ export type ExerciseId =
   | "scale-singing-syncopation"
   | "advanced-syncopation";
 
-type AppView = "menu" | "exercise";
+export type AppView = "menu" | "exercise";
 
-type PersistShape = { current: ExerciseId; view: AppView };
+type PersistShapeV2 = { view: AppView; current: ExerciseId };
 
+// Keep backward compat with the old v1 shape { current }
 const KEY = "appmode:v2";
-const DEFAULT: PersistShape = { current: "training-game", view: "menu" };
+const LEGACY_KEY = "appmode:v1";
 
-function load(): PersistShape {
+const DEFAULT: PersistShapeV2 = { view: "menu", current: "training-game" };
+
+function load(): PersistShapeV2 {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return DEFAULT;
-    const v = JSON.parse(raw) as Partial<PersistShape> | null;
-    const cur = (v?.current as ExerciseId) ?? DEFAULT.current;
-    const view = (v?.view as AppView) ?? "menu";
-    return { current: cur, view };
-  } catch {
-    return DEFAULT;
-  }
+    if (raw) {
+      const v = JSON.parse(raw) as Partial<PersistShapeV2> | null;
+      const view = (v?.view as AppView) ?? DEFAULT.view;
+      const current = (v?.current as ExerciseId) ?? DEFAULT.current;
+      return { view, current };
+    }
+    // migrate from v1 if present
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      const v = JSON.parse(legacy) as { current?: ExerciseId } | null;
+      return { view: "menu", current: (v?.current as ExerciseId) ?? DEFAULT.current };
+    }
+  } catch {}
+  return DEFAULT;
 }
 
-function save(v: PersistShape) {
+function save(v: PersistShapeV2) {
   try {
     localStorage.setItem(KEY, JSON.stringify(v));
   } catch {}
 }
 
-/** SPA exercise selector + simple view state for full-screen menu vs. in-game. */
+/** Global in-SPA app mode: full-screen menu vs. in-exercise, and which exercise is selected */
 export default function useAppMode() {
-  const [current, setCurrent] = useState<ExerciseId>(DEFAULT.current);
   const [view, setView] = useState<AppView>(DEFAULT.view);
+  const [current, setCurrent] = useState<ExerciseId>(DEFAULT.current);
 
+  // hydrate on mount
   useEffect(() => {
     const v = load();
-    setCurrent(v.current);
     setView(v.view);
+    setCurrent(v.current);
   }, []);
 
+  // persist whenever either changes
   useEffect(() => {
-    save({ current, view });
-  }, [current, view]);
+    save({ view, current });
+  }, [view, current]);
+
+  const startExercise = useCallback((id: ExerciseId) => {
+    setCurrent(id);
+    setView("exercise");
+  }, []);
+
+  const openMenu = useCallback(() => setView("menu"), []);
+
+  // Keep this for cases where you want to switch within the exercise shell
+  const setExercise = useCallback((id: ExerciseId) => setCurrent(id), []);
 
   return useMemo(
-    () => ({
-      current,
-      view,
-      startExercise: (id: ExerciseId) => {
-        setCurrent(id);
-        setView("exercise");
-      },
-      openMenu: () => setView("menu"),
-      setExercise: (id: ExerciseId) => setCurrent(id), // kept for compatibility if needed
-    }),
-    [current, view]
+    () => ({ view, current, setExercise, startExercise, openMenu }),
+    [view, current, startExercise, openMenu, setExercise]
   );
 }
