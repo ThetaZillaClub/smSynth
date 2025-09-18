@@ -40,26 +40,26 @@ export default function ImportMidiCard({
           }}
         />
 
-        {/* Styled trigger that flips the colors (dark bg, light text) */}
+        {/* Styled trigger — matches the Start session button */}
         <label
           htmlFor={inputId}
-          className="px-3 py-2 rounded-md text-sm cursor-pointer select-none
-                     border border-[#0f0f0f] bg-[#0f0f0f] text-white
-                     hover:bg-[#2d2d2d] transition
-                     focus:outline-none focus:ring-2 focus:ring-[#0f0f0f]/50"
+          className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm cursor-pointer select-none"
           title="Choose a .mid or .midi file"
         >
           Choose MIDI
         </label>
 
-        {/* Chosen file name (if any) */}
+        {/* Selected filename */}
         {fileName ? (
-          <span className="text-xs text-[#2d2d2d] truncate max-w-[18rem]" title={fileName}>
+          <span
+            className="text-xs text-[#2d2d2d] truncate max-w-[18rem]"
+            title={fileName}
+          >
             {fileName}
           </span>
         ) : null}
 
-        {/* Clear button (kept light style) */}
+        {/* Clear button (unchanged style) */}
         {hasPhrase ? (
           <button
             type="button"
@@ -67,7 +67,6 @@ export default function ImportMidiCard({
             onClick={() => {
               setFileName("");
               onClear();
-              // also clear the input's file selection for a clean slate
               if (fileInputRef.current) fileInputRef.current.value = "";
             }}
           >

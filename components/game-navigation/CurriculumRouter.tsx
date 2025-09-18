@@ -55,8 +55,9 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
         <button
           type="button"
           onClick={openMenu}
-          className="px-3 h-10 rounded-lg bg-black/80 text-white text-sm shadow-lg backdrop-blur hover:bg黑"
+          className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm"
           title="Back to menu"
+          aria-label="Back to menu"
         >
           ← Back to Menu
         </button>
