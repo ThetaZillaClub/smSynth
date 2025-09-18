@@ -1,4 +1,5 @@
 // components/training/TrainingCurriculum.tsx
+// ---------------------------------------------------
 "use client";
 
 import React, { useCallback, useMemo, useState } from "react";
@@ -6,7 +7,6 @@ import TransportPanelControlled from "./layout/transport/TransportPanelControlle
 import {
   DEFAULT_SESSION_CONFIG,
   type SessionConfig,
-  type LyricStrategy,
 } from "./layout/session/types";
 import type { Phrase } from "@/utils/piano-roll/scale";
 import { parseMidiToPhraseAndLyrics } from "@/utils/midi/smf";
@@ -142,7 +142,7 @@ export default function TrainingCurriculum({
           />
         </div>
 
-        {/* Content: Scale & Rhythm + Lyrics style */}
+        {/* Content: Scale & Rhythm + Lyrics */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
             <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">Scale & Rhythm</div>
@@ -308,17 +308,13 @@ export default function TrainingCurriculum({
               </div>
             </div>
 
-            {/* Lyrics style */}
+            {/* Lyrics (fixed policy) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-              <Field label="Lyrics style">
-                <select
-                  className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-                  value={cfg.lyricStrategy}
-                  onChange={(e) => pushChange({ lyricStrategy: e.target.value as LyricStrategy })}
-                >
-                  <option value="mixed">Mixed (varied)</option>
-                  <option value="stableVowel">Stable vowel</option>
-                </select>
+              <Field label="Lyrics">
+                <div className="text-sm">
+                  Uses <span className="font-semibold">solfege</span> by default (mode-aware, movable-do).
+                  You can override with custom words below or by importing a MIDI with karaoke lyrics.
+                </div>
               </Field>
               <div className="hidden sm:block" />
             </div>

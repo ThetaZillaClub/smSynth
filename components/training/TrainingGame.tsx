@@ -1,20 +1,15 @@
 // components/training/TrainingGame.tsx
 "use client";
-
 import React, { useMemo } from "react";
-
 import GameLayout from "./layout/GameLayout";
 import TrainingSessionPanel from "./layout/session/TrainingSessionPanel";
-
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
-import usePhraseLyrics from "@/hooks/lyrics/usePhraseLyrics";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
 import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
 import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRange from "@/hooks/students/useStudentRange";
-
 import { secondsPerBeat, beatsToSeconds, barsToBeats, noteValueToBeats } from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/piano-roll/scale";
 import { type SessionConfig, DEFAULT_SESSION_CONFIG } from "./layout/session/types";
@@ -25,7 +20,7 @@ import {
   sequenceNoteCountForScale,
   buildBarsRhythmForQuota,
 } from "@/utils/phrase/generator";
-import { makeWordLyricVariant } from "@/utils/lyrics/wordBank";
+import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
 
 type Props = {
   title?: string;
@@ -50,7 +45,7 @@ export default function TrainingGame({
 
   const {
     bpm, ts, leadBars, restBars,
-    noteValue, noteDurSec, lyricStrategy,
+    noteValue, noteDurSec, lyricStrategy, // lyricStrategy is retained for type stability but is always "solfege"
     customPhrase, customWords,
     scale, rhythm,
   } = sessionConfig;
@@ -88,7 +83,7 @@ export default function TrainingGame({
       const base = sequenceNoteCountForScale(scale.name);
       const want =
         ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
-          ? (base * 2 - 1) // no double peak
+          ? base * 2 - 1 // no double peak
           : base;
 
       const fabric = buildBarsRhythmForQuota({
@@ -132,29 +127,14 @@ export default function TrainingGame({
     }
   }, [usingOverrides, customPhrase, haveRange, lowHz, highHz, bpm, ts.den, ts.num, scale, rhythm]);
 
-  // Legacy fallback (kept for safety)
-  const {
-    phrase: genPhraseLegacy,
-    words: genWordsLegacy,
-    reset: resetPhraseLyrics,
-    advance: advancePhraseLyrics,
-  } = usePhraseLyrics({
-    lowHz: haveRange ? (lowHz as number) : null,
-    highHz: haveRange ? (highHz as number) : null,
-    lyricStrategy,
-    a4Hz: 440,
-    noteDurSec:
-      typeof noteValue === "string"
-        ? beatsToSeconds(noteValueToBeats(noteValue, ts.den), bpm, ts.den)
-        : (noteDurSec ?? secPerBeat),
-  });
-
+  // Phrase selection (overrides > generated > null)
   const phrase: Phrase | null = useMemo(() => {
     if (customPhrase) return customPhrase;
     if (generatedPhrase) return generatedPhrase;
-    return genPhraseLegacy ?? null;
-  }, [customPhrase, generatedPhrase, genPhraseLegacy]);
+    return null;
+  }, [customPhrase, generatedPhrase]);
 
+  // Lyrics: custom (trim/pad to phrase) → solfege (if phrase & scale) → null
   const words: string[] | null = useMemo(() => {
     if (Array.isArray(customWords) && customWords.length) {
       if (phrase?.notes?.length) {
@@ -165,12 +145,11 @@ export default function TrainingGame({
       }
       return customWords;
     }
-    if (generatedPhrase) {
-      const n = generatedPhrase.notes.length || 0;
-      return makeWordLyricVariant(n, lyricStrategy, 0xABCD1234);
+    if (phrase && scale && lyricStrategy === "solfege") {
+      return makeSolfegeLyrics(phrase, scale.tonicPc, scale.name as any, { chromaticStyle: "auto", caseStyle: "lower" });
     }
-    return genWordsLegacy ?? null;
-  }, [customWords, phrase, generatedPhrase, lyricStrategy, genWordsLegacy]);
+    return null;
+  }, [customWords, phrase, lyricStrategy, scale]);
 
   // Recorder + loop
   const { isRecording, start: startRec, stop: stopRec, wavBlob, startedAtMs, sampleRateOut, pcm16k } =
@@ -202,28 +181,26 @@ export default function TrainingGame({
   // This is the content window we want to keep (excludes pre-roll)
   const recordWindowSec = lastEndSec + padSec;
 
-  // IMPORTANT: We still start the recorder at the beginning of the record phase,
-  // so startAtMs anchors the overlay *before* the first note during pre-roll.
   const loop = usePracticeLoop({
-    step,                             // now always "play"
+    step, // now always "play"
     lowHz: haveRange ? (lowHz as number) : null,
     highHz: haveRange ? (highHz as number) : null,
     phrase,
     words,
-    windowOnSec: recordWindowSec,     // record window excludes lead-in
+    windowOnSec: recordWindowSec, // record window excludes lead-in
     windowOffSec: restSec,
-    preRollSec: leadInSec,            // NEW: account for pre-roll in the record-phase timeout
+    preRollSec: leadInSec, // pre-roll included in record-phase timer
     maxTakes: MAX_TAKES,
     maxSessionSec: MAX_SESSION_SEC,
     isRecording,
     startedAtMs: startedAtMs ?? null,
-    onAdvancePhrase: usingOverrides ? () => {} : generatedPhrase ? () => {} : advancePhraseLyrics,
-    onEnterPlay: usingOverrides ? () => {} : generatedPhrase ? () => {} : resetPhraseLyrics,
+    onAdvancePhrase: () => {}, // no legacy generator to advance anymore
+    onEnterPlay: () => {},     // no legacy reset needed
   });
 
   useRecorderAutoSync({
     enabled: step === "play",
-    shouldRecord: loop.shouldRecord,  // starts at beginning of record phase (pre-roll + phrase)
+    shouldRecord: loop.shouldRecord,
     isRecording,
     startRec,
     stopRec,
@@ -233,8 +210,8 @@ export default function TrainingGame({
     wavBlob,
     sampleRateOut,
     pcm16k,
-    windowOnSec: recordWindowSec,     // export just the content window (pre-roll is visual)
-    trimHeadSec: 0,                   // recorder already spans pre-roll; exports content
+    windowOnSec: recordWindowSec,
+    trimHeadSec: 0,
     onTakeReady: ({ exactBlob, exactSamples }) => {
       console.log("[musicianship] take ready", {
         studentRowId,
@@ -288,7 +265,7 @@ export default function TrainingGame({
           statusText={loop.statusText}
           isRecording={isRecording}
           startedAtMs={startedAtMs ?? null}
-          recordSec={leadInSec + recordWindowSec} // show the full record phase (pre-roll + content)
+          recordSec={leadInSec + recordWindowSec} // full record phase (pre-roll + content)
           restSec={restSec}
           maxTakes={MAX_TAKES}
           maxSessionSec={MAX_SESSION_SEC}

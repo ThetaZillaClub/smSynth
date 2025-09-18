@@ -1,16 +1,18 @@
 // components/training/layout/session/types.ts
+// ---------------------------------------------------
 import type { TimeSignature } from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/piano-roll/scale";
 import type { NoteValue } from "@/utils/time/tempo";
 import type { ScaleName } from "@/utils/phrase/scales";
 
-export type LyricStrategy = "mixed" | "stableVowel";
+// Only solfege is supported now; keep the field for forwards-compat
+export type LyricStrategy = "solfege";
 
 /** Optional scale config for generated exercises */
 export type ScaleConfig = {
   tonicPc: number;        // 0..11
   name: ScaleName;
-  maxPerDegree?: number;  // still used by "random" phrase builder, default 2
+  maxPerDegree?: number;  // used by "random" phrase builder, default 2
   seed?: number;
 };
 
@@ -24,7 +26,7 @@ export type RhythmConfig =
       seed?: number;
       /** Rest density in sequence mapping (applies to rhythm fabric below) */
       restProb?: number; // default 0.3
-      /** Available note lengths to compose the 2-bar rhythm (default ["quarter"]) */
+      /** Available note lengths to compose the rhythm fabric (default ["quarter"]) */
       available?: NoteValue[];
     }
   | {
@@ -47,16 +49,16 @@ export type SessionConfig = {
   /** Musical rest between takes in bars */
   restBars: number;
 
-  /** Legacy compatibility (used only when no rhythm config is provided) */
+  /** Legacy transport helper (still used for some UIs) */
   noteValue?: NoteValue;
   noteDurSec?: number;
 
-  lyricStrategy: LyricStrategy;
+  lyricStrategy: LyricStrategy; // always "solfege"
 
   /** Optional scale-based generator config */
   scale?: ScaleConfig;
 
-  /** NEW: sequence/random config (2-bar phrases) */
+  /** Sequence/random config */
   rhythm?: RhythmConfig;
 
   // Optional overrides
@@ -71,7 +73,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   restBars: 1,
   noteValue: "quarter",
   noteDurSec: 0.5,
-  lyricStrategy: "mixed",
+  lyricStrategy: "solfege",
   scale: { tonicPc: 0, name: "major", maxPerDegree: 2, seed: 0xC0FFEE },
   rhythm: { mode: "random", available: ["quarter"], restProb: 0.3, seed: 0xA5F3D7 },
   customPhrase: null,
