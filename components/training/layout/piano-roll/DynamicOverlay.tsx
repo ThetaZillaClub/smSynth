@@ -127,7 +127,7 @@ export default function DynamicOverlay({
           ctx.font = "11px ui-sans-serif, system-ui, -apple-system, Segoe UI";
           ctx.textAlign = "left";
           ctx.textBaseline = "middle";
-          const { octave } = midiToNoteName(midi, { useSharps: true, octaveAnchor: "A" });
+          const { octave } = midiToNoteName(midi, { useSharps: true, octaveAnchor: "C" });
           ctx.fillText(`C${octave}`, 4, centerY);
         }
       }
@@ -212,7 +212,7 @@ export default function DynamicOverlay({
         ctx.strokeRect(rx, ry, drawW, rh);
 
         if (drawW >= 24 && h >= 14) {
-          const { name, octave } = midiToNoteName(n.midi, { useSharps: true, octaveAnchor: "A" });
+          const { name, octave } = midiToNoteName(n.midi, { useSharps: true, octaveAnchor: "C" });
           drawInlineWordAndNote(rx, ry, drawW, rh, lyrics?.[i], `${name}${octave}`);
         }
 

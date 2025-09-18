@@ -36,7 +36,7 @@ export default function usePitchReadout({
     if (typeof pitch !== "number") return "—";
     const { name, octave, cents } = hzToNoteName(pitch, a4Hz, {
       useSharps: true,
-      octaveAnchor: "A",
+      octaveAnchor: "C",
     });
     const sign = cents > 0 ? "+" : "";
     return `${name}${octave} ${sign}${cents}¢`;

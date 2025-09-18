@@ -52,15 +52,7 @@ function parseSMF(u8: Uint8Array): ParseResult {
     if (tag !== "MTrk") throw new Error("Missing MTrk");
     const len = readU32(dv, p); p += 4;
     const end = p + len;
-
-    let abs = 0;
-    let runningStatus = 0;
-    const events: MidiTrackEvent[] = [];
-
-    while (p < end) {
-      const delta = readVarLen(u8, { p: p as number } as any);
-      // ^ we need p to advance; re-implement readVarLen that mutates p:
-    }
+    p = end;
   }
 
   // Re-parse track body using a version of readVarLen that mutates p:

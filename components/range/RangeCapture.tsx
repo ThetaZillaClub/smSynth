@@ -316,7 +316,7 @@ export default function RangeCapture({
   const display =
     effectiveCapturedHz != null
       ? (() => {
-          const n = hzToNoteName(effectiveCapturedHz, a4Hz, { useSharps: true, octaveAnchor: "A" });
+          const n = hzToNoteName(effectiveCapturedHz, a4Hz, { useSharps: true, octaveAnchor: "C" });
           const dispOct = n.octave;
           return `${n.name}${dispOct} • ${effectiveCapturedHz.toFixed(1)} Hz`;
         })()
