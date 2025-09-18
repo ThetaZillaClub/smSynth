@@ -12,8 +12,12 @@ type Opts = {
   phrase: unknown | null | undefined;
   words: unknown[] | null | undefined;
 
+  /** Length of the musical content to capture (seconds, excludes pre-roll). */
   windowOnSec: number;
+  /** Rest window (seconds). */
   windowOffSec: number;
+  /** Visual/audio pre-roll before first note (seconds). */
+  preRollSec?: number;
 
   maxTakes: number;
   maxSessionSec: number;
@@ -46,6 +50,7 @@ export default function usePracticeLoop({
   words,
   windowOnSec,
   windowOffSec,
+  preRollSec = 0,
   maxTakes,
   maxSessionSec,
   isRecording,
@@ -102,7 +107,7 @@ export default function usePracticeLoop({
     setRunning(true);
   }, [canPlay, hasPhrase, maxTakes, maxSessionSec, clearTimers]);
 
-  // exact end of record window
+  // exact end of record window (pre-roll + content)
   useEffect(() => {
     if (loopPhase !== "record") {
       if (recordTimerRef.current != null) { clearTimeout(recordTimerRef.current); recordTimerRef.current = null; }
@@ -110,7 +115,12 @@ export default function usePracticeLoop({
     }
     if (isRecording && startedAtMs != null && recordTimerRef.current == null) {
       const now = performance.now();
-      const delayMs = Math.max(0, windowOnSec * 1000 - (now - startedAtMs));
+      const elapsedMs = now - startedAtMs;
+      // include pre-roll *and* phrase window; add small frame cushion
+      const FRAME_MS = 16;
+      const totalMs = (preRollSec + windowOnSec) * 1000;
+      const delayMs = Math.max(0, totalMs - elapsedMs + FRAME_MS);
+
       recordTimerRef.current = window.setTimeout(() => {
         setRunning(false);
         setLoopPhase("rest");
@@ -118,7 +128,7 @@ export default function usePracticeLoop({
         setTakeCount((n) => n + 1);
       }, delayMs);
     }
-  }, [loopPhase, isRecording, startedAtMs, windowOnSec, onAdvancePhrase]);
+  }, [loopPhase, isRecording, startedAtMs, windowOnSec, preRollSec, onAdvancePhrase]);
 
   // rest -> next take (if looping)
   useEffect(() => {

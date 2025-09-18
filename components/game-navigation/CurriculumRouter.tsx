@@ -6,32 +6,18 @@ import useAppMode, { type ExerciseId } from "./hooks/useAppMode";
 import CurriculumMenu from "./CurriculumMenu";
 import TrainingGame from "@/components/training/TrainingGame";
 import TrainingCurriculum from "@/components/training/TrainingCurriculum";
+import RangeSetup from "@/components/range/RangeSetup"; // NEW
 import {
   DEFAULT_SESSION_CONFIG,
   type SessionConfig,
 } from "@/components/training/layout/session/types";
 
-type Props = {
-  /** Student/model id from the URL; passed through to exercises that need it */
-  studentId?: string | null;
-};
-
-/**
- * SPA router for curriculum:
- * - Full-screen menu (default)
- * - Selected exercise shows its curriculum first (universal layer)
- * - Then launches the in-game view with a floating Back control and injected session config
- */
-export default function CurriculumRouter({ studentId = null }: Props) {
+export default function CurriculumRouter({ studentId = null }: { studentId?: string | null }) {
   const { view, current, startExercise, openMenu } = useAppMode();
 
-  // Within an exercise, show a "curriculum" subview first, then "game"
   const [subview, setSubview] = useState<"curriculum" | "game">("curriculum");
-
-  // Per-launch session config (owned here, passed down)
   const [sessionCfg, setSessionCfg] = useState<SessionConfig>(DEFAULT_SESSION_CONFIG);
 
-  // Reset to curriculum whenever switching exercises or returning from menu
   useEffect(() => {
     setSubview("curriculum");
   }, [current, view]);
@@ -49,6 +35,11 @@ export default function CurriculumRouter({ studentId = null }: Props) {
         ) : (
           <TrainingGame title="Training" studentId={studentId ?? null} sessionConfig={sessionCfg} />
         );
+
+      case "range-setup":
+        // standalone screen — no curriculum step needed
+        return <RangeSetup studentId={studentId ?? null} />;
+
       default:
         return null;
     }
@@ -58,22 +49,18 @@ export default function CurriculumRouter({ studentId = null }: Props) {
     return <CurriculumMenu studentId={studentId} onStart={startExercise} />;
   }
 
-  // In-exercise wrapper with a floating back button that returns to menu
   return (
     <div className="relative min-h-dvh h-dvh bg-[#f0f0f0]">
-      {/* Floating back to menu */}
       <div className="fixed left-4 top-4 z-50">
         <button
           type="button"
           onClick={openMenu}
-          className="px-3 h-10 rounded-lg bg-black/80 text-white text-sm shadow-lg backdrop-blur hover:bg-black"
+          className="px-3 h-10 rounded-lg bg-black/80 text-white text-sm shadow-lg backdrop-blur hover:bg黑"
           title="Back to menu"
         >
           ← Back to Menu
         </button>
       </div>
-
-      {/* Exercise content */}
       <div className="h-full">{content}</div>
     </div>
   );

@@ -22,7 +22,7 @@ const ITEMS: Array<{
   {
     id: "training-game",
     title: "Training",
-    subtitle: "Warm-ups • vocal range • phrasing",
+    subtitle: "Warm-ups • phrasing",
     emoji: "🎯",
     enabled: true,
     gradient: "from-emerald-400 via-emerald-500 to-emerald-600",
@@ -32,8 +32,7 @@ const ITEMS: Array<{
     title: "Range Setup",
     subtitle: "One-time voice range capture",
     emoji: "📏",
-    enabled: false,
-    soon: true,
+    enabled: true, // enabled now
     gradient: "from-sky-400 via-sky-500 to-sky-600",
   },
   {
@@ -141,7 +140,7 @@ export default function CurriculumMenu({ studentId = null, onStart }: Props) {
                   <div className="p-5 sm:p-6">
                     <div className="flex items-center justify-between">
                       <div className="text-3xl">{it.emoji}</div>
-                      {it.soon && (
+                      {it.soon && !it.enabled && (
                         <span className="text-[10px] uppercase tracking-wide bg-black/30 px-2 py-1 rounded-full">
                           Coming soon
                         </span>

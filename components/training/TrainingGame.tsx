@@ -4,7 +4,6 @@
 import React, { useMemo } from "react";
 
 import GameLayout from "./layout/GameLayout";
-import RangeCapture from "./layout/range/RangeCapture";
 import TrainingSessionPanel from "./layout/session/TrainingSessionPanel";
 
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -14,8 +13,7 @@ import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
 import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
 import useStudentRow from "@/hooks/students/useStudentRow";
-import useStudentRangeUpdater from "@/hooks/students/useStudentRangeUpdater";
-import useRangeSteps from "./layout/range/useRangeSteps";
+import useStudentRange from "@/hooks/students/useStudentRange";
 
 import { secondsPerBeat, beatsToSeconds, barsToBeats, noteValueToBeats } from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/piano-roll/scale";
@@ -25,7 +23,7 @@ import {
   buildTwoBarRhythm,
   buildPhraseFromScaleSequence,
   sequenceNoteCountForScale,
-  buildBarsRhythmForQuota, // NEW
+  buildBarsRhythmForQuota,
 } from "@/utils/phrase/generator";
 import { makeWordLyricVariant } from "@/utils/lyrics/wordBank";
 
@@ -45,9 +43,10 @@ export default function TrainingGame({
   sessionConfig = DEFAULT_SESSION_CONFIG,
 }: Props) {
   const { studentRowId, studentName, genderLabel } = useStudentRow({ studentIdFromQuery: studentId });
-  const updateRange = useStudentRangeUpdater(studentRowId);
+  const { lowHz, highHz, loading: rangeLoading, error: rangeError } = useStudentRange(studentRowId);
 
-  const { step, lowHz, highHz, canPlay, confirmLow, confirmHigh } = useRangeSteps({ updateRange, a4Hz: 440 });
+  // Fixed step flow now: no range capture step inside the game
+  const step: "play" = "play";
 
   const {
     bpm, ts, leadBars, restBars,
@@ -74,25 +73,24 @@ export default function TrainingGame({
   const liveHz = typeof pitch === "number" ? pitch : null;
 
   const usingOverrides = !!customPhrase || !!customWords;
+  const haveRange = lowHz != null && highHz != null;
 
-  // Build phrase according to rhythm config (sequence can exceed 2 bars now)
+  // Build phrase according to rhythm config (sequence can exceed 2 bars)
   const generatedPhrase: Phrase | null = useMemo(() => {
     if (usingOverrides) return customPhrase ?? null;
-    if (!lowHz || !highHz || !scale || !rhythm) return null;
+    if (!haveRange || !scale || !rhythm) return null;
 
     const available = (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
     const restProb = (rhythm as any).restProb ?? 0.3;
     const seed = (rhythm as any).seed ?? 0xA5F3D7;
 
     if ((rhythm as any).mode === "sequence") {
-      // Determine how many scale targets we need
       const base = sequenceNoteCountForScale(scale.name);
       const want =
         ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
-          ? (base * 2 - 1)   // don't double-count the apex/valley
+          ? (base * 2 - 1) // no double peak
           : base;
 
-      // Build *as many bars as needed* to deliver EXACTLY `want` NOTE slots
       const fabric = buildBarsRhythmForQuota({
         bpm, den: ts.den, tsNum: ts.num,
         available,
@@ -102,7 +100,9 @@ export default function TrainingGame({
       });
 
       return buildPhraseFromScaleSequence({
-        lowHz, highHz, a4Hz: 440,
+        lowHz: lowHz as number,
+        highHz: highHz as number,
+        a4Hz: 440,
         bpm, den: ts.den,
         tonicPc: scale.tonicPc,
         scale: scale.name,
@@ -112,7 +112,6 @@ export default function TrainingGame({
         seed,
       });
     } else {
-      // random: 2-bar rhythm, then stepwise-ish scale phrase using soft caps
       const fabric = buildTwoBarRhythm({
         bpm, den: ts.den, tsNum: ts.num,
         available,
@@ -120,7 +119,9 @@ export default function TrainingGame({
         seed,
       });
       return buildPhraseFromScaleWithRhythm({
-        lowHz, highHz, a4Hz: 440,
+        lowHz: lowHz as number,
+        highHz: highHz as number,
+        a4Hz: 440,
         bpm, den: ts.den,
         tonicPc: scale.tonicPc,
         scale: scale.name,
@@ -129,7 +130,7 @@ export default function TrainingGame({
         seed: scale.seed ?? 0x9E3779B9,
       });
     }
-  }, [usingOverrides, customPhrase, lowHz, highHz, bpm, ts.den, ts.num, scale, rhythm]);
+  }, [usingOverrides, customPhrase, haveRange, lowHz, highHz, bpm, ts.den, ts.num, scale, rhythm]);
 
   // Legacy fallback (kept for safety)
   const {
@@ -138,8 +139,8 @@ export default function TrainingGame({
     reset: resetPhraseLyrics,
     advance: advancePhraseLyrics,
   } = usePhraseLyrics({
-    lowHz,
-    highHz,
+    lowHz: haveRange ? (lowHz as number) : null,
+    highHz: haveRange ? (highHz as number) : null,
     lyricStrategy,
     a4Hz: 440,
     noteDurSec:
@@ -175,27 +176,43 @@ export default function TrainingGame({
   const { isRecording, start: startRec, stop: stopRec, wavBlob, startedAtMs, sampleRateOut, pcm16k } =
     useWavRecorder({ sampleRateOut: 16000 });
 
+  // Accurate phrase duration and padding
   const genNoteDurSec =
     typeof noteValue === "string"
       ? beatsToSeconds(noteValueToBeats(noteValue, ts.den), bpm, ts.den)
       : (noteDurSec ?? secPerBeat);
 
+  const fallbackPhraseSec =
+    beatsToSeconds(2 * ts.num, bpm, ts.den) ?? genNoteDurSec * 8;
+
   const phraseSec =
     phrase?.durationSec && Number.isFinite(phrase.durationSec)
       ? phrase.durationSec
-      : // fallback: was 2 bars; keep as last-resort only
-        beatsToSeconds(2 * ts.num, bpm, ts.den) ?? genNoteDurSec * 8;
+      : fallbackPhraseSec;
 
-  const totalTakeSec = leadInSec + phraseSec;
+  // Real end of notes (more robust than trusting durationSec blindly)
+  const lastEndSec =
+    phrase?.notes?.length
+      ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
+      : phraseSec;
 
+  // Safety pad: ≥80ms or 15% of a beat (helps at high BPM & triplets)
+  const padSec = Math.max(0.08, secPerBeat * 0.15);
+
+  // This is the content window we want to keep (excludes pre-roll)
+  const recordWindowSec = lastEndSec + padSec;
+
+  // IMPORTANT: We still start the recorder at the beginning of the record phase,
+  // so startAtMs anchors the overlay *before* the first note during pre-roll.
   const loop = usePracticeLoop({
-    step,
-    lowHz,
-    highHz,
+    step,                             // now always "play"
+    lowHz: haveRange ? (lowHz as number) : null,
+    highHz: haveRange ? (highHz as number) : null,
     phrase,
     words,
-    windowOnSec: totalTakeSec,
+    windowOnSec: recordWindowSec,     // record window excludes lead-in
     windowOffSec: restSec,
+    preRollSec: leadInSec,            // NEW: account for pre-roll in the record-phase timeout
     maxTakes: MAX_TAKES,
     maxSessionSec: MAX_SESSION_SEC,
     isRecording,
@@ -206,7 +223,7 @@ export default function TrainingGame({
 
   useRecorderAutoSync({
     enabled: step === "play",
-    shouldRecord: loop.shouldRecord,
+    shouldRecord: loop.shouldRecord,  // starts at beginning of record phase (pre-roll + phrase)
     isRecording,
     startRec,
     stopRec,
@@ -216,8 +233,8 @@ export default function TrainingGame({
     wavBlob,
     sampleRateOut,
     pcm16k,
-    windowOnSec: phraseSec,
-    trimHeadSec: leadInSec,
+    windowOnSec: recordWindowSec,     // export just the content window (pre-roll is visual)
+    trimHeadSec: 0,                   // recorder already spans pre-roll; exports content
     onTakeReady: ({ exactBlob, exactSamples }) => {
       console.log("[musicianship] take ready", {
         studentRowId,
@@ -227,7 +244,7 @@ export default function TrainingGame({
         ts: `${ts.num}/${ts.den}`,
         leadBars,
         restBars,
-        exportSeconds: phraseSec,
+        exportSeconds: recordWindowSec,
         restSeconds: restSec,
         sampleRateOut: sampleRateOut || 16000,
         exactSamples,
@@ -240,15 +257,19 @@ export default function TrainingGame({
   const showLyrics = step === "play" && !!words?.length;
   const startMs = isRecording ? startedAtMs ?? null : null;
 
-  const isRangeStep = step === "low" || step === "high";
-  const rangeConfirm = step === "low" ? confirmLow : confirmHigh;
-  const showSessionPanel = step === "play" && canPlay;
+  // UI-only messaging when range is missing
+  const readinessError =
+    rangeError
+      ? `Range load failed: ${rangeError}`
+      : !rangeLoading && !haveRange
+        ? "No saved range found. Please set your vocal range first."
+        : null;
 
   return (
     <GameLayout
       title={title}
-      error={error}
-      running={loop.running}
+      error={error || readinessError}
+      running={loop.running && haveRange && !!phrase}
       onToggle={loop.toggle}
       phrase={phrase ?? undefined}
       lyrics={showLyrics ? words ?? undefined : undefined}
@@ -257,29 +278,17 @@ export default function TrainingGame({
       confThreshold={CONF_THRESHOLD}
       startAtMs={startMs}
       leadInSec={leadInSec}
-      isReady={isReady}
+      isReady={isReady && haveRange && !!phrase}
       step={step}
       loopPhase={loop.loopPhase}
     >
-      {isRangeStep && (
-        <RangeCapture
-          key={`range-${step}`}
-          mode={step as "low" | "high"}
-          active
-          pitchHz={liveHz}
-          holdSec={1}
-          centsWindow={75}
-          a4Hz={440}
-          onConfirm={rangeConfirm}
-        />
-      )}
-
-      {showSessionPanel && (
+      {/* Session panel and stats remain; if range is missing we still show transport info */}
+      {haveRange && phrase && (
         <TrainingSessionPanel
           statusText={loop.statusText}
           isRecording={isRecording}
           startedAtMs={startedAtMs ?? null}
-          recordSec={totalTakeSec}
+          recordSec={leadInSec + recordWindowSec} // show the full record phase (pre-roll + content)
           restSec={restSec}
           maxTakes={MAX_TAKES}
           maxSessionSec={MAX_SESSION_SEC}
