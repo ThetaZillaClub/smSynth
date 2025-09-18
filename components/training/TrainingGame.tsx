@@ -37,6 +37,8 @@ const MAX_TAKES = 24;
 const MAX_SESSION_SEC = 15 * 60;
 const CONF_THRESHOLD = 0.5;
 
+const rand32 = () => (Math.floor(Math.random() * 0xffffffff) >>> 0);
+
 export default function TrainingGame({
   title = "Training",
   studentId = null,
@@ -75,25 +77,23 @@ export default function TrainingGame({
   const usingOverrides = !!customPhrase || !!customWords;
   const haveRange = lowHz != null && highHz != null;
 
+  // session-scoped random seeds (don’t expose in UI)
+  const rhythmSeed = useMemo(() => rand32(), []);
+  const scaleSeed  = useMemo(() => rand32(), []);
+  const syncSeed   = useMemo(() => rand32(), []);
+
   /* -------------------- Sync line rhythm ONLY -------------------- */
-  // Build a rhythm "fabric" for the BLUE syncopation line.
-  // IMPORTANT: use a seed that’s *different* from the phrase rhythm seed
-  // so the sync line doesn’t mirror the phrase durations.
   const syncRhythmFabric: RhythmEvent[] | null = useMemo(() => {
     if (!rhythm) return null;
 
     const available =
       (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
-    const allowRests: boolean = (rhythm as any).allowRests !== false; // default true
-    const restProbRaw = (rhythm as any).restProb ?? 0.3;
-    const restProb = allowRests ? restProbRaw : 0; // hard zero if disabled
 
-    const rhythmSeed = (rhythm as any).seed ?? 0xA5F3D7;
-    // Use an alternate seed for the sync line; supports optional .lineSeed if you add it later.
-    const syncSeed = (((rhythm as any).lineSeed ?? (rhythmSeed ^ 0x9e3779b9)) >>> 0);
+    const allowRests: boolean = (rhythm as any).allowRests !== false; // rhythm-line rests
+    const restProbRaw = (rhythm as any).restProb ?? 0.3;
+    const restProb = allowRests ? restProbRaw : 0;
 
     if ((rhythm as any).mode === "sequence") {
-      // choose a quota based on scale (independent from phrase rendering)
       const base = sequenceNoteCountForScale((scale?.name ?? "major") as any);
       const want =
         ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
@@ -117,7 +117,7 @@ export default function TrainingGame({
         seed: syncSeed,
       });
     }
-  }, [rhythm, bpm, ts.den, ts.num, scale?.name]);
+  }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed]);
 
   /* ------------------ Phrase generation (content) ------------------ */
   const generatedPhrase: Phrase | null = useMemo(() => {
@@ -126,25 +126,24 @@ export default function TrainingGame({
 
     const available =
       (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
-    const allowRests: boolean = (rhythm as any).allowRests !== false; // default true
-    const restProbRaw = (rhythm as any).restProb ?? 0.3;
-    const restProb = allowRests ? restProbRaw : 0; // hard zero if disabled
 
-    const rhythmSeed = (rhythm as any).seed ?? 0xA5F3D7; // content rhythm seed (unchanged)
-    const scaleSeed = (scale.seed ?? 0xC0FFEE);
+    // separate "phrase" (scale) rest controls
+    const contentAllowRests: boolean = (rhythm as any).contentAllowRests !== false;
+    const contentRestProbRaw = (rhythm as any).contentRestProb ?? 0.3;
+    const contentRestProb = contentAllowRests ? contentRestProbRaw : 0;
 
     if ((rhythm as any).mode === "sequence") {
       const base = sequenceNoteCountForScale(scale.name);
       const want =
         ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
-          ? base * 2 - 1 // no double peak
+          ? base * 2 - 1
           : base;
 
       const fabric = buildBarsRhythmForQuota({
         bpm, den: ts.den, tsNum: ts.num,
         available,
-        restProb,
-        allowRests,
+        restProb: contentRestProb,
+        allowRests: contentAllowRests,
         seed: rhythmSeed,
         noteQuota: want,
       });
@@ -159,15 +158,14 @@ export default function TrainingGame({
         rhythm: fabric,
         pattern: (rhythm as any).pattern,
         noteQuota: want,
-        // IMPORTANT: different seed for pitch selection to avoid matching rhythm RNG
         seed: scaleSeed,
       });
     } else {
       const fabric = buildTwoBarRhythm({
         bpm, den: ts.den, tsNum: ts.num,
         available,
-        restProb,
-        allowRests,
+        restProb: contentRestProb,
+        allowRests: contentAllowRests,
         seed: rhythmSeed,
       });
 
@@ -194,6 +192,8 @@ export default function TrainingGame({
     ts.num,
     scale,
     rhythm,
+    rhythmSeed,
+    scaleSeed,
   ]);
 
   /* --------------- Phrase selection + lyrics ---------------- */
@@ -243,16 +243,12 @@ export default function TrainingGame({
       ? phrase.durationSec
       : fallbackPhraseSec;
 
-  // Real end of notes (more robust than trusting durationSec blindly)
   const lastEndSec =
     phrase?.notes?.length
       ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
       : phraseSec;
 
-  // Safety pad: ≥80ms or 15% of a beat
   const padSec = Math.max(0.08, secPerBeat * 0.15);
-
-  // Content window length (excludes pre-roll)
   const recordWindowSec = lastEndSec + padSec;
 
   const loop = usePracticeLoop({
@@ -261,15 +257,15 @@ export default function TrainingGame({
     highHz: haveRange ? (highHz as number) : null,
     phrase,
     words,
-    windowOnSec: recordWindowSec, // record window excludes lead-in
+    windowOnSec: recordWindowSec,
     windowOffSec: restSec,
-    preRollSec: leadInSec,        // pre-roll included in record-phase timer
+    preRollSec: leadInSec,
     maxTakes: MAX_TAKES,
     maxSessionSec: MAX_SESSION_SEC,
     isRecording,
     startedAtMs: startedAtMs ?? null,
-    onAdvancePhrase: () => {}, // no legacy generator to advance
-    onEnterPlay: () => {},     // no legacy reset needed
+    onAdvancePhrase: () => {},
+    onEnterPlay: () => {},
   });
 
   useRecorderAutoSync({
@@ -308,7 +304,6 @@ export default function TrainingGame({
   const showLyrics = step === "play" && !!words?.length;
   const startMs = isRecording ? startedAtMs ?? null : null;
 
-  /* ---------------- UI-only readiness message ---------------- */
   const readinessError =
     rangeError
       ? `Range load failed: ${rangeError}`
@@ -316,7 +311,6 @@ export default function TrainingGame({
         ? "No saved range found. Please set your vocal range first."
         : null;
 
-  /* --------------------------- Render ------------------------- */
   return (
     <GameLayout
       title={title}
@@ -333,18 +327,16 @@ export default function TrainingGame({
       isReady={isReady && haveRange && !!phrase}
       step={step}
       loopPhase={loop.loopPhase}
-      /* Pass the independent syncopation fabric to the rhythm line */
       rhythm={syncRhythmFabric ?? undefined}
       bpm={bpm}
       den={ts.den}
     >
-      {/* Session panel and stats remain; if range is missing we still show transport info */}
       {haveRange && phrase && (
         <TrainingSessionPanel
           statusText={loop.statusText}
           isRecording={isRecording}
           startedAtMs={startedAtMs ?? null}
-          recordSec={leadInSec + recordWindowSec} // full record phase (pre-roll + content)
+          recordSec={leadInSec + recordWindowSec}
           restSec={restSec}
           maxTakes={MAX_TAKES}
           maxSessionSec={MAX_SESSION_SEC}

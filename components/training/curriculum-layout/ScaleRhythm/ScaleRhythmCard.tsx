@@ -1,15 +1,16 @@
 // components/training/curriculum-layout/ScaleRhythm/ScaleRhythmCard.tsx
 "use client";
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo } from "react";
 import type { SessionConfig } from "../../layout/session/types";
 import type { ScaleName } from "@/utils/phrase/scales";
 import type { NoteValue } from "@/utils/time/tempo";
 import Field from "../Field";
 import { NOTE_VALUE_OPTIONS, TONIC_OPTIONS, SCALE_OPTIONS } from "../Options";
+
 /* --------------------------------- Types --------------------------------- */
 type RangeHint = { lo: string; hi: string; list: string; none: boolean } | null;
+
 /* --------------------------- Reusable UI pieces --------------------------- */
-/** Light box + dark check. Keeps the box light and the check itself dark. */
 function FancyCheckbox({
   checked,
   onChange,
@@ -33,14 +34,14 @@ function FancyCheckbox({
         className={[
           "relative inline-flex h-4 w-4 shrink-0 items-center justify-center",
           "rounded-[4px] border",
-          "bg-[#f5f5f5] border-[#d2d2d2]", // light box
+          "bg-[#f5f5f5] border-[#d2d2d2]",
         ].join(" ")}
       >
         {checked ? (
           <svg
             viewBox="0 0 20 20"
             aria-hidden="true"
-            className="h-3 w-3 text-[#0f0f0f]" // dark check
+            className="h-3 w-3 text-[#0f0f0f]"
             fill="none"
             stroke="currentColor"
             strokeWidth="3"
@@ -55,6 +56,7 @@ function FancyCheckbox({
     </button>
   );
 }
+
 function NoteLengthPicker({
   selected,
   onToggle,
@@ -81,6 +83,7 @@ function NoteLengthPicker({
     </div>
   );
 }
+
 function RestControls({
   allowRests,
   restProb,
@@ -118,6 +121,7 @@ function RestControls({
     </>
   );
 }
+
 /* --------------------------------- Card ---------------------------------- */
 export default function ScaleRhythmCard({
   cfg,
@@ -130,25 +134,37 @@ export default function ScaleRhythmCard({
   allowedTonicPcs: Set<number>;
   rangeHint: RangeHint;
 }) {
-  const rand32 = useCallback(() => Math.floor(Math.random() * 0xffffffff) >>> 0, []);
   const haveRange = useMemo(
     () => allowedTonicPcs.size > 0 || rangeHint != null,
     [allowedTonicPcs, rangeHint]
   );
+
   const scaleCfg =
-    cfg.scale ?? ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2, seed: 0xC0FFEE } as const);
+    cfg.scale ?? ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2 } as const);
+
+  // bring forward defaults + ensure separate rest controls exist
   const rhythmCfg = (cfg.rhythm ?? {
     mode: "random",
     available: ["quarter"],
     restProb: 0.3,
     allowRests: true,
-    seed: 0xA5F3D7,
+    contentRestProb: 0.3,
+    contentAllowRests: true,
   }) as any;
-  const allowRests: boolean = rhythmCfg.allowRests !== false; // default true
+
   const selected = new Set<NoteValue>(rhythmCfg.available ?? ["quarter"]);
+
+  const SEQ_PATTERN_OPTIONS: { label: string; value: "asc" | "desc" | "asc-desc" | "desc-asc" }[] = [
+    { label: "Ascending", value: "asc" },
+    { label: "Descending", value: "desc" },
+    { label: "Asc → Desc", value: "asc-desc" },
+    { label: "Desc → Asc", value: "desc-asc" },
+  ];
+
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">Scale & Rhythm</div>
+
       {/* Range hint */}
       {rangeHint ? (
         <div className="mb-2 text-xs text-[#2d2d2d]">
@@ -164,6 +180,7 @@ export default function ScaleRhythmCard({
           Select a key (will be limited once a vocal range is saved).
         </div>
       )}
+
       {/* Scale */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <Field label="Tonic">
@@ -226,33 +243,10 @@ export default function ScaleRhythmCard({
           />
         </Field>
       </div>
-      {/* Scale randomness */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-        <Field label="Scale seed (pitch)">
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              inputMode="numeric"
-              className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-              value={scaleCfg.seed ?? 0xC0FFEE}
-              onChange={(e) =>
-                onChange({ scale: { ...scaleCfg, seed: Math.floor(Number(e.target.value) || 0) } as any })
-              }
-            />
-            <button
-              type="button"
-              className="px-2 py-1 rounded-md border border-[#d2d2d2] bg-white text-sm"
-              title="Randomize scale seed"
-              onClick={() => onChange({ scale: { ...scaleCfg, seed: rand32() } as any })}
-            >
-              🎲
-            </button>
-          </div>
-        </Field>
-        <div className="hidden sm:block" />
-      </div>
+
       {/* Rhythm */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-3">
+        {/* Mode */}
         <Field label="Mode">
           <select
             className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
@@ -264,18 +258,21 @@ export default function ScaleRhythmCard({
                   mode === "sequence"
                     ? ({
                         mode: "sequence",
-                        pattern: "asc",
-                        available: ["quarter"],
-                        restProb: 0.3,
-                        allowRests: true,
-                        seed: 0xD1A1,
+                        pattern: rhythmCfg.pattern ?? "asc",
+                        available: rhythmCfg.available ?? ["quarter"],
+                        // keep both rest control sets when toggling
+                        restProb: rhythmCfg.restProb ?? 0.3,
+                        allowRests: rhythmCfg.allowRests ?? true,
+                        contentRestProb: rhythmCfg.contentRestProb ?? 0.3,
+                        contentAllowRests: rhythmCfg.contentAllowRests ?? true,
                       } as any)
                     : ({
                         mode: "random",
-                        available: ["quarter"],
-                        restProb: 0.3,
-                        allowRests: true,
-                        seed: 0xA5F3D7,
+                        available: rhythmCfg.available ?? ["quarter"],
+                        restProb: rhythmCfg.restProb ?? 0.3,
+                        allowRests: rhythmCfg.allowRests ?? true,
+                        contentRestProb: rhythmCfg.contentRestProb ?? 0.3,
+                        contentAllowRests: rhythmCfg.contentAllowRests ?? true,
                       } as any),
               });
             }}
@@ -284,15 +281,56 @@ export default function ScaleRhythmCard({
             <option value="random">Random</option>
           </select>
         </Field>
-        <RestControls
-          allowRests={allowRests}
-          restProb={rhythmCfg.restProb ?? 0.3}
-          onAllowChange={(next) => onChange({ rhythm: { ...rhythmCfg, allowRests: next } as any })}
-          onProbChange={(next) => onChange({ rhythm: { ...rhythmCfg, restProb: next } as any })}
-        />
-        {/* keep grid aligned when fewer than 4 fields in this row */}
-        <div className="hidden sm:block" />
+
+        {/* Sequence pattern (only for sequence mode) */}
+        {rhythmCfg.mode === "sequence" ? (
+          <Field label="Sequence pattern">
+            <select
+              className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+              value={rhythmCfg.pattern ?? "asc"}
+              onChange={(e) =>
+                onChange({ rhythm: { ...rhythmCfg, pattern: e.target.value as any } })
+              }
+            >
+              {SEQ_PATTERN_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <div className="hidden sm:block" />
+        )}
+
+        {/* Rhythm line rests (blue strip) */}
+        <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="col-span-1">
+            <RestControls
+              allowRests={rhythmCfg.allowRests !== false}
+              restProb={rhythmCfg.restProb ?? 0.3}
+              onAllowChange={(next) => onChange({ rhythm: { ...rhythmCfg, allowRests: next } as any })}
+              onProbChange={(next) => onChange({ rhythm: { ...rhythmCfg, restProb: next } as any })}
+            />
+          </div>
+
+          {/* Phrase (scale) rests */}
+          <div className="col-span-1">
+            <RestControls
+              allowRests={rhythmCfg.contentAllowRests !== false}
+              restProb={rhythmCfg.contentRestProb ?? 0.3}
+              onAllowChange={(next) =>
+                onChange({ rhythm: { ...rhythmCfg, contentAllowRests: next } as any })
+              }
+              onProbChange={(next) =>
+                onChange({ rhythm: { ...rhythmCfg, contentRestProb: next } as any })
+              }
+            />
+          </div>
+        </div>
       </div>
+
+      {/* Available note lengths (shared) */}
       <div className="grid grid-cols-1 gap-2 mt-3">
         <Field label="Available note lengths">
           <NoteLengthPicker
@@ -305,45 +343,6 @@ export default function ScaleRhythmCard({
             }}
           />
         </Field>
-      </div>
-      {/* Rhythm randomness */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-        <Field label="Rhythm seed">
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              inputMode="numeric"
-              className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-              value={rhythmCfg.seed ?? 0xA5F3D7}
-              onChange={(e) =>
-                onChange({ rhythm: { ...rhythmCfg, seed: Math.floor(Number(e.target.value) || 0) } as any })
-              }
-            />
-            <button
-              type="button"
-              className="px-2 py-1 rounded-md border border-[#d2d2d2] bg-white text-sm"
-              title="Randomize rhythm seed"
-              onClick={() => onChange({ rhythm: { ...rhythmCfg, seed: rand32() } as any })}
-            >
-              🎲
-            </button>
-          </div>
-        </Field>
-        <div className="hidden sm:block" />
-      </div>
-      <div className="mt-2 text-xs text-[#6b6b6b]">
-        Seeds are independent so scale notes and rhythm won’t “lock step” by accident — great for interlocking patterns.
-      </div>
-
-      {/* Lyrics policy hint */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-        <Field label="Lyrics">
-          <div className="text-sm">
-            Uses <span className="font-semibold">solfege</span> by default (mode-aware, movable-do). You can override
-            with custom words below or by importing a MIDI with karaoke lyrics.
-          </div>
-        </Field>
-        <div className="hidden sm:block" />
       </div>
     </div>
   );
