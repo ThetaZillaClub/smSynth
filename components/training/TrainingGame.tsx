@@ -45,7 +45,7 @@ export default function TrainingGame({
 
   const {
     bpm, ts, leadBars, restBars,
-    noteValue, noteDurSec, lyricStrategy, // lyricStrategy is retained for type stability but is always "solfege"
+    noteValue, noteDurSec, lyricStrategy,
     customPhrase, customWords,
     scale, rhythm,
   } = sessionConfig;
@@ -75,8 +75,11 @@ export default function TrainingGame({
     if (usingOverrides) return customPhrase ?? null;
     if (!haveRange || !scale || !rhythm) return null;
 
-    const available = (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
-    const restProb = (rhythm as any).restProb ?? 0.3;
+    const available =
+      (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
+    const allowRests: boolean = (rhythm as any).allowRests !== false; // default true
+    const restProbRaw = (rhythm as any).restProb ?? 0.3;
+    const restProb = allowRests ? restProbRaw : 0; // hard zero if disabled
     const seed = (rhythm as any).seed ?? 0xA5F3D7;
 
     if ((rhythm as any).mode === "sequence") {
@@ -90,6 +93,7 @@ export default function TrainingGame({
         bpm, den: ts.den, tsNum: ts.num,
         available,
         restProb,
+        allowRests, // NEW
         seed,
         noteQuota: want,
       });
@@ -111,8 +115,10 @@ export default function TrainingGame({
         bpm, den: ts.den, tsNum: ts.num,
         available,
         restProb,
+        allowRests, // NEW
         seed,
       });
+
       return buildPhraseFromScaleWithRhythm({
         lowHz: lowHz as number,
         highHz: highHz as number,
@@ -125,7 +131,18 @@ export default function TrainingGame({
         seed: scale.seed ?? 0x9E3779B9,
       });
     }
-  }, [usingOverrides, customPhrase, haveRange, lowHz, highHz, bpm, ts.den, ts.num, scale, rhythm]);
+  }, [
+    usingOverrides,
+    customPhrase,
+    haveRange,
+    lowHz,
+    highHz,
+    bpm,
+    ts.den,
+    ts.num,
+    scale,
+    rhythm,
+  ]);
 
   // Phrase selection (overrides > generated > null)
   const phrase: Phrase | null = useMemo(() => {

@@ -25,7 +25,9 @@ export type RhythmConfig =
       /** Optional seed to pick starting register */
       seed?: number;
       /** Rest density in sequence mapping (applies to rhythm fabric below) */
-      restProb?: number; // default 0.3
+      restProb?: number;          // default 0.3
+      /** Hard switch to allow (true) or forbid (false) rests entirely */
+      allowRests?: boolean;       // default true
       /** Available note lengths to compose the rhythm fabric (default ["quarter"]) */
       available?: NoteValue[];
     }
@@ -35,6 +37,8 @@ export type RhythmConfig =
       available?: NoteValue[];
       /** Rest density (default 0.3) */
       restProb?: number;
+      /** Hard switch to allow (true) or forbid (false) rests entirely */
+      allowRests?: boolean;       // default true
       /** Seed */
       seed?: number;
     };
@@ -75,7 +79,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   noteDurSec: 0.5,
   lyricStrategy: "solfege",
   scale: { tonicPc: 0, name: "major", maxPerDegree: 2, seed: 0xC0FFEE },
-  rhythm: { mode: "random", available: ["quarter"], restProb: 0.3, seed: 0xA5F3D7 },
+  rhythm: { mode: "random", available: ["quarter"], restProb: 0.3, allowRests: true, seed: 0xA5F3D7 },
   customPhrase: null,
   customWords: null,
 };

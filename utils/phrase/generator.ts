@@ -141,7 +141,7 @@ export function buildPhraseFromScaleWithRhythm(params: {
       else leap.push(m);
     }
 
-    let choices = (rnd() < 0.75 ? near : leap);
+    let choices = rnd() < 0.75 ? near : leap;
     if (!choices.length) choices = allowed.slice();
 
     let filtered = choices.filter(fitsCap);
@@ -162,28 +162,30 @@ export function buildPhraseFromScaleWithRhythm(params: {
   return { durationSec: t, notes };
 }
 
-/* ---------------- NEW exports used by TrainingGame ---------------- */
+/* ---------------- Builders used by TrainingGame ---------------- */
 
 /**
  * Build a 2-bar rhythm using a whitelist of note values.
  * - Exactly fills 2 bars (within float tolerance).
- * - Produces both notes and rests (guaranteed at least one rest).
+ * - Respects allowRests: if false, emits no rests.
  * - You can bias rest density via restProb.
  * - Optionally enforce a minimum number of NOTES (noteQuota) to support scale sequences.
  */
 export function buildTwoBarRhythm(opts: {
   bpm: number;
   den: number;
-  tsNum: number;        // numerator
+  tsNum: number;         // numerator
   available: NoteValue[]; // allowed note values (e.g., ["quarter","eighth"])
-  restProb?: number;    // default 0.3
+  restProb?: number;     // default 0.3
+  allowRests?: boolean;  // default true
   seed?: number;
-  noteQuota?: number;   // ensure at least this many notes
+  noteQuota?: number;    // ensure at least this many notes
 }): RhythmEvent[] {
   const {
     bpm, den, tsNum,
     available,
     restProb = 0.3,
+    allowRests = true,
     seed = 0xA5F3D7,
     noteQuota = 0,
   } = opts;
@@ -201,13 +203,13 @@ export function buildTwoBarRhythm(opts: {
     const candidates = available.filter((v) => dur(v) <= remaining + EPS);
     if (!candidates.length) break; // rounding tail
     const value = choose(candidates, rnd);
-    const type = rnd() < restProb ? "rest" : "note";
+    const type: RhythmEvent["type"] = allowRests && rnd() < restProb ? "rest" : "note";
     out.push({ type, value });
     t += dur(value);
   }
 
-  // Ensure at least one rest
-  if (!out.some((e) => e.type === "rest")) {
+  // Only ensure a rest if rests are allowed
+  if (allowRests && !out.some((e) => e.type === "rest")) {
     const idx = out.findIndex((e) => e.type === "note");
     if (idx >= 0) out[idx] = { ...out[idx], type: "rest" };
     else if (out.length) out[out.length - 1] = { ...out[out.length - 1], type: "rest" };
@@ -215,7 +217,7 @@ export function buildTwoBarRhythm(opts: {
   }
 
   // Enforce minimum note count by flipping rests if needed
-  if (noteQuota > 0) {
+  if (allowRests && noteQuota > 0) {
     let notes = out.filter((e) => e.type === "note").length;
     if (notes < noteQuota) {
       const restIdxs = out.map((e, i) => (e.type === "rest" ? i : -1)).filter((i) => i >= 0);
@@ -236,14 +238,16 @@ export function buildBarsRhythmForQuota(opts: {
   den: number;
   tsNum: number;
   available: NoteValue[];
-  restProb?: number;   // default 0.3
+  restProb?: number;     // default 0.3
+  allowRests?: boolean;  // default true
   seed?: number;
-  noteQuota: number;   // how many NOTE events we need in total
+  noteQuota: number;     // how many NOTE events we need in total
 }): RhythmEvent[] {
   const {
     bpm, den, tsNum,
     available,
     restProb = 0.3,
+    allowRests = true,
     seed = 0xA5F3D7,
     noteQuota,
   } = opts;
@@ -262,16 +266,17 @@ export function buildBarsRhythmForQuota(opts: {
     while (used + EPS < beatsPerBar) {
       const remaining = beatsPerBar - used + EPS;
       const candidates = available
-        .map(v => ({ v, b: beats(v) }))
-        .filter(x => x.b <= remaining + EPS)
-        .sort((a,b) => a.b - b.b); // prefer shorter first for better packing
+        .map((v) => ({ v, b: beats(v) }))
+        .filter((x) => x.b <= remaining + EPS)
+        .sort((a, b) => a.b - b.b); // prefer shorter first for better packing
       if (!candidates.length) break;
 
       const pick = candidates[Math.floor(rnd() * candidates.length)].v;
-      let type: RhythmEvent["type"] = rnd() < restProb ? "rest" : "note";
 
-      // Don’t exceed the global quota of NOTE slots: flip surplus to rest.
-      if (type === "note" && notesSoFar >= noteQuota) type = "rest";
+      let type: RhythmEvent["type"] = allowRests && rnd() < restProb ? "rest" : "note";
+
+      // If rests are allowed, constrain NOTE count to global quota.
+      if (allowRests && type === "note" && notesSoFar >= noteQuota) type = "rest";
 
       bar.push({ type, value: pick });
       used += beats(pick);
@@ -281,18 +286,22 @@ export function buildBarsRhythmForQuota(opts: {
     return bar;
   };
 
-  // Keep adding bars until we’ve delivered at least `noteQuota` NOTE slots
+  // Keep adding bars until we’ve delivered at least `noteQuota` NOTE slots.
   while (notesSoFar < noteQuota) {
     out.push(...makeBar());
+    // When rests are NOT allowed, we may overshoot noteQuota with pure notes; stop once quota met.
+    if (!allowRests && notesSoFar >= noteQuota) break;
   }
 
-  // If we overshot, ensure EXACT number of note slots by flipping extras to RESTs from the end.
-  let extra = notesSoFar - noteQuota;
-  if (extra > 0) {
-    for (let i = out.length - 1; i >= 0 && extra > 0; i--) {
-      if (out[i].type === "note") {
-        out[i] = { ...out[i], type: "rest" };
-        extra--;
+  // If rests are allowed and we overshot, ensure EXACT number of note slots by flipping extras to RESTs.
+  if (allowRests) {
+    let extra = notesSoFar - noteQuota;
+    if (extra > 0) {
+      for (let i = out.length - 1; i >= 0 && extra > 0; i--) {
+        if (out[i].type === "note") {
+          out[i] = { ...out[i], type: "rest" };
+          extra--;
+        }
       }
     }
   }
@@ -350,7 +359,7 @@ export function buildPhraseFromScaleSequence(params: {
   }
 
   // --- Degree offsets inside one octave ---
-  const baseOffsets = scaleSemitones(scale).slice().sort((a,b)=>a-b);
+  const baseOffsets = scaleSemitones(scale).slice().sort((a, b) => a - b);
 
   // Create exactly `noteQuota` ascending degree offsets, repeating into next octaves as needed.
   const buildAscendingOffsets = (quota: number): number[] => {
@@ -384,14 +393,8 @@ export function buildPhraseFromScaleSequence(params: {
   const fits: Fit[] = tonicCandidates.map((base) => {
     const lastAsc = base + asc[asc.length - 1];
     const firstAsc = base + asc[0];
-    const overflow =
-      Math.max(0, loM - firstAsc) + Math.max(0, lastAsc - hiM);
-    return {
-      base,
-      fits: overflow === 0,
-      overflow,
-      dist: Math.abs(base - center),
-    };
+    const overflow = Math.max(0, loM - firstAsc) + Math.max(0, lastAsc - hiM);
+    return { base, fits: overflow === 0, overflow, dist: Math.abs(base - center) };
   });
 
   // Prefer perfect fits, then minimal overflow, then proximity (deterministic tiebreak)
