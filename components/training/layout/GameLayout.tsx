@@ -9,6 +9,7 @@ import useActiveLyricIndex from "./lyrics/useActiveLyricIndex";
 import { type Phrase } from "./piano-roll/PianoRollCanvas";
 // Use a relative import here to avoid alias resolution issues
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
+import type { RhythmEvent } from "@/utils/phrase/generator";
 
 type LayoutProps = {
   title: string;
@@ -43,6 +44,11 @@ type LayoutProps = {
   step: "low" | "high" | "play";
   loopPhase: LoopPhase;
 
+  /** NEW: rhythm fabric (to render a syncopation line) + tempo */
+  rhythm?: RhythmEvent[];
+  bpm?: number;
+  den?: number;
+
   children?: React.ReactNode;
 };
 
@@ -65,6 +71,10 @@ export default function GameLayout({
 
   step,
   loopPhase,
+
+  rhythm,
+  bpm = 80,
+  den = 4,
 
   children,
 }: LayoutProps) {
@@ -125,6 +135,10 @@ export default function GameLayout({
               startAtMs={startAtMs}
               lyrics={lyrics}
               leadInSec={leadInSec}
+              /* NEW: rhythm line & tempo */
+              rhythm={rhythm}
+              bpm={bpm}
+              den={den}
             />
           </div>
 
