@@ -61,7 +61,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
   const brandContent = (
     <div className="flex items-center gap-2">
       <Logo className="w-12 h-12" />
-      <span className="text-xl sm:text-2xl md:text-3xl font-semibold text-[#0f0f0f]">smSynth</span>
+      <span className="text-xl sm:text-2xl md:text-3xl font-semibold text-[#0f0f0f]">PitchTune.Pro</span>
     </div>
   )
 
@@ -111,8 +111,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
           </>
         ) : (
           <>
-            {/* NEW: Models link (only when logged in), placed to the left of "My Account" */}
-            {navLink('/model-library', 'Model Library')}
+            {/* Removed: Model Library link */}
 
             {pathname === '/profile' ? (
               <a
@@ -120,10 +119,11 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
                 onClick={(e) => { e.preventDefault(); scrollToTop() }}
                 className="text-base sm:text-md font-medium text-[#0f0f0f] transition duration-200 hover:underline hover:underline-offset-4"
               >
-                My Account
+                Study
               </a>
             ) : (
-              navLink('/profile', 'Model Training')
+              // Renamed from "Model Training" → "Study"
+              navLink('/profile', 'Study')
             )}
             <SignOutButton />
           </>

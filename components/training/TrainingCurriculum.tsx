@@ -118,7 +118,7 @@ export default function TrainingCurriculum({
   const rhythmCfg = cfg.rhythm ?? { preset: "equal" as const, noteValue: (cfg.noteValue ?? "eighth"), length: 8, allowRests: false, seed: 0xA5F3D7 };
 
   return (
-    <div className="min-h-dvh h-dvh flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
+    <div className="min-h-dvh h-dvh flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
       {/* Header */}
       <div className="w-full flex justify-center pt-4 px-6 pb-2">
         <div className="w-full max-w-7xl">
@@ -148,165 +148,165 @@ export default function TrainingCurriculum({
             <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">Scale & Rhythm</div>
 
             {/* Scale & Rhythm */}
-<div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-  <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">Scale & Rhythm</div>
+            <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
+              <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">Scale & Rhythm</div>
 
-  {/* Scale */}
-  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-    <Field label="Tonic">
-      <select
-        className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-        value={scaleCfg.tonicPc}
-        onChange={(e) =>
-          pushChange({ scale: { ...scaleCfg, tonicPc: Math.max(0, Math.min(11, Number(e.target.value) || 0)) } })
-        }
-      >
-        {TONIC_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    </Field>
-    <Field label="Scale">
-      <select
-        className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-        value={scaleCfg.name}
-        onChange={(e) => pushChange({ scale: { ...scaleCfg, name: e.target.value as ScaleName } })}
-      >
-        {SCALE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    </Field>
-    <Field label="Max per degree (random only)">
-      <input
-        type="number"
-        inputMode="numeric"
-        className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-        value={scaleCfg.maxPerDegree ?? 2}
-        min={1}
-        max={8}
-        onChange={(e) =>
-          pushChange({ scale: { ...scaleCfg, maxPerDegree: Math.max(1, Math.floor(Number(e.target.value) || 1)) } })
-        }
-      />
-    </Field>
-  </div>
+              {/* Scale */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Field label="Tonic">
+                  <select
+                    className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+                    value={scaleCfg.tonicPc}
+                    onChange={(e) =>
+                      pushChange({ scale: { ...scaleCfg, tonicPc: Math.max(0, Math.min(11, Number(e.target.value) || 0)) } })
+                    }
+                  >
+                    {TONIC_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Scale">
+                  <select
+                    className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+                    value={scaleCfg.name}
+                    onChange={(e) => pushChange({ scale: { ...scaleCfg, name: e.target.value as ScaleName } })}
+                  >
+                    {SCALE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Max per degree (random only)">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+                    value={scaleCfg.maxPerDegree ?? 2}
+                    min={1}
+                    max={8}
+                    onChange={(e) =>
+                      pushChange({ scale: { ...scaleCfg, maxPerDegree: Math.max(1, Math.floor(Number(e.target.value) || 1)) } })
+                    }
+                  />
+                </Field>
+              </div>
 
-  {/* Rhythm */}
-  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-3">
-    <Field label="Mode">
-      <select
-        className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-        value={(rhythmCfg as any).mode ?? "random"}
-        onChange={(e) => {
-          const mode = e.target.value as "sequence" | "random";
-          pushChange({
-            rhythm:
-              mode === "sequence"
-                ? { mode: "sequence", pattern: "asc", available: ["quarter"], restProb: 0.3, seed: 0xD1A1 }
-                : { mode: "random", available: ["quarter"], restProb: 0.3, seed: 0xA5F3D7 },
-          });
-        }}
-      >
-        <option value="sequence">Sequence</option>
-        <option value="random">Random</option>
-      </select>
-    </Field>
+              {/* Rhythm */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-3">
+                <Field label="Mode">
+                  <select
+                    className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+                    value={(rhythmCfg as any).mode ?? "random"}
+                    onChange={(e) => {
+                      const mode = e.target.value as "sequence" | "random";
+                      pushChange({
+                        rhythm:
+                          mode === "sequence"
+                            ? { mode: "sequence", pattern: "asc", available: ["quarter"], restProb: 0.3, seed: 0xD1A1 }
+                            : { mode: "random", available: ["quarter"], restProb: 0.3, seed: 0xA5F3D7 },
+                      });
+                    }}
+                  >
+                    <option value="sequence">Sequence</option>
+                    <option value="random">Random</option>
+                  </select>
+                </Field>
 
-    {"mode" in rhythmCfg && rhythmCfg.mode === "sequence" ? (
-      <>
-        <Field label="Pattern">
-          <select
-            className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-            value={rhythmCfg.pattern}
-            onChange={(e) => pushChange({ rhythm: { ...rhythmCfg, pattern: e.target.value as any } })}
-          >
-            <option value="asc">Ascending</option>
-            <option value="desc">Descending</option>
-            <option value="asc-desc">Asc → Desc</option>
-            <option value="desc-asc">Desc → Asc</option>
-          </select>
-        </Field>
-        <Field label="Available note lengths">
-          <div className="flex flex-wrap gap-2">
-            {NOTE_VALUE_OPTIONS
-              .filter((o) => ["whole","half","quarter","eighth","sixteenth","triplet-eighth","dotted-eighth"].includes(o.value))
-              .map((o) => {
-                const arr = new Set(rhythmCfg.available ?? ["quarter"]);
-                const checked = arr.has(o.value);
-                return (
-                  <label key={o.value} className="inline-flex items-center gap-1 text-sm">
-                    <input
-                      type="checkbox"
-                      className="accent-black"
-                      checked={checked}
-                      onChange={(e) => {
-                        if (e.target.checked) arr.add(o.value); else arr.delete(o.value);
-                        pushChange({ rhythm: { ...rhythmCfg, available: Array.from(arr) as NoteValue[] } });
-                      }}
-                    />
-                    <span>{o.label}</span>
-                  </label>
-                );
-              })}
-          </div>
-        </Field>
-        <Field label="Rest probability">
-          <input
-            type="number"
-            step="0.05"
-            min={0}
-            max={0.95}
-            className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-            value={rhythmCfg.restProb ?? 0.3}
-            onChange={(e) => pushChange({ rhythm: { ...rhythmCfg, restProb: Math.max(0, Math.min(0.95, Number(e.target.value) || 0.3)) } })}
-          />
-        </Field>
-      </>
-    ) : (
-      <>
-        <Field label="Available note lengths">
-          <div className="flex flex-wrap gap-2">
-            {NOTE_VALUE_OPTIONS
-              .filter((o) => ["whole","half","quarter","eighth","sixteenth","triplet-eighth","dotted-eighth"].includes(o.value))
-              .map((o) => {
-                const arr = new Set((rhythmCfg as any).available ?? ["quarter"]);
-                const checked = arr.has(o.value);
-                return (
-                  <label key={o.value} className="inline-flex items-center gap-1 text-sm">
-                    <input
-                      type="checkbox"
-                      className="accent-black"
-                      checked={checked}
-                      onChange={(e) => {
-                        if (e.target.checked) arr.add(o.value); else arr.delete(o.value);
-                        pushChange({ rhythm: { ...(rhythmCfg as any), available: Array.from(arr) as NoteValue[] } });
-                      }}
-                    />
-                    <span>{o.label}</span>
-                  </label>
-                );
-              })}
-          </div>
-        </Field>
-        <Field label="Rest probability">
-          <input
-            type="number"
-            step="0.05"
-            min={0}
-            max={0.95}
-            className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-            value={(rhythmCfg as any).restProb ?? 0.3}
-            onChange={(e) =>
-              pushChange({ rhythm: { ...(rhythmCfg as any), restProb: Math.max(0, Math.min(0.95, Number(e.target.value) || 0.3)) } })
-            }
-          />
-        </Field>
-        <div className="hidden sm:block" />
-      </>
-    )}
-  </div>
-</div>
+                {"mode" in rhythmCfg && rhythmCfg.mode === "sequence" ? (
+                  <>
+                    <Field label="Pattern">
+                      <select
+                        className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+                        value={rhythmCfg.pattern}
+                        onChange={(e) => pushChange({ rhythm: { ...rhythmCfg, pattern: e.target.value as any } })}
+                      >
+                        <option value="asc">Ascending</option>
+                        <option value="desc">Descending</option>
+                        <option value="asc-desc">Asc → Desc</option>
+                        <option value="desc-asc">Desc → Asc</option>
+                      </select>
+                    </Field>
+                    <Field label="Available note lengths">
+                      <div className="flex flex-wrap gap-2">
+                        {NOTE_VALUE_OPTIONS
+                          .filter((o) => ["whole","half","quarter","eighth","sixteenth","triplet-eighth","dotted-eighth"].includes(o.value))
+                          .map((o) => {
+                            const arr = new Set(rhythmCfg.available ?? ["quarter"]);
+                            const checked = arr.has(o.value);
+                            return (
+                              <label key={o.value} className="inline-flex items-center gap-1 text-sm">
+                                <input
+                                  type="checkbox"
+                                  className="accent-black"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) arr.add(o.value); else arr.delete(o.value);
+                                    pushChange({ rhythm: { ...rhythmCfg, available: Array.from(arr) as NoteValue[] } });
+                                  }}
+                                />
+                                <span>{o.label}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    </Field>
+                    <Field label="Rest probability">
+                      <input
+                        type="number"
+                        step="0.05"
+                        min={0}
+                        max={0.95}
+                        className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+                        value={rhythmCfg.restProb ?? 0.3}
+                        onChange={(e) => pushChange({ rhythm: { ...rhythmCfg, restProb: Math.max(0, Math.min(0.95, Number(e.target.value) || 0.3)) } })}
+                      />
+                    </Field>
+                  </>
+                ) : (
+                  <>
+                    <Field label="Available note lengths">
+                      <div className="flex flex-wrap gap-2">
+                        {NOTE_VALUE_OPTIONS
+                          .filter((o) => ["whole","half","quarter","eighth","sixteenth","triplet-eighth","dotted-eighth"].includes(o.value))
+                          .map((o) => {
+                            const arr = new Set((rhythmCfg as any).available ?? ["quarter"]);
+                            const checked = arr.has(o.value);
+                            return (
+                              <label key={o.value} className="inline-flex items-center gap-1 text-sm">
+                                <input
+                                  type="checkbox"
+                                  className="accent-black"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) arr.add(o.value); else arr.delete(o.value);
+                                    pushChange({ rhythm: { ...(rhythmCfg as any), available: Array.from(arr) as NoteValue[] } });
+                                  }}
+                                />
+                                <span>{o.label}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    </Field>
+                    <Field label="Rest probability">
+                      <input
+                        type="number"
+                        step="0.05"
+                        min={0}
+                        max={0.95}
+                        className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+                        value={(rhythmCfg as any).restProb ?? 0.3}
+                        onChange={(e) =>
+                          pushChange({ rhythm: { ...(rhythmCfg as any), restProb: Math.max(0, Math.min(0.95, Number(e.target.value) || 0.3)) } })
+                        }
+                      />
+                    </Field>
+                    <div className="hidden sm:block" />
+                  </>
+                )}
+              </div>
+            </div>
 
             {/* Lyrics style */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
@@ -397,7 +397,7 @@ export default function TrainingCurriculum({
           <button
             type="button"
             onClick={launch}
-            className="px-4 py-2 rounded-md bg-black text-white text-sm hover:bg-black/90 transition shadow"
+            className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm"
             title="Begin session"
           >
             Start session →

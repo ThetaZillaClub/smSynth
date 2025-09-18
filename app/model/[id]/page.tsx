@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import PrimaryHeader from '@/components/header/PrimaryHeader';
 
@@ -65,15 +66,14 @@ export default function ModelDetailPage() {
     return () => { mounted = false; };
   }, [m?.image_path, supabase]);
 
-  // Download link (optional ?sessionId=... passthrough)
+  // Build training href (preserve optional ?sessionId=... passthrough if used downstream)
   const sessionId = sp.get('sessionId');
-  const dlHref = sessionId
-    ? `/api/models/${id}/latest-ckpt?sessionId=${encodeURIComponent(sessionId)}`
-    : `/api/models/${id}/latest-ckpt`;
+  const trainingHref = sessionId
+    ? `/training?model_id=${encodeURIComponent(String(id))}&sessionId=${encodeURIComponent(sessionId)}`
+    : `/training?model_id=${encodeURIComponent(String(id))}`;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
-      {/* Primary header fixed to top */}
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
       <PrimaryHeader />
 
       <div id="top" className="max-w-5xl mx-auto pt-28 p-6 w-full">
@@ -107,17 +107,19 @@ export default function ModelDetailPage() {
                 </div>
 
                 <div className="mt-4 flex gap-3">
-                  <a
-                    href={dlHref}
-                    className="px-4 py-2 rounded-md bg-black text-white hover:opacity-90"
+                  {/* Light CTA (brand) */}
+                  <Link
+                    href={trainingHref}
+                    prefetch
+                    className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] hover:bg-white transition"
                   >
-                    Download latest checkpoint
-                  </a>
+                    Launch Training
+                  </Link>
                 </div>
               </div>
             </div>
 
-            {/* Removed the inference panel */}
+            {/* inference panel removed as before */}
           </div>
         )}
       </div>
