@@ -18,6 +18,7 @@ import ImportMidiCard from "./curriculum-layout/ImportMidi/ImportMidiCard";
 import AdvancedOverridesCard from "./curriculum-layout/AdvancedOverrides/AdvancedOverridesCard";
 import CustomLyricsCard from "./curriculum-layout/CustomLyrics/CustomLyricsCard";
 import Field from "./curriculum-layout/Field";
+import ViewSelectCard from "./curriculum-layout/ViewSelect/ViewSelectCard";
 
 function safeParsePhrase(s: string): Phrase | null {
   try {
@@ -150,7 +151,8 @@ export default function TrainingCurriculum({
 
       {/* Body */}
       <div className="w-full flex-1 flex flex-col gap-4 min-h-0 px-6 pb-6">
-        <div className="w-full max-w-7xl mx-auto mt-2">
+        {/* Transport + View */}
+        <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
           <TransportCard
             bpm={cfg.bpm}
             ts={cfg.ts}
@@ -158,8 +160,10 @@ export default function TrainingCurriculum({
             restBars={cfg.restBars}
             onChange={pushChange}
           />
+          <ViewSelectCard value={cfg.view} onChange={pushChange} />
         </div>
 
+        {/* Scale / Rhythm + Import MIDI */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
           <ScaleRhythmCard
             cfg={cfg}

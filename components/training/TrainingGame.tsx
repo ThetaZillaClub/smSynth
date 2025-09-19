@@ -55,6 +55,7 @@ export default function TrainingGame({
     noteValue, noteDurSec, lyricStrategy,
     customPhrase, customWords,
     scale, rhythm,
+    view,
   } = sessionConfig;
 
   /* ----------------------- Transport math ----------------------- */
@@ -330,6 +331,8 @@ export default function TrainingGame({
       rhythm={syncRhythmFabric ?? undefined}
       bpm={bpm}
       den={ts.den}
+      tsNum={ts.num}  // NEW: plumb numerator
+      view={view}
     >
       {haveRange && phrase && (
         <TrainingSessionPanel

@@ -39,6 +39,8 @@ export type RhythmConfig =
       seed?: number;
     };
 
+export type ViewMode = "piano" | "sheet";
+
 export type SessionConfig = {
   bpm: number;
   ts: TimeSignature;
@@ -51,6 +53,8 @@ export type SessionConfig = {
   rhythm?: RhythmConfig;
   customPhrase?: Phrase | null;
   customWords?: string[] | null;
+  /** NEW: session view mode */
+  view: ViewMode;
 };
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
@@ -73,4 +77,5 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   },
   customPhrase: null,
   customWords: null,
+  view: "piano",
 };

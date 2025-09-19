@@ -44,10 +44,14 @@ type LayoutProps = {
   step: "low" | "high" | "play";
   loopPhase: LoopPhase;
 
-  /** NEW: rhythm fabric (to render a syncopation line) + tempo */
+  /** rhythm fabric (to render a syncopation line) + tempo */
   rhythm?: RhythmEvent[];
   bpm?: number;
   den?: number;
+  tsNum?: number; // NEW
+
+  /** session view */
+  view?: "piano" | "sheet";
 
   children?: React.ReactNode;
 };
@@ -75,6 +79,9 @@ export default function GameLayout({
   rhythm,
   bpm = 80,
   den = 4,
+  tsNum = 4, // NEW
+
+  view = "piano",
 
   children,
 }: LayoutProps) {
@@ -135,10 +142,13 @@ export default function GameLayout({
               startAtMs={startAtMs}
               lyrics={lyrics}
               leadInSec={leadInSec}
-              /* NEW: rhythm line & tempo */
+              /* rhythm line & tempo */
               rhythm={rhythm}
               bpm={bpm}
               den={den}
+              tsNum={tsNum}   // NEW
+              /* view mode */
+              view={view}
             />
           </div>
 
