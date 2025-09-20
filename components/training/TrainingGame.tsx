@@ -121,9 +121,9 @@ export default function TrainingGame({
   }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed]);
 
   /* ------------------ Phrase generation (content) ------------------ */
-  const generatedPhrase: Phrase | null = useMemo(() => {
-    if (usingOverrides) return customPhrase ?? null;
-    if (!haveRange || !scale || !rhythm) return null;
+  const generated = useMemo((): { phrase: Phrase | null; melodyRhythm: RhythmEvent[] | null } => {
+    if (usingOverrides) return { phrase: customPhrase ?? null, melodyRhythm: null };
+    if (!haveRange || !scale || !rhythm) return { phrase: null, melodyRhythm: null };
 
     const available =
       (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
@@ -149,7 +149,7 @@ export default function TrainingGame({
         noteQuota: want,
       });
 
-      return buildPhraseFromScaleSequence({
+      const phrase = buildPhraseFromScaleSequence({
         lowHz: lowHz as number,
         highHz: highHz as number,
         a4Hz: 440,
@@ -161,6 +161,8 @@ export default function TrainingGame({
         noteQuota: want,
         seed: scaleSeed,
       });
+
+      return { phrase, melodyRhythm: fabric };
     } else {
       const fabric = buildTwoBarRhythm({
         bpm, den: ts.den, tsNum: ts.num,
@@ -170,7 +172,7 @@ export default function TrainingGame({
         seed: rhythmSeed,
       });
 
-      return buildPhraseFromScaleWithRhythm({
+      const phrase = buildPhraseFromScaleWithRhythm({
         lowHz: lowHz as number,
         highHz: highHz as number,
         a4Hz: 440,
@@ -181,6 +183,8 @@ export default function TrainingGame({
         maxPerDegree: scale.maxPerDegree ?? 2,
         seed: scaleSeed,
       });
+
+      return { phrase, melodyRhythm: fabric };
     }
   }, [
     usingOverrides,
@@ -200,9 +204,13 @@ export default function TrainingGame({
   /* --------------- Phrase selection + lyrics ---------------- */
   const phrase: Phrase | null = useMemo(() => {
     if (customPhrase) return customPhrase;
-    if (generatedPhrase) return generatedPhrase;
+    if (generated.phrase) return generated.phrase;
     return null;
-  }, [customPhrase, generatedPhrase]);
+  }, [customPhrase, generated]);
+
+  const melodyRhythm: RhythmEvent[] | null = useMemo(() => {
+    return generated.melodyRhythm ?? null;
+  }, [generated]);
 
   const words: string[] | null = useMemo(() => {
     if (Array.isArray(customWords) && customWords.length) {
@@ -329,6 +337,7 @@ export default function TrainingGame({
       step={step}
       loopPhase={loop.loopPhase}
       rhythm={syncRhythmFabric ?? undefined}
+      melodyRhythm={melodyRhythm ?? undefined}
       bpm={bpm}
       den={ts.den}
       tsNum={ts.num}  // NEW: plumb numerator

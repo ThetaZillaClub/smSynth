@@ -7,6 +7,8 @@ import { noteValueToSeconds, noteValueToBeats, type NoteValue } from "@/utils/ti
 /** Rhythm event — can be a 'note' or a 'rest' with a musical value */
 export type RhythmEvent = { type: "note" | "rest"; value: NoteValue };
 
+/* ---------------- RNG + small utils ---------------- */
+
 function makeRng(seed: number) {
   // xorshift32
   let x = seed >>> 0;
@@ -21,6 +23,106 @@ function makeRng(seed: number) {
 function choose<T>(arr: T[], rnd: () => number): T {
   return arr[Math.floor(rnd() * arr.length)];
 }
+
+/* ---------------- exact rational beat math helpers ---------------- */
+
+type Rat = { n: number; d: number };
+const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : Math.abs(a));
+const lcm = (a: number, b: number): number => Math.abs(a / (gcd(a, b) || 1) * b);
+const reduce = ({ n, d }: Rat): Rat => {
+  const g = gcd(n, d) || 1;
+  return { n: n / g, d: d / g };
+};
+
+/** Quarter-note fractions (exact) for every NoteValue. (quarter = 1) */
+const QF: Record<NoteValue, Rat> = {
+  whole: { n: 4, d: 1 },
+  "dotted-half": { n: 3, d: 1 },
+  half: { n: 2, d: 1 },
+  "dotted-quarter": { n: 3, d: 2 },
+  "triplet-quarter": { n: 2, d: 3 },
+  quarter: { n: 1, d: 1 },
+  "dotted-eighth": { n: 3, d: 4 },
+  "triplet-eighth": { n: 1, d: 3 },
+  eighth: { n: 1, d: 2 },
+  "dotted-sixteenth": { n: 3, d: 8 },
+  "triplet-sixteenth": { n: 1, d: 6 },
+  sixteenth: { n: 1, d: 4 },
+  thirtysecond: { n: 1, d: 8 },
+};
+
+/** Exact beats (relative to denominator beat) for a NoteValue. */
+function beatsFrac(v: NoteValue, den: number): Rat {
+  // beats = quarter_units * (den / 4)
+  const { n, d } = QF[v];
+  return reduce({ n: n * den, d: d * 4 });
+}
+
+/** Per-beat integer grid = LCM of denominators from available values. */
+function makeBeatGridDen(available: NoteValue[], den: number): number {
+  let g = 1;
+  for (const v of available) {
+    const { d } = beatsFrac(v, den);
+    g = lcm(g, d);
+  }
+  return g;
+}
+
+/** Convert a NoteValue to integer units given per-beat grid denominator. */
+function toUnits(v: NoteValue, den: number, gridDen: number): number {
+  const { n, d } = beatsFrac(v, den);
+  // beats = n/d, 1 beat = gridDen units → units = n * (gridDen / d)
+  return (n * gridDen) / d; // integer because gridDen is LCM of all d's
+}
+
+/** Build a lookup: units → list of NoteValues with that exact size (for variety). */
+function unitsBucket(available: NoteValue[], den: number, gridDen: number): Map<number, NoteValue[]> {
+  const m = new Map<number, NoteValue[]>();
+  for (const v of available) {
+    const u = toUnits(v, den, gridDen);
+    if (!m.has(u)) m.set(u, []);
+    const arr = m.get(u)!;
+    if (!arr.includes(v)) arr.push(v);
+  }
+  return m;
+}
+
+/** Unbounded coin-change reachability for “can we finish this remainder exactly?”. */
+function makeReach(coins: number[], target: number): boolean[] {
+  const reach = Array<boolean>(target + 1).fill(false);
+  reach[0] = true;
+  for (let s = 1; s <= target; s++) {
+    for (const c of coins) {
+      if (c <= s && reach[s - c]) { reach[s] = true; break; }
+    }
+  }
+  return reach;
+}
+
+/** Random constructive fill of `target` units using `coins`, guaranteed to end exactly. */
+function randomExactUnits(target: number, coins: number[], rnd: () => number): number[] {
+  const reach = makeReach(coins, target);
+  if (!reach[target]) return [];
+  const parts: number[] = [];
+  let rem = target;
+  // prefer shorter coins a bit to avoid too-sparse bars
+  const sorted = coins.slice().sort((a, b) => a - b);
+  while (rem > 0) {
+    const feas = sorted.filter((c) => c <= rem && reach[rem - c]);
+    const pick = feas[Math.floor(Math.pow(rnd(), 0.7) * feas.length)];
+    parts.push(pick);
+    rem -= pick;
+  }
+  return parts;
+}
+
+/** Last-resort tiny fillers to close a bar if the user's pool can't pack it. */
+const FILLERS: NoteValue[] = [
+  "triplet-sixteenth",
+  "sixteenth",
+  "triplet-eighth",
+  "eighth",
+];
 
 /* ---------------- existing exports (kept) ---------------- */
 
@@ -162,77 +264,94 @@ export function buildPhraseFromScaleWithRhythm(params: {
   return { durationSec: t, notes };
 }
 
-/* ---------------- Builders used by TrainingGame ---------------- */
+/* ---------------- Rhythm builders used by TrainingGame ---------------- */
 
 /**
- * Build a 2-bar rhythm using a whitelist of note values.
- * - Exactly fills 2 bars (within float tolerance).
+ * Build a rhythm that fills an exact number of whole bars using a whitelist of note values.
+ * - Exactly fills `bars * tsNum` beats (within exact rational math).
  * - Respects allowRests: if false, emits no rests.
  * - You can bias rest density via restProb.
- * - Optionally enforce a minimum number of NOTES (noteQuota) to support scale sequences.
+ *
+ * NOTE: Backwards-compatible name; you can pass `{ bars: N }` now (default 2).
  */
 export function buildTwoBarRhythm(opts: {
   bpm: number;
   den: number;
-  tsNum: number;         // numerator
-  available: NoteValue[]; // allowed note values (e.g., ["quarter","eighth"])
-  restProb?: number;     // default 0.3
-  allowRests?: boolean;  // default true
+  tsNum: number;           // numerator
+  available: NoteValue[];  // allowed values (e.g., ["quarter","eighth"])
+  restProb?: number;       // default 0.3
+  allowRests?: boolean;    // default true
   seed?: number;
-  noteQuota?: number;    // ensure at least this many notes
+  noteQuota?: number;      // ignored here; parity
+  bars?: number;           // NEW (default 2)
 }): RhythmEvent[] {
   const {
-    bpm, den, tsNum,
+    den, tsNum,
     available,
     restProb = 0.3,
     allowRests = true,
     seed = 0xA5F3D7,
-    noteQuota = 0,
+    bars = 2,
   } = opts;
 
   const rnd = makeRng(seed);
-  const targetSec = (2 * tsNum) * (60 / Math.max(1, bpm)) * (4 / Math.max(1, den));
-  const dur = (v: NoteValue) => noteValueToSeconds(v, bpm, den);
-  const EPS = 1e-4;
 
-  let t = 0;
-  const out: RhythmEvent[] = [];
+  // Build per-beat grid from the *actual* available set.
+  let gridDen = makeBeatGridDen(available, den);
+  let bucket = unitsBucket(available, den, gridDen);
+  let coins = Array.from(bucket.keys()).sort((a, b) => a - b);
 
-  while (t + EPS < targetSec) {
-    const remaining = targetSec - t + EPS;
-    const candidates = available.filter((v) => dur(v) <= remaining + EPS);
-    if (!candidates.length) break; // rounding tail
-    const value = choose(candidates, rnd);
-    const type: RhythmEvent["type"] = allowRests && rnd() < restProb ? "rest" : "note";
-    out.push({ type, value });
-    t += dur(value);
-  }
+  // Target units per bar
+  let target = tsNum * gridDen;
 
-  // Only ensure a rest if rests are allowed
-  if (allowRests && !out.some((e) => e.type === "rest")) {
-    const idx = out.findIndex((e) => e.type === "note");
-    if (idx >= 0) out[idx] = { ...out[idx], type: "rest" };
-    else if (out.length) out[out.length - 1] = { ...out[out.length - 1], type: "rest" };
-    else out.push({ type: "rest", value: "quarter" });
-  }
-
-  // Enforce minimum note count by flipping rests if needed
-  if (allowRests && noteQuota > 0) {
-    let notes = out.filter((e) => e.type === "note").length;
-    if (notes < noteQuota) {
-      const restIdxs = out.map((e, i) => (e.type === "rest" ? i : -1)).filter((i) => i >= 0);
-      for (let k = 0; k < restIdxs.length && notes < noteQuota; k++) {
-        const i = restIdxs[k];
-        out[i] = { ...out[i], type: "note" };
-        notes++;
-      }
+  // If a bar isn't packable with just the user's pool, permissively extend grid with tiny fillers.
+  const barReachable = makeReach(coins, target)[target];
+  if (!barReachable) {
+    for (const f of FILLERS) {
+      gridDen = lcm(gridDen, beatsFrac(f, den).d);
     }
+    bucket = unitsBucket([...available, ...FILLERS], den, gridDen);
+    coins = Array.from(bucket.keys()).sort((a, b) => a - b);
+    target = tsNum * gridDen;
+  }
+
+  const makeBarUnits = () => {
+    const u = randomExactUnits(target, coins, rnd);
+    // If somehow unreachable (shouldn't happen), fall back to a single bar of quarters.
+    return u.length ? u : Array.from({ length: tsNum }, () => toUnits("quarter", den, gridDen));
+  };
+
+  const outVals: NoteValue[] = [];
+  for (let b = 0; b < Math.max(1, Math.floor(bars)); b++) {
+    const units = makeBarUnits();
+    for (const u of units) {
+      const vals = bucket.get(u)!;
+      outVals.push(vals[Math.floor(rnd() * vals.length)]);
+    }
+  }
+
+  const out: RhythmEvent[] = outVals.map((v) => {
+    let type: RhythmEvent["type"] = "note";
+    if (allowRests) type = rnd() < restProb ? "rest" : "note";
+    return { type, value: v };
+  });
+
+  // Make sure there's at least one rest if rests are allowed: flip an early note.
+  if (allowRests && !out.some((e) => e.type === "rest")) {
+    const i = out.findIndex((e) => e.type === "note");
+    if (i >= 0) out[i] = { ...out[i], type: "rest" };
   }
 
   return out;
 }
 
-/** Build as many whole bars as needed to supply exactly `noteQuota` NOTE slots. */
+/**
+ * Build as many whole bars as needed to supply exactly `noteQuota` NOTE slots.
+ * - Each bar is packed exactly to the meter using rational math (see helpers above).
+ * - When rests are allowed, NOTE density is controlled by `restProb` but *never*
+ *   breaks the bar math—extra notes are flipped to rests if we exceed the quota.
+ * - Stops as soon as we’ve produced `noteQuota` NOTE slots (rest slots excluded).
+ */
 export function buildBarsRhythmForQuota(opts: {
   bpm: number;
   den: number;
@@ -244,7 +363,7 @@ export function buildBarsRhythmForQuota(opts: {
   noteQuota: number;     // how many NOTE events we need in total
 }): RhythmEvent[] {
   const {
-    bpm, den, tsNum,
+    den, tsNum,
     available,
     restProb = 0.3,
     allowRests = true,
@@ -253,56 +372,56 @@ export function buildBarsRhythmForQuota(opts: {
   } = opts;
 
   const rnd = makeRng(seed);
-  const beatsPerBar = Math.max(1, tsNum);
-  const beats = (v: NoteValue) => noteValueToBeats(v, den);
-  const EPS = 1e-4;
+
+  // Build grid/buckets from available; expand with tiny fillers only if truly needed.
+  let gridDen = makeBeatGridDen(available, den);
+  let bucket = unitsBucket(available, den, gridDen);
+  let coins = Array.from(bucket.keys()).sort((a, b) => a - b);
+  const targetUnitsPerBar_initial = tsNum * gridDen;
+
+  if (!makeReach(coins, targetUnitsPerBar_initial)[targetUnitsPerBar_initial]) {
+    for (const f of FILLERS) {
+      gridDen = lcm(gridDen, beatsFrac(f, den).d);
+    }
+    bucket = unitsBucket([...available, ...FILLERS], den, gridDen);
+    coins = Array.from(bucket.keys()).sort((a, b) => a - b);
+  }
+
+  const targetUnitsPerBar = tsNum * gridDen;
+
+  const makeBarVals = () => {
+    const units = randomExactUnits(targetUnitsPerBar, coins, rnd);
+    const vals: NoteValue[] = units.map((u) => {
+      const vs = bucket.get(u)!;
+      return vs[Math.floor(rnd() * vs.length)];
+    });
+    return vals;
+  };
 
   const out: RhythmEvent[] = [];
   let notesSoFar = 0;
 
-  const makeBar = () => {
-    let used = 0;
-    const bar: RhythmEvent[] = [];
-    while (used + EPS < beatsPerBar) {
-      const remaining = beatsPerBar - used + EPS;
-      const candidates = available
-        .map((v) => ({ v, b: beats(v) }))
-        .filter((x) => x.b <= remaining + EPS)
-        .sort((a, b) => a.b - b.b); // prefer shorter first for better packing
-      if (!candidates.length) break;
-
-      const pick = candidates[Math.floor(rnd() * candidates.length)].v;
-
-      let type: RhythmEvent["type"] = allowRests && rnd() < restProb ? "rest" : "note";
-
-      // If rests are allowed, constrain NOTE count to global quota.
-      if (allowRests && type === "note" && notesSoFar >= noteQuota) type = "rest";
-
-      bar.push({ type, value: pick });
-      used += beats(pick);
-
-      if (type === "note") notesSoFar++;
-    }
-    return bar;
-  };
-
-  // Keep adding bars until we’ve delivered at least `noteQuota` NOTE slots.
   while (notesSoFar < noteQuota) {
-    out.push(...makeBar());
-    // When rests are NOT allowed, we may overshoot noteQuota with pure notes; stop once quota met.
+    const vals = makeBarVals();
+    for (const v of vals) {
+      let type: RhythmEvent["type"] = "note";
+      if (allowRests) {
+        // cap notes to quota, flip to rests when quota is satisfied
+        if (notesSoFar >= noteQuota) type = "rest";
+        else type = rnd() < restProb ? "rest" : "note";
+      }
+      if (type === "note") notesSoFar++;
+      out.push({ type, value: v });
+    }
+    // If rests are not allowed and we just crossed the quota, stop here.
     if (!allowRests && notesSoFar >= noteQuota) break;
   }
 
-  // If rests are allowed and we overshot, ensure EXACT number of note slots by flipping extras to RESTs.
-  if (allowRests) {
+  // If we overshot but rests are allowed, flip extra trailing notes to rests.
+  if (allowRests && notesSoFar > noteQuota) {
     let extra = notesSoFar - noteQuota;
-    if (extra > 0) {
-      for (let i = out.length - 1; i >= 0 && extra > 0; i--) {
-        if (out[i].type === "note") {
-          out[i] = { ...out[i], type: "rest" };
-          extra--;
-        }
-      }
+    for (let i = out.length - 1; i >= 0 && extra > 0; i--) {
+      if (out[i].type === "note") { out[i] = { ...out[i], type: "rest" }; extra--; }
     }
   }
 
@@ -329,7 +448,7 @@ export function buildPhraseFromScaleSequence(params: {
   den: number;
   tonicPc: number;
   scale: ScaleName;
-  rhythm: RhythmEvent[]; // variable length (>= 2 bars)
+  rhythm: RhythmEvent[]; // variable length (>= 1 bar; commonly multiple bars)
   pattern: "asc" | "desc" | "asc-desc" | "desc-asc";
   noteQuota: number;     // how many NOTE targets to emit (e.g., 12 chromatic, 8 diatonic incl. octave, 5 pentatonic)
   seed?: number;         // only used to break ties on which octave to pick

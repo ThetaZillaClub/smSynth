@@ -20,7 +20,10 @@ type Props = {
   startAtMs?: number | null;
   lyrics?: string[];
   leadInSec?: number;
+  /** Blue rhythm line (independent of melody) */
   rhythm?: RhythmEvent[];
+  /** Authoritative durations for MELODY only (independent of blue rhythm line) */
+  melodyRhythm?: RhythmEvent[];
   bpm?: number;
   den?: number;
   tsNum?: number;
@@ -47,6 +50,7 @@ export default function GameStage({
   lyrics,
   leadInSec = 1.5,
   rhythm,
+  melodyRhythm,
   bpm = 80,
   den = 4,
   tsNum = 4,
@@ -142,6 +146,7 @@ export default function GameStage({
                 clef={clef}
                 onLayout={handleLayout}
                 rhythm={rhythm}
+                melodyRhythm={melodyRhythm}
               />
               {sheetW && sheetW > 4 ? (
                 <SheetOverlay

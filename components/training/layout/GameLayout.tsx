@@ -46,6 +46,8 @@ type LayoutProps = {
 
   /** rhythm fabric (to render a syncopation line) + tempo */
   rhythm?: RhythmEvent[];
+  /** authoritative rhythm for the melody durations */
+  melodyRhythm?: RhythmEvent[];
   bpm?: number;
   den?: number;
   tsNum?: number; // NEW
@@ -77,6 +79,7 @@ export default function GameLayout({
   loopPhase,
 
   rhythm,
+  melodyRhythm,
   bpm = 80,
   den = 4,
   tsNum = 4, // NEW
@@ -144,6 +147,7 @@ export default function GameLayout({
               leadInSec={leadInSec}
               /* rhythm line & tempo */
               rhythm={rhythm}
+              melodyRhythm={melodyRhythm}
               bpm={bpm}
               den={den}
               tsNum={tsNum}   // NEW
