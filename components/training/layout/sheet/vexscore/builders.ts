@@ -155,11 +155,15 @@ function groupKeyFor(note: any, i: number, opts?: BuildBeamsOpts) {
 }
 
 /**
- * Infer a reasonable *default* stem direction purely from staff line (no stem API).
- * Average key lines: line > 2 → stem UP (+1), else stem DOWN (-1).
+ * Infer a reasonable *default* stem direction.
+ * Honor explicit stem direction if it exists (so we can force up-stems on melody).
  */
 function defaultStemDir(note: any): 1 | -1 {
   try {
+    if (typeof note?.getStemDirection === "function") {
+      const sd = note.getStemDirection();
+      if (sd === 1 || sd === -1) return sd as 1 | -1;
+    }
     const props = typeof note?.getKeyProps === "function" ? note.getKeyProps() : null;
     if (Array.isArray(props) && props.length) {
       const sum = props.reduce((s: number, p: any) => s + (typeof p?.line === "number" ? p.line : 0), 0);

@@ -71,6 +71,8 @@ function makeRest(duration: string, clef: "treble" | "bass") {
  *
  * Additionally, we **pad with visible rests to the next barline** using `secPerBar`,
  * so measures are never visually short even if the material ends early.
+ *
+ * Also: we force **stems up** on melody so flags always point upward.
  */
 export function buildMelodyTickables(params: {
   phrase: Phrase;
@@ -80,7 +82,7 @@ export function buildMelodyTickables(params: {
   wnPerSec: number;
   secPerWholeNote: number;
   secPerBeat: number;
-  secPerBar: number;           // NEW: used to pad to bar boundaries
+  secPerBar: number;           // used to pad to bar boundaries
   lyrics?: string[];
   /** When provided, this is the authoritative rhythm for the melody's durations. */
   rhythm?: RhythmEvent[];
@@ -198,7 +200,13 @@ export function buildMelodyTickables(params: {
         q === 1/6 ? "16" :
         q === 0.125 ? "32" : "8";
 
-      const sn = new StaveNote({ keys: [key], duration: durStr as any, clef, autoStem: true });
+      const sn = new StaveNote({
+        keys: [key],
+        duration: durStr as any,
+        clef,
+        autoStem: false,
+        stemDirection: 1,   // force stems/flags up
+      });
       if (accidental) sn.addModifier(new Accidental(accidental), 0);
 
       if (lyrics && lyrics[lyricIndex]) {
@@ -267,7 +275,8 @@ export function buildMelodyTickables(params: {
           keys: [key],
           duration: tokToDuration(tok),
           clef,
-          autoStem: true,
+          autoStem: false,
+          stemDirection: 1, // force stems/flags up
         });
         if (accidental) sn.addModifier(new Accidental(accidental), 0);
         if (tok.dots) Dot.buildAndAttach([sn as any], { all: true });
@@ -300,7 +309,7 @@ export function buildRhythmTickables(params: {
   leadInSec: number;
   wnPerSec: number;
   secPerWholeNote: number;
-  secPerBar: number;          // NEW: used to pad to bar boundaries
+  secPerBar: number;          // used to pad to bar boundaries
 }) {
   const { rhythm, leadInSec, wnPerSec, secPerWholeNote, secPerBar } = params;
   const secPerQuarter = secPerWholeNote / 4;
@@ -353,26 +362,49 @@ export function buildRhythmTickables(params: {
 
   for (const ev of rhythm as RhythmEvent[]) {
     const durTicks = noteValueToTicks(ev.value);
+    const q = noteValueInQuarterUnits(ev.value);
+    // map exact musical value → VexFlow duration string
+    const durStr =
+      q === 4 ? "w" :
+      q === 3 ? "hd" :
+      q === 2 ? "h" :
+      q === 1.5 ? "qd" :
+      q === 1 ? "q" :
+      q === 0.75 ? "8d" :
+      q === 2/3 ? "q" :
+      q === 0.5 ? "8" :
+      q === 3/8 ? "16d" :
+      q === 1/3 ? "8" :
+      q === 0.25 ? "16" :
+      q === 1/6 ? "16" :
+      q === 0.125 ? "32" : "8";
 
     if (ev.type === "rest") {
-      const rn = makeRest("q" as any /* display only */, "bass");
+      const rn = makeRest(durStr as any, "bass"); // show real rest length → proper flags
       ticksOut.push(rn);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
       tTicks += durTicks;
-      flush();
+      flush(); // rests break triplet groups
     } else {
-      const sn = new StaveNote({ keys: ["d/3"], duration: "q" as any, clef: "bass", autoStem: true });
+      // neutral percussion-like head position on bass staff
+      const sn = new StaveNote({
+        keys: ["d/3"],
+        duration: durStr as any,
+        clef: "bass",
+        autoStem: true,
+      });
       ticksOut.push(sn);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
       tTicks += durTicks;
 
-      const q = noteValueInQuarterUnits(ev.value);
       const isTriplet = q === 2/3 || q === 1/3 || q === 1/6;
       if (isTriplet) {
         const baseDur = q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
         tripletBuf.push({ base: baseDur as Tok["dur"], note: sn });
         if (tripletBuf.length === 3) flush();
-      } else flush();
+      } else {
+        flush();
+      }
     }
   }
   flush();
