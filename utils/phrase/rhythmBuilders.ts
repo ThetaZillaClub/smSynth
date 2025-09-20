@@ -66,7 +66,12 @@ export type TwoBarOpts = {
   bars?: number;      // default 2
 };
 
-/** Build a rhythm that fills an exact number of whole bars from a whitelist of note values. */
+/**
+ * Build a rhythm that fills an exact number of whole bars from a whitelist of note values.
+ * Hard guarantees:
+ *  - First slot of every bar is a NOTE (prevents blank bars).
+ *  - Gentle “soft start” on rests: early notes are biased toward notes.
+ */
 export function buildTwoBarRhythm(opts: TwoBarOpts): RhythmEvent[] {
   const {
     den, tsNum,
@@ -97,30 +102,47 @@ export function buildTwoBarRhythm(opts: TwoBarOpts): RhythmEvent[] {
     return u.length ? u : Array.from({ length: tsNum }, () => toUnits("quarter", den, gridDen));
   };
 
-  const outVals: NoteValue[] = [];
-  for (let b = 0; b < Math.max(1, Math.floor(bars)); b++) {
+  const out: RhythmEvent[] = [];
+  const barsInt = Math.max(1, Math.floor(bars));
+  let notesTotal = 0;
+
+  for (let b = 0; b < barsInt; b++) {
     const units = makeBarUnits();
+    let notesThisBar = 0;
+
     for (const u of units) {
       const vals = bucket.get(u)!;
-      outVals.push(vals[Math.floor(rnd() * vals.length)]);
-    }
-  }
+      const v = vals[Math.floor(rnd() * vals.length)];
 
-  const out: RhythmEvent[] = outVals.map((v) => {
-    let type: RhythmEvent["type"] = "note";
-    if (allowRests) type = rnd() < restProb ? "rest" : "note";
-    return { type, value: v };
-  });
+      // --- REST POLICY ---
+      // 1) First slot in each bar must be a NOTE.
+      // 2) “Soft start”: in the very beginning (first ~2 notes overall),
+      //    tone down rests to avoid an all-rest opening feel.
+      // 3) If still somehow no note yet in this bar, keep biasing toward a note.
+      let type: RhythmEvent["type"] = "note";
+      if (allowRests) {
+        const atBarStart = notesThisBar === 0;
+        const softStart = notesTotal < 2;                    // first couple of notes overall
+        const rampedRestProb = softStart ? restProb * 0.4    // soften rests at the very start
+                                         : (notesThisBar === 0 ? Math.min(restProb, 0.25) : restProb);
 
-  if (allowRests) {
-    const unitsPerBar = tsNum * gridDen;
-    let acc = 0;
-    let hasNote = false;
-    for (let i = 0; i < out.length && acc < unitsPerBar; i++) {
-      acc += toUnits(out[i].value, den, gridDen);
-      if (out[i].type === "note") hasNote = true;
+        type = atBarStart ? "note" : (rnd() < rampedRestProb ? "rest" : "note");
+      }
+
+      if (type === "note") { notesThisBar++; notesTotal++; }
+      out.push({ type, value: v });
     }
-    if (!hasNote && out.length) out[0] = { ...out[0], type: "note" };
+
+    // Safety: if an edge case slipped through, flip bar’s first event to a NOTE.
+    if (allowRests && notesThisBar === 0) {
+      const barLen = units.length;
+      const idx0 = out.length - barLen;
+      if (idx0 >= 0 && idx0 < out.length) {
+        out[idx0] = { ...out[idx0], type: "note" };
+        notesThisBar = 1;
+        notesTotal++;
+      }
+    }
   }
 
   return out;
@@ -138,7 +160,12 @@ export type QuotaOpts = {
   noteQuota: number;
 };
 
-/** Build as many whole bars as needed to supply exactly `noteQuota` NOTE slots. */
+/**
+ * Build as many whole bars as needed to supply exactly `noteQuota` NOTE slots.
+ * Adjustments:
+ *  - First slot of each bar is forced NOTE (prevents all-rest bars).
+ *  - Soft-start rest probability for the first few notes to avoid blank openings.
+ */
 export function buildBarsRhythmForQuota(opts: QuotaOpts): RhythmEvent[] {
   const {
     den, tsNum,
@@ -183,30 +210,42 @@ export function buildBarsRhythmForQuota(opts: QuotaOpts): RhythmEvent[] {
     const vals = makeBarVals();
     let barHasNote = false;
 
-    for (const v of vals) {
+    for (let i = 0; i < vals.length; i++) {
+      const v = vals[i];
+
+      // --- REST POLICY (quota variant) ---
+      // 1) If we already met the quota, remaining are rests.
+      // 2) Force first slot of the bar to NOTE.
+      // 3) Soft start: reduce early rest probability until a couple of notes appear.
       let type: RhythmEvent["type"] = "note";
       if (allowRests) {
-        if (notesSoFar >= noteQuota) type = "rest";
-        else type = rnd() < restProb ? "rest" : "note";
+        const atBarStart = i === 0 || !barHasNote;
+        if (notesSoFar >= noteQuota) {
+          type = "rest";
+        } else if (atBarStart) {
+          type = "note";
+        } else {
+          const softStart = notesSoFar < Math.max(2, Math.ceil(noteQuota * 0.25));
+          const rampedRestProb = softStart ? restProb * 0.5 : restProb;
+          type = rnd() < rampedRestProb ? "rest" : "note";
+        }
       }
+
       if (type === "note") { notesSoFar++; barHasNote = true; }
       out.push({ type, value: v });
+
       if (!allowRests && notesSoFar >= noteQuota) break bars_loop;
     }
 
-    if (allowRests && out.length && out.every((e, i) => i < vals.length ? e.type === "rest" : true)) {
-      out[0] = { ...out[0], type: "note" };
-      notesSoFar = Math.max(1, notesSoFar);
-      barHasNote = true;
-    }
-
-    if (allowRests && !barHasNote) {
+    // Safety: ensure at least one NOTE in the bar
+    if (allowRests && !barHasNote && vals.length) {
       const idx0 = out.length - vals.length;
       out[idx0] = { ...out[idx0], type: "note" };
-      notesSoFar++;
+      notesSoFar = Math.max(1, notesSoFar);
     }
   }
 
+  // If we overshot (shouldn't normally), demote trailing notes to rests.
   const noteCount = out.filter((e) => e.type === "note").length;
   if (allowRests && noteCount > noteQuota) {
     let extra = noteCount - noteQuota;
