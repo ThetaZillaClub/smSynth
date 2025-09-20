@@ -5,6 +5,7 @@ import type { RhythmEvent } from "@/utils/phrase/generator";
 export type BarSegment = {
   startSec: number;
   endSec: number;
+  /** Outer bar edges (barlines), used for strict musical time mapping. */
   x0: number;
   x1: number;
 };
@@ -13,8 +14,13 @@ export type SystemLayout = {
   startSec: number; endSec: number;
   x0: number; x1: number;
   y0: number; y1: number;
-  /** Piecewise-linear mapping (per-bar) so overlays can match timing exactly. */
+  /** Piecewise-linear mapping (per bar, no manual padding). */
   segments?: BarSegment[];
+};
+
+export type LayoutPayload = {
+  systems: SystemLayout[];
+  total: { startSec: number; endSec: number; x0: number; x1: number; y0: number; y1: number };
 };
 
 export type VexScoreProps = {
@@ -31,10 +37,6 @@ export type VexScoreProps = {
   rhythm?: RhythmEvent[];
   /** Authoritative rhythm for the melody durations (optional, independent of the blue staff). */
   melodyRhythm?: RhythmEvent[];
-  onLayout?: (
-    m:
-      | { noteStartX: number; noteEndX: number }
-      | { systems: SystemLayout[]; total: { startSec: number; endSec: number; x0: number; x1: number; y0: number; y1: number } }
-  ) => void;
+  onLayout?: (m: LayoutPayload) => void;
   className?: string;
 };

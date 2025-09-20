@@ -6,8 +6,8 @@ import RhythmRollCanvas from "@/components/training/layout/piano-roll/RhythmRoll
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import VexScore from "@/components/training/layout/sheet/VexScore";
 import SheetOverlay from "@/components/training/layout/sheet/SheetOverlay";
-
-type SystemLayout = { startSec: number; endSec: number; x0: number; x1: number; y0: number; y1: number };
+import type { SystemLayout } from "@/components/training/layout/sheet/vexscore/types";
+import { pickClef } from "@/components/training/layout/sheet/vexscore/builders";
 
 type Props = {
   phrase?: Phrase | null;
@@ -29,14 +29,6 @@ type Props = {
   tsNum?: number;
   view?: "piano" | "sheet";
 };
-
-function pickClef(phrase: Phrase | null | undefined): "treble" | "bass" {
-  const ns = phrase?.notes ?? [];
-  if (!ns.length) return "treble";
-  let below = 0;
-  for (const n of ns) if (n.midi < 60) below++;
-  return below > ns.length / 2 ? "bass" : "treble";
-}
 
 export default function GameStage({
   phrase,
@@ -75,7 +67,6 @@ export default function GameStage({
   }, [height]);
 
   const [sheetW, setSheetW] = useState<number | null>(null);
-  const [layoutBand, setLayoutBand] = useState<{ start: number; end: number } | null>(null);
   const [systems, setSystems] = useState<SystemLayout[] | null>(null);
 
   const sheetHostRef = useRef<HTMLDivElement | null>(null);
@@ -94,25 +85,8 @@ export default function GameStage({
     return () => ro.disconnect();
   }, [view, sheetW]);
 
-  // Accept both old single-band and new multi-system payloads
-  const handleLayout = useCallback((m: any) => {
-    if (m && Array.isArray(m.systems)) {
-      setSystems(m.systems as SystemLayout[]);
-      const first = m.systems[0];
-      if (first) {
-        setLayoutBand((prev) => {
-          const next = { start: first.x0, end: first.x1 };
-          if (prev && Math.abs(prev.start - next.start) < 0.5 && Math.abs(prev.end - next.end) < 0.5) return prev;
-          return next;
-        });
-      }
-    } else if (m && typeof m.noteStartX === "number" && typeof m.noteEndX === "number") {
-      setLayoutBand((prev) => {
-        if (prev && Math.abs(prev.start - m.noteStartX) < 0.5 && Math.abs(prev.end - m.noteEndX) < 0.5) return prev;
-        return { start: m.noteStartX, end: m.noteEndX };
-      });
-      setSystems(null);
-    }
+  const handleLayout = useCallback((m: { systems: SystemLayout[] }) => {
+    setSystems(m.systems ?? null);
   }, []);
 
   const showRhythm = !!(rhythm && rhythm.length);
@@ -156,16 +130,11 @@ export default function GameStage({
                   running={running}
                   startAtMs={startAtMs}
                   leadInSec={leadInSec}
-                  bpm={bpm}
-                  tsNum={tsNum}
-                  den={den}
                   livePitchHz={livePitchHz}
                   confidence={confidence}
                   confThreshold={confThreshold}
                   a4Hz={440}
-                  staffStartX={layoutBand?.start ?? undefined}
-                  staffEndX={layoutBand?.end ?? undefined}
-                  /** NEW: multi-row layout for precise playhead */
+                  /** precise multi-row layout */
                   systems={systems ?? undefined}
                 />
               ) : null}

@@ -2,7 +2,11 @@
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { Phrase } from "@/utils/piano-roll/scale";
 import { degreeIndex, isInScale, scaleSemitones, type ScaleName } from "./scales";
-import { noteValueToSeconds, noteValueToBeats, type NoteValue } from "@/utils/time/tempo";
+import {
+  noteValueToSeconds,
+  noteValueToBeats,
+  type NoteValue,
+} from "@/utils/time/tempo";
 
 /** Rhythm event — can be a 'note' or a 'rest' with a musical value */
 export type RhythmEvent = { type: "note" | "rest"; value: NoteValue };
@@ -33,6 +37,8 @@ const reduce = ({ n, d }: Rat): Rat => {
   const g = gcd(n, d) || 1;
   return { n: n / g, d: d / g };
 };
+const addRat = (a: Rat, b: Rat): Rat => reduce({ n: a.n * b.d + b.n * a.d, d: a.d * b.d });
+const subRat = (a: Rat, b: Rat): Rat => reduce({ n: a.n * b.d - b.n * a.d, d: a.d * b.d });
 
 /** Quarter-note fractions (exact) for every NoteValue. (quarter = 1) */
 const QF: Record<NoteValue, Rat> = {
@@ -123,6 +129,142 @@ const FILLERS: NoteValue[] = [
   "triplet-eighth",
   "eighth",
 ];
+
+/* ---------------- new shared helpers for bar math ---------------- */
+
+/** Sum *exact* beats for a rhythm, as a rational number. */
+export function totalBeatsRat(rhythm: RhythmEvent[], den: number): Rat {
+  let r: Rat = { n: 0, d: 1 };
+  for (const ev of rhythm) {
+    const b = beatsFrac(ev.value, den);
+    r = addRat(r, b);
+  }
+  return reduce(r);
+}
+
+/** Number of bars (ceil to whole bars) a rhythm occupies. */
+export function rhythmBars(rhythm: RhythmEvent[], den: number, tsNum: number): number {
+  const { n, d } = totalBeatsRat(rhythm, den);
+  const barsFloat = (n / d) / Math.max(1, tsNum);
+  // tiny epsilon guards against float fuzz when the rational is exactly an integer
+  return Math.max(1, Math.ceil(barsFloat - 1e-9));
+}
+
+/**
+ * Fit a rhythm to exactly N whole bars:
+ *  - If rhythm is longer → truncate and fill the last partial unit exactly.
+ *  - If rhythm is shorter → append random filler (notes/rests) to finish the last bar exactly.
+ *  - Guarantees at least one NOTE in the first bar when rests are allowed.
+ */
+export function fitRhythmToBars(opts: {
+  rhythm: RhythmEvent[];
+  bars: number;
+  den: number;
+  tsNum: number;
+  /** Values we’re allowed to use when filling/truncating. If omitted, use rhythm’s values. */
+  availableForFiller?: NoteValue[];
+  allowRests?: boolean;       // default true
+  restProb?: number;          // default 0.3 (only used if allowRests)
+  seed?: number;              // for random filler choices
+}): RhythmEvent[] {
+  const {
+    rhythm,
+    bars,
+    den,
+    tsNum,
+    availableForFiller,
+    allowRests = true,
+    restProb = 0.3,
+    seed = 0xC0FFEE,
+  } = opts;
+
+  const targetBeats = reduce({ n: Math.max(1, bars) * tsNum, d: 1 });
+
+  // Determine an integer grid from the values we expect to use (input + fillers).
+  const baseVals = Array.from(
+    new Set<NoteValue>([
+      ...(rhythm?.map((r) => r.value) ?? []),
+      ...((availableForFiller && availableForFiller.length ? availableForFiller : ["quarter", "eighth", "sixteenth"]) as NoteValue[]),
+    ])
+  );
+  let gridDen = makeBeatGridDen(baseVals, den);
+  let bucket = unitsBucket(baseVals, den, gridDen);
+  let coins = Array.from(bucket.keys()).sort((a, b) => a - b);
+
+  // Expand grid with tiny fillers if the target beat count isn't reachable.
+  const targetUnitsInitial = (targetBeats.n * gridDen) / targetBeats.d;
+  if (!makeReach(coins, targetUnitsInitial)[targetUnitsInitial]) {
+    for (const f of FILLERS) gridDen = lcm(gridDen, beatsFrac(f, den).d);
+    const more = Array.from(new Set<NoteValue>([...baseVals, ...FILLERS]));
+    bucket = unitsBucket(more, den, gridDen);
+    coins = Array.from(bucket.keys()).sort((a, b) => a - b);
+  }
+  const targetUnits = (targetBeats.n * gridDen) / targetBeats.d;
+
+  const rnd = makeRng(seed);
+  const out: RhythmEvent[] = [];
+
+  let usedUnits = 0;
+  const push = (type: "note" | "rest", v: NoteValue) => {
+    out.push({ type, value: v });
+    usedUnits += toUnits(v, den, gridDen);
+  };
+
+  // Copy as much of the input as fits; truncate the first event that would overflow.
+  for (const ev of rhythm) {
+    const u = toUnits(ev.value, den, gridDen);
+    if (usedUnits + u < targetUnits) {
+      push(ev.type, ev.value);
+    } else if (usedUnits + u === targetUnits) {
+      push(ev.type, ev.value);
+      break;
+    } else {
+      // Needs truncation: fill the exact remainder with filler pieces.
+      const rem = targetUnits - usedUnits;
+      if (rem > 0) {
+        const parts = randomExactUnits(rem, coins, rnd);
+        for (const p of parts) {
+          const vals = bucket.get(p)!;
+          const chosen = vals[Math.floor(rnd() * vals.length)];
+          const t = allowRests && rnd() < restProb ? "rest" : "note";
+          push(t, chosen);
+        }
+      }
+      break;
+    }
+  }
+
+  // If we ended short, fill the rest with random filler.
+  if (usedUnits < targetUnits) {
+    const rem = targetUnits - usedUnits;
+    const parts = randomExactUnits(rem, coins, rnd);
+    for (const p of parts) {
+      const vals = bucket.get(p)!;
+      const chosen = vals[Math.floor(rnd() * vals.length)];
+      const t = allowRests && rnd() < restProb ? "rest" : "note";
+      push(t, chosen);
+    }
+  }
+
+  // Ensure first bar has at least one NOTE if rests are allowed.
+  if (allowRests) {
+    let barUnits = tsNum * gridDen;
+    let acc = 0;
+    let hasNote = false;
+    for (let i = 0; i < out.length && acc < barUnits; i++) {
+      acc += toUnits(out[i].value, den, gridDen);
+      if (out[i].type === "note") hasNote = true;
+      if (acc >= barUnits) break;
+    }
+    if (!hasNote && out.length) {
+      // Flip the first element to a NOTE (keep its value).
+      const first = out[0];
+      out[0] = { ...first, type: "note" };
+    }
+  }
+
+  return out;
+}
 
 /* ---------------- existing exports (kept) ---------------- */
 
@@ -330,16 +472,22 @@ export function buildTwoBarRhythm(opts: {
     }
   }
 
-  const out: RhythmEvent[] = outVals.map((v) => {
+  const out: RhythmEvent[] = outVals.map((v, idx) => {
     let type: RhythmEvent["type"] = "note";
     if (allowRests) type = rnd() < restProb ? "rest" : "note";
     return { type, value: v };
   });
 
-  // Make sure there's at least one rest if rests are allowed: flip an early note.
-  if (allowRests && !out.some((e) => e.type === "rest")) {
-    const i = out.findIndex((e) => e.type === "note");
-    if (i >= 0) out[i] = { ...out[i], type: "rest" };
+  // Make sure there's at least one NOTE in the first bar if rests are allowed.
+  if (allowRests) {
+    const unitsPerBar = tsNum * gridDen;
+    let acc = 0;
+    let hasNote = false;
+    for (let i = 0; i < out.length && acc < unitsPerBar; i++) {
+      acc += toUnits(out[i].value, den, gridDen);
+      if (out[i].type === "note") hasNote = true;
+    }
+    if (!hasNote && out.length) out[0] = { ...out[0], type: "note" };
   }
 
   return out;
@@ -401,8 +549,11 @@ export function buildBarsRhythmForQuota(opts: {
   const out: RhythmEvent[] = [];
   let notesSoFar = 0;
 
+  bars_loop:
   while (notesSoFar < noteQuota) {
     const vals = makeBarVals();
+    let barHasNote = false;
+
     for (const v of vals) {
       let type: RhythmEvent["type"] = "note";
       if (allowRests) {
@@ -410,16 +561,33 @@ export function buildBarsRhythmForQuota(opts: {
         if (notesSoFar >= noteQuota) type = "rest";
         else type = rnd() < restProb ? "rest" : "note";
       }
-      if (type === "note") notesSoFar++;
+      if (type === "note") { notesSoFar++; barHasNote = true; }
       out.push({ type, value: v });
+      if (!allowRests && notesSoFar >= noteQuota) break bars_loop;
     }
-    // If rests are not allowed and we just crossed the quota, stop here.
-    if (!allowRests && notesSoFar >= noteQuota) break;
+
+    // Ensure the first bar isn’t all rests if rests are allowed.
+    if (allowRests && out.length && out.every((e, i) => {
+      if (i >= vals.length) return true; // only inspect first bar just appended
+      return e.type === "rest";
+    })) {
+      out[0] = { ...out[0], type: "note" };
+      notesSoFar = Math.max(1, notesSoFar);
+      barHasNote = true;
+    }
+
+    // If no note was picked in this bar and rests are allowed, force the first slot to NOTE
+    if (allowRests && !barHasNote) {
+      const idx0 = out.length - vals.length;
+      out[idx0] = { ...out[idx0], type: "note" };
+      notesSoFar++;
+    }
   }
 
   // If we overshot but rests are allowed, flip extra trailing notes to rests.
-  if (allowRests && notesSoFar > noteQuota) {
-    let extra = notesSoFar - noteQuota;
+  const noteCount = out.filter((e) => e.type === "note").length;
+  if (allowRests && noteCount > noteQuota) {
+    let extra = noteCount - noteQuota;
     for (let i = out.length - 1; i >= 0 && extra > 0; i--) {
       if (out[i].type === "note") { out[i] = { ...out[i], type: "rest" }; extra--; }
     }

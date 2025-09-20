@@ -14,7 +14,7 @@ type DrawParams = {
   clef: "treble" | "bass";
   haveRhythm: boolean;
   systemWindow: { startSec: number; endSec: number; contentEndSec: number };
-  mel: { ticks: any[]; starts: number[] }; // may also carry mel.tuplets (accessed via any)
+  mel: { ticks: any[]; starts: number[]; tuplets?: any[] };
   rhy: { ticks: any[]; starts: number[]; tuplets: any[] };
   secPerBar: number;
 };
@@ -35,7 +35,7 @@ export function drawSystem({
 }: DrawParams) {
   const { startSec, endSec, contentEndSec } = systemWindow;
 
-  // create staves
+  // ----- staves -----
   const melStave = new Stave(padding.left, currentY, staffWidth);
   melStave.setClef(clef);
   melStave.addTimeSignature(`${tsNum}/${den}`);
@@ -54,7 +54,7 @@ export function drawSystem({
     new StaveConnector(melStave, rhyStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(ctx).draw();
   }
 
-  // ---- robust time helpers (no compression, exact bar spans) ----
+  // ----- geometry across the row -----
   const noteStartX =
     typeof (melStave as any).getNoteStartX === "function"
       ? (melStave as any).getNoteStartX()
@@ -63,108 +63,222 @@ export function drawSystem({
     typeof (melStave as any).getNoteEndX === "function"
       ? (melStave as any).getNoteEndX()
       : melStave.getX() + melStave.getWidth() - 12;
+
   const bandW = Math.max(1, noteEndX - noteStartX);
   const barW = bandW / BARS_PER_ROW;
 
-  // small tolerance to tame float drift (e.g., 1/256 of a beat per bar)
-  const eps = Math.max(1e-6, secPerBar / (tsNum * 256));
+  // tolerances (seconds) — very tight; all times come from PPQ → sec now
+  const eps = Math.max(1e-6, secPerBar / (tsNum * 512));   // ~1/512 beat
+  const secPerBeat = secPerBar / tsNum;
+  const downbeatEps = Math.max(1e-6, secPerBeat / 128);    // strict
+  const dupEps = Math.max(1e-6, secPerBeat / 512);         // same-start dedupe
 
-  const inWindow = (t0: number) => t0 >= startSec - eps && t0 < contentEndSec - eps;
+  const windowEnd = Math.min(endSec, contentEndSec);
+
+  // full-width bar segments (don’t clamp to content)
+  const segments = Array.from({ length: BARS_PER_ROW }, (_, i) => {
+    const segStartSec = startSec + i * secPerBar;
+    const segEndSec = segStartSec + secPerBar;
+    const barX0 = noteStartX + i * barW;
+    const barX1 = noteStartX + (i + 1) * barW;
+    return { startSec: segStartSec, endSec: segEndSec, x0: barX0, x1: barX1 };
+  });
+
+  // half-open window [start, windowEnd)
+  const inWindow = (t0: number) => t0 >= startSec - eps && t0 < windowEnd - eps;
 
   const barIndexOf = (t0: number) => {
-    const rel = t0 - startSec;
+    const rel = Math.max(0, t0 - startSec);
     let idx = Math.floor((rel + eps) / secPerBar);
     if (idx < 0) idx = 0;
     if (idx >= BARS_PER_ROW) idx = BARS_PER_ROW - 1;
     return idx;
   };
 
+  // strict musical time → X within each bar
   const xAt = (t0: number) => {
     const idx = barIndexOf(t0);
-    const bStart = startSec + idx * secPerBar;
-    // normalized time inside the bar (0..1), clamped with epsilon forgiveness
-    let u = (t0 - bStart) / secPerBar;
+    const seg = segments[idx];
+    const dur = Math.max(1e-6, seg.endSec - seg.startSec);
+    let u = (t0 - seg.startSec) / dur;
     if (u < 0 && u > -eps) u = 0;
     if (u > 1 && u < 1 + eps) u = 1;
     u = Math.max(0, Math.min(1, u));
-    return noteStartX + idx * barW + u * barW;
+    return seg.x0 + u * (seg.x1 - seg.x0);
   };
 
-  // filter tickables strictly by system content window (no compression)
+  // Filter tickables to system window
   const sel = (ticks: any[], starts: number[]) => {
     const outT: any[] = [];
     const outS: number[] = [];
     for (let i = 0; i < ticks.length; i++) {
       const t0 = starts[i];
-      if (inWindow(t0)) {
-        outT.push(ticks[i]);
-        outS.push(t0);
+      if (inWindow(t0)) { outT.push(ticks[i]); outS.push(t0); }
+    }
+    return { t: outT, s: outS };
+  };
+  let melSel = sel(mel.ticks, mel.starts);
+  let rhySel = haveRhythm && rhyStave ? sel(rhy.ticks, rhy.starts) : { t: [] as any[], s: [] as number[] };
+
+  // helpers
+  const isRest = (note: any): boolean => {
+    if (typeof note?.isRest === "function") return !!note.isRest();
+    const d = note?.getDuration?.();
+    if (typeof d === "string" && d.endsWith("r")) return true;
+    const cat = typeof note?.getCategory === "function" ? note.getCategory() : "";
+    if (typeof cat === "string" && cat.toLowerCase().includes("ghost")) return true;
+    return false;
+  };
+
+  // De-duplicate events with the same start time (floating rounding)
+  const dedupeSameStart = (selObj: { t: any[]; s: number[] }) => {
+    const T = selObj.t, S = selObj.s;
+    if (T.length <= 1) return selObj;
+    const outT: any[] = [];
+    const outS: number[] = [];
+    for (let i = 0; i < T.length; i++) {
+      const curT = T[i], curS = S[i];
+      if (!outS.length) { outT.push(curT); outS.push(curS); continue; }
+      const j = outS.length - 1;
+      if (Math.abs(curS - outS[j]) <= dupEps) {
+        // prefer NOTE over REST when colliding
+        const keepIncoming = isRest(outT[j]) && !isRest(curT);
+        if (keepIncoming) { outT[j] = curT; outS[j] = curS; }
+        // else drop incoming
+      } else {
+        outT.push(curT); outS.push(curS);
       }
     }
     return { t: outT, s: outS };
   };
-  const melSel = sel(mel.ticks, mel.starts);
-  const rhySel =
-    haveRhythm && rhyStave ? sel(rhy.ticks, rhy.starts) : { t: [] as any[], s: [] as number[] };
 
-  // >>> Force all MELODY stems UP before formatting / beaming.
-  for (const n of melSel.t) {
-    if (typeof (n as any)?.setStemDirection === "function") {
-      (n as any).setStemDirection(1); // 1 = UP, -1 = DOWN
-    }
-  }
+  melSel = dedupeSameStart(melSel);
+  if (haveRhythm && rhyStave) rhySel = dedupeSameStart(rhySel);
 
-  // voices + auto layout (we'll override tickcontext X shortly)
+  // create tick contexts only (no justification)
   const melVoice = new Voice({ numBeats: tsNum, beatValue: den }).setStrict(false);
   melVoice.addTickables(melSel.t as any);
-  new Formatter({ softmaxFactor: 5 }).joinVoices([melVoice]).formatToStave([melVoice], melStave);
+  const melFmt = new Formatter();
+  melFmt.joinVoices([melVoice]);
+  (melFmt as any).createTickContexts([melVoice]);
+  melFmt.preFormat();
 
   let rhyVoice: Voice | null = null;
   if (haveRhythm && rhyStave) {
     rhyVoice = new Voice({ numBeats: tsNum, beatValue: den }).setStrict(false);
     rhyVoice.addTickables(rhySel.t as any);
-    new Formatter({ softmaxFactor: 5 }).joinVoices([rhyVoice]).formatToStave([rhyVoice], rhyStave);
+    const rhyFmt = new Formatter();
+    rhyFmt.joinVoices([rhyVoice]);
+    (rhyFmt as any).createTickContexts([rhyVoice]);
+    rhyFmt.preFormat();
   }
 
-  // pin tickcontexts to time-true X (no head-shift)
-  for (let i = 0; i < melSel.t.length; i++) {
-    const tc = (melSel.t[i] as any).getTickContext?.();
-    if (tc?.setX) tc.setX(xAt(melSel.s[i] ?? startSec));
-  }
-  if (haveRhythm && rhyVoice && rhyStave) {
-    for (let i = 0; i < rhySel.t.length; i++) {
-      const tc = (rhySel.t[i] as any).getTickContext?.();
-      if (tc?.setX) tc.setX(xAt(rhySel.s[i] ?? startSec));
+  // 1) place each tickable at its linear musical X and bind stave/context
+  const placeTicks = (ticks: any[], starts: number[], stave: Stave) => {
+    for (let i = 0; i < ticks.length; i++) {
+      const n = ticks[i] as any;
+      const tc = n.getTickContext?.();
+      const x = xAt(starts[i] ?? startSec);
+      if (tc?.setX) { tc.setX(x); (tc as any).preFormatted = true; (tc as any).postFormatted = true; }
+      if (typeof n.setPreFormatted === "function") n.setPreFormatted(true);
+      else (n as any).preFormatted = true;
+      if (typeof n.setStave === "function") n.setStave(stave);
+      if (typeof n.setContext === "function") n.setContext(ctx);
+    }
+  };
+  placeTicks(melSel.t, melSel.s, melStave);
+  if (haveRhythm && rhyVoice && rhyStave) placeTicks(rhySel.t, rhySel.s, rhyStave);
+
+  // leftmost x for the tickable’s drawn glyph (note or rest)
+  const leftMostX = (n: any): number => {
+    try {
+      if (!isRest(n) && typeof n.getNoteHeadBeginX === "function") return n.getNoteHeadBeginX();
+      const bb = typeof n.getBoundingBox === "function" ? n.getBoundingBox() : null;
+      if (bb) return bb.getX();
+      const m = n.getMetrics?.();
+      const w = (m?.noteHeadWidth && m.noteHeadWidth > 0) ? m.noteHeadWidth : 10;
+      const ax = typeof n.getAbsoluteX === "function" ? n.getAbsoluteX() : (n.getTickContext?.().getX?.() ?? 0);
+      return ax - w * 0.5;
+    } catch { return 0; }
+  };
+
+  // 2) per-bar Δx so the first *true* downbeat tickable’s LEFT edge sits one 16th into the bar
+  const barShiftX: number[] = Array(BARS_PER_ROW).fill(0);
+
+  for (let b = 0; b < BARS_PER_ROW; b++) {
+    const seg = segments[b];
+    const gapPx16 = (seg.x1 - seg.x0) * (den / (16 * tsNum)); // exact music-time gap
+
+    // find first tickable that starts exactly at bar downbeat (± downbeatEps)
+    let idx = -1;
+    for (let i = 0; i < melSel.t.length; i++) {
+      const t0 = melSel.s[i];
+      if (t0 < seg.startSec - eps || t0 >= seg.endSec - eps) continue;
+      if (Math.abs(t0 - seg.startSec) <= downbeatEps) { idx = i; break; }
+    }
+
+    if (idx >= 0) {
+      const curLeft = leftMostX(melSel.t[idx]);
+      const targetLeft = seg.x0 + gapPx16;
+      barShiftX[b] = targetLeft - curLeft;
+    } else {
+      barShiftX[b] = 0; // no downbeat in this bar → don't drag pickups
     }
   }
 
-  // build beams BEFORE drawing (suppresses flags on beamed notes)
-  const melGroupKeys = melSel.s.map((t0) => barIndexOf(t0));
-  const melBeams = buildBeams(melSel.t, {
-    groupKeys: melGroupKeys,
-    allowMixed: true,
-    sameStemOnly: true, // harmless (all stems are up now)
-  });
+  // apply uniform per-bar shift (keeps timing linear)
+  const applyBarShift = (ticks: any[], starts: number[]) => {
+    for (let i = 0; i < ticks.length; i++) {
+      const n = ticks[i] as any;
+      const b = barIndexOf(starts[i] ?? startSec);
+      const dx = barShiftX[b] || 0;
+      if (!dx) continue;
+      const tc = n.getTickContext?.();
+      if (tc?.setX) tc.setX((tc.getX?.() ?? xAt(starts[i])) + dx);
+      if (tc) { (tc as any).preFormatted = true; (tc as any).postFormatted = true; }
+    }
+  };
+  applyBarShift(melSel.t, melSel.s);
+  if (haveRhythm && rhyVoice && rhyStave) applyBarShift(rhySel.t, rhySel.s);
 
+  // 3) beams after positions are final
+  const melGroupKeys = melSel.s.map((t0) => barIndexOf(t0));
+  const melBeams = buildBeams(melSel.t, { groupKeys: melGroupKeys, allowMixed: true, sameStemOnly: true });
   let rhyBeams: any[] = [];
   if (haveRhythm && rhyVoice && rhyStave) {
     const rhyGroupKeys = rhySel.s.map((t0) => barIndexOf(t0));
     rhyBeams = buildBeams(rhySel.t, { groupKeys: rhyGroupKeys, allowMixed: true, sameStemOnly: true });
   }
 
-  // draw notes, beams, tuplets
-  melVoice.draw(ctx, melStave);
+  // 4) manual draw (avoid any auto justification)
+  const drawTickables = (ticks: any[], stave: Stave) => {
+    for (const t of ticks) {
+      if (typeof t.setStave === "function") t.setStave(stave);
+      if (typeof t.setContext === "function") t.setContext(ctx);
+      if (typeof t.draw === "function") t.draw();
+    }
+  };
+  drawTickables(melSel.t, melStave);
   melBeams.forEach((b) => b.setContext(ctx).draw());
-  const melTuplets = (mel as any).tuplets || [];
-  melTuplets.forEach((t: any) => t.setContext(ctx).draw());
 
-  if (haveRhythm && rhyVoice && rhyStave) {
-    rhyVoice.draw(ctx, rhyStave);
+  // draw ONLY tuplets present in this system (avoid cross-row overlaps)
+  const tupletHasAny = (tp: any, pool: any[]) => {
+    const notes = typeof tp.getNotes === "function" ? tp.getNotes() : [];
+    return notes.some((n: any) => pool.includes(n));
+  };
+  (mel.tuplets || [])
+    .filter((t: any) => tupletHasAny(t, melSel.t))
+    .forEach((t: any) => t.setContext(ctx).draw());
+
+  if (haveRhythm && rhyStave) {
+    drawTickables(rhySel.t, rhyStave);
     rhyBeams.forEach((b) => b.setContext(ctx).draw());
-    (rhy.tuplets || []).forEach((t: any) => t.setContext(ctx).draw());
+    (rhy.tuplets || [])
+      .filter((t: any) => tupletHasAny(t, rhySel.t))
+      .forEach((t: any) => t.setContext(ctx).draw());
   }
 
-  // barlines (4 equal segments per row)
+  // exact barlines from our geometry
   const staffTopY = melStave.getYForLine(0) - 6;
   const staffBottomY = (haveRhythm && rhyStave ? rhyStave : melStave).getYForLine(4) + 6;
   const drawBarAtX = (x: number) => {
@@ -173,7 +287,7 @@ export function drawSystem({
     ctx.moveTo(xi, staffTopY);
     ctx.lineTo(xi, staffBottomY);
     ctx.setLineWidth(1);
-    ctx.setStrokeStyle("rgba(15,15,15,0.5)");
+    ctx.setStrokeStyle("rgba(15,15,15,1)");
     ctx.stroke();
   };
   drawBarAtX(noteStartX);
@@ -187,6 +301,7 @@ export function drawSystem({
     x1: noteEndX,
     y0: staffTopY,
     y1: staffBottomY,
+    segments: segments.map(({ startSec, endSec, x0, x1 }) => ({ startSec, endSec, x0, x1 })),
   };
   const nextY = (haveRhythm && rhyStave ? rhyStave : melStave).getBottomY();
 

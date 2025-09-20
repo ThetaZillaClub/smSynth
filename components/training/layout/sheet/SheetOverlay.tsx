@@ -4,13 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { PR_COLORS, midiToY, getMidiRange, type Phrase } from "@/utils/piano-roll/scale";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
-
-/** NEW: describe per-system layout coming from VexScore */
-type SystemLayout = {
-  startSec: number; endSec: number;
-  x0: number; x1: number;
-  y0: number; y1: number;
-};
+import type { SystemLayout } from "./vexscore/types";
 
 type Props = {
   width: number;
@@ -20,16 +14,12 @@ type Props = {
   startAtMs?: number | null;
   leadInSec?: number;
 
-  /** Legacy single-row alignment (still supported) */
+  /** Legacy single-row alignment (still supported if provided) */
   staffStartX?: number | null;
   staffEndX?: number | null;
 
-  /** NEW: multi-row layout (preferred if provided) */
+  /** Preferred: multi-row layout */
   systems?: SystemLayout[];
-
-  bpm: number;
-  tsNum: number;
-  den: number;
 
   livePitchHz?: number | null;
   confidence?: number;
@@ -47,9 +37,6 @@ export default function SheetOverlay({
   staffStartX = null,
   staffEndX = null,
   systems,
-  bpm,        // kept in props for future use if needed
-  tsNum,      // ^
-  den,        // ^
   livePitchHz = null,
   confidence = 0,
   confThreshold = 0.5,
@@ -65,10 +52,13 @@ export default function SheetOverlay({
     return { minMidi: r.minMidi, maxMidi: r.maxMidi };
   }, [phrase]);
 
-  const totalSec = useMemo(
-    () => Math.max(leadInSec + (phrase?.durationSec ?? 0), 0.001),
-    [leadInSec, phrase?.durationSec]
-  );
+  // Prefer the systems’ end (bar-aligned), fall back to phrase+lead-in
+  const totalSec = useMemo(() => {
+    if (Array.isArray(systems) && systems.length) {
+      return systems[systems.length - 1]!.endSec;
+    }
+    return Math.max(leadInSec + (phrase?.durationSec ?? 0), 0.001);
+  }, [systems, leadInSec, phrase?.durationSec]);
 
   const draw = useCallback((nowMs: number) => {
     const cnv = canvasRef.current;
@@ -85,9 +75,6 @@ export default function SheetOverlay({
     ctx.clearRect(0, 0, width, height);
 
     const isLive = running && startAtMs != null;
-
-    // (Removed) tempo/meter badge
-
     const tNow = isLive ? (nowMs - (startAtMs as number)) / 1000 : 0;
     const headTime = Math.max(0, Math.min(totalSec, tNow));
 
@@ -97,18 +84,37 @@ export default function SheetOverlay({
     let yBottom = height;
 
     if (Array.isArray(systems) && systems.length) {
+      // choose active system
       let sys = systems[0];
       for (let i = 0; i < systems.length; i++) {
         const s = systems[i];
         if (headTime >= s.startSec && headTime < s.endSec) { sys = s; break; }
         if (headTime >= s.endSec) sys = s;
       }
-      const dur = Math.max(1e-6, sys.endSec - sys.startSec);
-      const u = (headTime - sys.startSec) / dur;
-      xGuide = Math.round(sys.x0 + u * (sys.x1 - sys.x0)) + 0.5;
+
+      // Prefer piecewise (per-bar) mapping with *outer* bar edges only (no inner pads).
+      if (Array.isArray(sys.segments) && sys.segments.length) {
+        // find active segment (default to the last one if past end)
+        let seg = sys.segments[0];
+        for (let i = 0; i < sys.segments.length; i++) {
+          const s = sys.segments[i]!;
+          if (headTime >= s.startSec && headTime < s.endSec) { seg = s; break; }
+          if (headTime >= s.endSec) seg = s;
+        }
+        const dur = Math.max(1e-6, seg.endSec - seg.startSec);
+        const u = Math.max(0, Math.min(1, (headTime - seg.startSec) / dur));
+        xGuide = Math.round(seg.x0 + u * (seg.x1 - seg.x0)) + 0.5;
+      } else {
+        // Fallback: linear across the whole system band
+        const dur = Math.max(1e-6, sys.endSec - sys.startSec);
+        const u = (headTime - sys.startSec) / dur;
+        xGuide = Math.round(sys.x0 + u * (sys.x1 - sys.x0)) + 0.5;
+      }
+
       yTop = sys.y0;
       yBottom = sys.y1;
     } else {
+      // legacy single-row fallback
       const x0 = Number.isFinite(staffStartX as number) ? (staffStartX as number) : 0;
       const x1 = Number.isFinite(staffEndX as number) ? (staffEndX as number) : width;
       const bandW = Math.max(1, x1 - x0);
@@ -140,11 +146,7 @@ export default function SheetOverlay({
         ctx.stroke();
       }
     }
-  }, [
-    width, height, dpr, running, startAtMs, totalSec,
-    livePitchHz, confidence, confThreshold, a4Hz, minMidi, maxMidi,
-    staffStartX, staffEndX, systems
-  ]);
+  }, [width, height, dpr, running, startAtMs, totalSec, livePitchHz, confidence, confThreshold, a4Hz, minMidi, maxMidi, staffStartX, staffEndX, systems]);
 
   const drawRef = useRef(draw);
   useEffect(() => { drawRef.current = draw; }, [draw]);

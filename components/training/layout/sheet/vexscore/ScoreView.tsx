@@ -9,6 +9,7 @@ import { useResizeObserver } from "./useResizeObserver";
 import { buildMelodyTickables, buildRhythmTickables } from "./makeTickables";
 import { drawSystem } from "./drawSystem";
 import type { VexScoreProps, SystemLayout } from "./types";
+import { noteValueToSeconds } from "@/utils/time/tempo";
 
 export default function ScoreView({
   phrase,
@@ -20,116 +21,171 @@ export default function ScoreView({
   leadInSec = 0,
   useSharps = true,
   clef: clefProp,
-  rhythm,          // blue staff (optional)
-  melodyRhythm,    // authoritative rhythm for melody (optional)
+  rhythm,
+  melodyRhythm,
   onLayout,
   className,
 }: VexScoreProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const hasDrawnOnceRef = useRef<boolean>(false);
   const dims = useResizeObserver(hostRef as any, 120, heightPx);
 
   const clef = clefProp ?? pickClef(phrase);
   const wnPerSec = useMemo(() => bpm / (60 * den), [bpm, den]);
   const secPerBeat = useMemo(() => (60 / Math.max(1, bpm)) * (4 / Math.max(1, den)), [bpm, den]);
   const secPerBar = useMemo(() => tsNum * secPerBeat, [tsNum, secPerBeat]);
-  const totalSec = useMemo(
-    () => Math.max(leadInSec + (phrase?.durationSec ?? 0), 1e-3),
-    [leadInSec, phrase?.durationSec]
-  );
-  const secPerWholeNote = useMemo(() => 1 / Math.max(1e-9, wnPerSec), [wnPerSec]);
+
+  // Total musical content length from the longest of: phrase, melody rhythm, visible rhythm
+  const contentSec = useMemo(() => {
+    const fromPhrase = Math.max(0, phrase?.durationSec ?? 0);
+    const fromMelodyRhy =
+      Array.isArray(melodyRhythm) && melodyRhythm.length
+        ? melodyRhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0)
+        : 0;
+    const fromRhy =
+      Array.isArray(rhythm) && rhythm.length
+        ? rhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0)
+        : 0;
+    return Math.max(fromPhrase, fromMelodyRhy, fromRhy);
+  }, [phrase?.durationSec, melodyRhythm, rhythm, bpm, den]);
+
+  // Include lead-in, then round UP to the next whole bar so we never clip a bar
+  const totalSec = useMemo(() => {
+    const raw = Math.max(leadInSec + contentSec, 1e-3);
+    return Math.ceil(raw / Math.max(1e-9, secPerBar)) * secPerBar;
+  }, [leadInSec, contentSec, secPerBar]);
 
   useEffect(() => {
     const el = hostRef.current;
     if (!el || !dims.w) return;
 
-    // build once (whole piece)
-    const mel = buildMelodyTickables({
-      phrase,
-      clef,
-      useSharps,
-      leadInSec,
-      wnPerSec,
-      secPerWholeNote,
-      secPerBeat,
-      lyrics,
-      // IMPORTANT: melody rhythm is independent from the visible blue rhythm staff.
-      rhythm: melodyRhythm,
-    });
-    const rhy = buildRhythmTickables({ rhythm, leadInSec, wnPerSec, secPerWholeNote });
-    const haveRhythm = Array.isArray(rhythm) && rhythm.length > 0;
+    // Hide before the very first draw only to avoid FOUC; preserve layout.
+    if (!hasDrawnOnceRef.current) el.style.visibility = "hidden";
 
-    const systems = computeSystems(totalSec, secPerBar);
+    // Ensure music/text fonts are ready before drawing to avoid fallback flashes
+    const ensureVexFonts = async () => {
+      if (typeof document !== "undefined" && (document as any).fonts) {
+        try {
+          await Promise.race([
+            (document as any).fonts.ready,
+            Promise.allSettled([
+              (document as any).fonts.load('12px "Bravura"'),
+              (document as any).fonts.load('12px "Gonville"'),
+              (document as any).fonts.load('12px "Petaluma"'),
+              (document as any).fonts.load('12px "Arial"'),
+            ]),
+          ]);
+        } catch {
+          // ignore font loading errors; we’ll draw anyway
+        }
+      }
+    };
 
-    // renderer + canvas size estimate
-    el.innerHTML = "";
-    const renderer = new Renderer(el, Renderer.Backends.SVG);
-    const systemCount = systems.length;
-    const stavesPerSystem = haveRhythm ? 2 : 1;
-    const estimatedH =
-      10 +
-      systemCount * (stavesPerSystem * EST_STAVE_H + (haveRhythm ? STAFF_GAP_Y : 0)) +
-      (systemCount - 1) * SYSTEM_GAP_Y +
-      10;
-    const totalH = Math.max(dims.h, estimatedH);
-    renderer.resize(dims.w, totalH);
-    const ctx = renderer.getContext();
+    let cancelled = false;
 
-    const padding = { left: 12, right: 12, top: 10, bottom: 10 } as const;
-    const staffWidth = Math.max(50, dims.w - padding.left - padding.right);
+    (async () => {
+      await ensureVexFonts();
+      if (cancelled) return;
 
-    const layouts: SystemLayout[] = [];
-    let currentY = padding.top;
-
-    systems.forEach((meta, sIdx) => {
-      const { layout, nextY } = drawSystem({
-        ctx,
-        padding,
-        currentY,
-        staffWidth,
-        tsNum,
-        den,
+      // build once (whole piece)
+      const mel = buildMelodyTickables({
+        phrase,
         clef,
-        haveRhythm,
-        systemWindow: {
-          startSec: meta.startSec,
-          endSec: meta.endSec,
-          contentEndSec: meta.contentEndSec,
-        },
-        mel,
-        rhy,
-        secPerBar,
+        useSharps,
+        leadInSec,
+        wnPerSec,
+        secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
+        secPerBeat,
+        secPerBar, // ensure builders can pad to bar boundaries
+        lyrics,
+        rhythm: melodyRhythm, // independent from the visible rhythm staff
       });
 
-      // legacy one-row callback (first row)
-      if (sIdx === 0 && onLayout) onLayout({ noteStartX: layout.x0, noteEndX: layout.x1 });
+      const rhy = buildRhythmTickables({
+        rhythm,
+        leadInSec,
+        wnPerSec,
+        secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
+        secPerBar, // ensure builders can pad to bar boundaries
+      });
 
-      layouts.push(layout);
-      currentY = nextY + SYSTEM_GAP_Y;
-    });
+      const haveRhythm = Array.isArray(rhythm) && rhythm.length > 0;
 
-    // multi-row overlay payload
-    if (onLayout && layouts.length) {
-      const total = {
-        startSec: 0,
-        endSec: systems.length ? systems[systems.length - 1].endSec : totalSec,
-        x0: layouts[0].x0,
-        x1: layouts[layouts.length - 1].x1,
-        y0: layouts[0].y0,
-        y1: layouts[layouts.length - 1].y1,
-      };
-      onLayout({ systems: layouts, total });
-    }
+      const systems = computeSystems(totalSec, secPerBar);
 
-    // polish SVG
-    const svg = el.querySelector("svg") as SVGSVGElement | null;
-    if (svg) {
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      svg.style.display = "block";
-      svg.style.width = "100%";
-      svg.style.height = "100%";
-    }
+      // renderer + canvas
+      el.innerHTML = "";
+      const renderer = new Renderer(el, Renderer.Backends.SVG);
+      const systemCount = systems.length;
+      const stavesPerSystem = haveRhythm ? 2 : 1;
+      const estimatedH =
+        10 +
+        systemCount * (stavesPerSystem * EST_STAVE_H + (haveRhythm ? STAFF_GAP_Y : 0)) +
+        (systemCount - 1) * SYSTEM_GAP_Y +
+        10;
+      const totalH = Math.max(dims.h, estimatedH);
+      renderer.resize(dims.w, totalH);
+      const ctx = renderer.getContext();
+
+      const padding = { left: 12, right: 12, top: 10, bottom: 10 } as const;
+      const staffWidth = Math.max(50, dims.w - padding.left - padding.right);
+
+      const layouts: SystemLayout[] = [];
+      let currentY = padding.top;
+
+      systems.forEach((meta) => {
+        const { layout, nextY } = drawSystem({
+          ctx,
+          padding,
+          currentY,
+          staffWidth,
+          tsNum,
+          den,
+          clef,
+          haveRhythm,
+          systemWindow: {
+            startSec: meta.startSec,
+            endSec: meta.endSec,
+            contentEndSec: meta.contentEndSec,
+          },
+          mel,
+          rhy,
+          secPerBar,
+        });
+
+        layouts.push(layout);
+        currentY = nextY + SYSTEM_GAP_Y;
+      });
+
+      // multi-row overlay payload only
+      if (onLayout && layouts.length) {
+        const total = {
+          startSec: 0,
+          endSec: systems.length ? systems[systems.length - 1].endSec : totalSec,
+          x0: layouts[0].x0,
+          x1: layouts[layouts.length - 1].x1,
+          y0: layouts[0].y0,
+          y1: layouts[layouts.length - 1].y1,
+        };
+        onLayout({ systems: layouts, total });
+      }
+
+      // polish SVG
+      const svg = el.querySelector("svg") as SVGSVGElement | null;
+      if (svg) {
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        svg.style.display = "block";
+        svg.style.width = "100%";
+        svg.style.height = "100%";
+      }
+
+      // Reveal after first complete draw
+      hasDrawnOnceRef.current = true;
+      el.style.visibility = "visible";
+    })();
 
     return () => {
+      cancelled = true;
       el.innerHTML = "";
     };
   }, [
@@ -147,9 +203,9 @@ export default function ScoreView({
     secPerBar,
     totalSec,
     wnPerSec,
-    secPerWholeNote,
     clef,
     onLayout,
+    contentSec,
   ]);
 
   return (
