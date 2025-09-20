@@ -35,19 +35,16 @@ export default function ScoreView({
   const secPerBeat = useMemo(() => (60 / Math.max(1, bpm)) * (4 / Math.max(1, den)), [bpm, den]);
   const secPerBar = useMemo(() => tsNum * secPerBeat, [tsNum, secPerBeat]);
 
-  // Total musical content length from the longest of: phrase, melody rhythm, visible rhythm
+  // Total musical content length — **melody only**.
+  // Rhythm staff length is intentionally ignored so it can’t extend the score.
   const contentSec = useMemo(() => {
     const fromPhrase = Math.max(0, phrase?.durationSec ?? 0);
     const fromMelodyRhy =
       Array.isArray(melodyRhythm) && melodyRhythm.length
         ? melodyRhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0)
         : 0;
-    const fromRhy =
-      Array.isArray(rhythm) && rhythm.length
-        ? rhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0)
-        : 0;
-    return Math.max(fromPhrase, fromMelodyRhy, fromRhy);
-  }, [phrase?.durationSec, melodyRhythm, rhythm, bpm, den]);
+    return Math.max(fromPhrase, fromMelodyRhy);
+  }, [phrase?.durationSec, melodyRhythm, bpm, den]);
 
   // Include lead-in, then round UP to the next whole bar so we never clip a bar
   const totalSec = useMemo(() => {
@@ -98,7 +95,7 @@ export default function ScoreView({
         secPerBeat,
         secPerBar, // ensure builders can pad to bar boundaries
         lyrics,
-        rhythm: melodyRhythm, // independent from the visible rhythm staff
+        rhythm: melodyRhythm, // authoritative rhythm for the melody only
       });
 
       const rhy = buildRhythmTickables({
@@ -109,6 +106,7 @@ export default function ScoreView({
         secPerBar, // ensure builders can pad to bar boundaries
       });
 
+      // We may still *show* the rhythm staff, but it must not extend the score.
       const haveRhythm = Array.isArray(rhythm) && rhythm.length > 0;
 
       const systems = computeSystems(totalSec, secPerBar);

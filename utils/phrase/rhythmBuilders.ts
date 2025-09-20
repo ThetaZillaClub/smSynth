@@ -68,9 +68,10 @@ export type TwoBarOpts = {
 
 /**
  * Build a rhythm that fills an exact number of whole bars from a whitelist of note values.
- * Hard guarantees:
+ * Guarantees:
  *  - First slot of every bar is a NOTE (prevents blank bars).
- *  - Gentle “soft start” on rests: early notes are biased toward notes.
+ *  - Soft-start rest probability to avoid all-rest openings.
+ *  - Trims any trailing bars that contain only rests (ripple edit).
  */
 export function buildTwoBarRhythm(opts: TwoBarOpts): RhythmEvent[] {
   const {
@@ -90,6 +91,7 @@ export function buildTwoBarRhythm(opts: TwoBarOpts): RhythmEvent[] {
 
   let target = tsNum * gridDen;
 
+  // If user's pool can't pack a full bar, extend grid with tiny fillers.
   if (!makeReach(coins, target)[target]) {
     for (const f of FILLERS) gridDen = lcm(gridDen, beatsFrac(f, den).d);
     bucket = unitsBucket([...available, ...FILLERS], den, gridDen);
@@ -114,26 +116,26 @@ export function buildTwoBarRhythm(opts: TwoBarOpts): RhythmEvent[] {
       const vals = bucket.get(u)!;
       const v = vals[Math.floor(rnd() * vals.length)];
 
-      // --- REST POLICY ---
+      // REST POLICY
       // 1) First slot in each bar must be a NOTE.
-      // 2) “Soft start”: in the very beginning (first ~2 notes overall),
-      //    tone down rests to avoid an all-rest opening feel.
-      // 3) If still somehow no note yet in this bar, keep biasing toward a note.
+      // 2) Soft start: first couple of overall notes → reduce rest prob.
+      // 3) If bar has no note yet, keep rests slightly toned down.
       let type: RhythmEvent["type"] = "note";
       if (allowRests) {
         const atBarStart = notesThisBar === 0;
-        const softStart = notesTotal < 2;                    // first couple of notes overall
-        const rampedRestProb = softStart ? restProb * 0.4    // soften rests at the very start
-                                         : (notesThisBar === 0 ? Math.min(restProb, 0.25) : restProb);
-
-        type = atBarStart ? "note" : (rnd() < rampedRestProb ? "rest" : "note");
+        const softStart = notesTotal < 2;
+        const ramped =
+          atBarStart ? Math.min(restProb, 0.25) :
+          softStart ? restProb * 0.4 :
+          restProb;
+        type = atBarStart ? "note" : (rnd() < ramped ? "rest" : "note");
       }
 
       if (type === "note") { notesThisBar++; notesTotal++; }
       out.push({ type, value: v });
     }
 
-    // Safety: if an edge case slipped through, flip bar’s first event to a NOTE.
+    // Safety: guarantee at least one NOTE in this bar
     if (allowRests && notesThisBar === 0) {
       const barLen = units.length;
       const idx0 = out.length - barLen;
@@ -141,6 +143,33 @@ export function buildTwoBarRhythm(opts: TwoBarOpts): RhythmEvent[] {
         out[idx0] = { ...out[idx0], type: "note" };
         notesThisBar = 1;
         notesTotal++;
+      }
+    }
+  }
+
+  // Trim trailing all-rest bars (ripple edit from the end).
+  if (allowRests) {
+    const barUnits = tsNum * gridDen;
+    const unitsOf = (e: RhythmEvent) => toUnits(e.value, den, gridDen);
+
+    let i = out.length - 1;
+    while (i >= 0) {
+      let sum = 0;
+      let hasNote = false;
+      let start = i;
+      // accumulate one full bar from the end
+      while (start >= 0 && sum < barUnits) {
+        sum += unitsOf(out[start]);
+        if (out[start].type === "note") hasNote = true;
+        start--;
+      }
+      if (sum !== barUnits) break; // incomplete bar at end → keep it
+      const barLen = i - start;
+      if (!hasNote) {
+        out.splice(start + 1, barLen); // remove this empty bar
+        i = start;                     // continue trimming previous bar(s)
+      } else {
+        break; // last bar already has a note
       }
     }
   }
@@ -165,6 +194,7 @@ export type QuotaOpts = {
  * Adjustments:
  *  - First slot of each bar is forced NOTE (prevents all-rest bars).
  *  - Soft-start rest probability for the first few notes to avoid blank openings.
+ *  - After building, trims any trailing all-rest bars (ripple edit).
  */
 export function buildBarsRhythmForQuota(opts: QuotaOpts): RhythmEvent[] {
   const {
@@ -213,7 +243,7 @@ export function buildBarsRhythmForQuota(opts: QuotaOpts): RhythmEvent[] {
     for (let i = 0; i < vals.length; i++) {
       const v = vals[i];
 
-      // --- REST POLICY (quota variant) ---
+      // REST POLICY (quota variant)
       // 1) If we already met the quota, remaining are rests.
       // 2) Force first slot of the bar to NOTE.
       // 3) Soft start: reduce early rest probability until a couple of notes appear.
@@ -251,6 +281,32 @@ export function buildBarsRhythmForQuota(opts: QuotaOpts): RhythmEvent[] {
     let extra = noteCount - noteQuota;
     for (let i = out.length - 1; i >= 0 && extra > 0; i--) {
       if (out[i].type === "note") { out[i] = { ...out[i], type: "rest" }; extra--; }
+    }
+  }
+
+  // Trim trailing all-rest bars (ripple edit from the end).
+  if (allowRests) {
+    const barUnits = targetUnitsPerBar;
+    const unitsOf = (e: RhythmEvent) => toUnits(e.value, den, gridDen);
+
+    let i = out.length - 1;
+    while (i >= 0) {
+      let sum = 0;
+      let hasNote = false;
+      let start = i;
+      while (start >= 0 && sum < barUnits) {
+        sum += unitsOf(out[start]);
+        if (out[start].type === "note") hasNote = true;
+        start--;
+      }
+      if (sum !== barUnits) break; // partial bar at the very end — keep it
+      const barLen = i - start;
+      if (!hasNote) {
+        out.splice(start + 1, barLen); // remove empty trailing bar
+        i = start;                     // continue trimming previous bar(s)
+      } else {
+        break; // last bar already has a note
+      }
     }
   }
 
