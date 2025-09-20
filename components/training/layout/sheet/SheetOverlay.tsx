@@ -2,31 +2,35 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { PR_COLORS, midiToY, midiCellRect, getMidiRange, type Phrase } from "@/utils/piano-roll/scale";
+import { PR_COLORS, midiToY, getMidiRange, type Phrase } from "@/utils/piano-roll/scale";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
+
+/** NEW: describe per-system layout coming from VexScore */
+type SystemLayout = {
+  startSec: number; endSec: number;
+  x0: number; x1: number;
+  y0: number; y1: number;
+};
 
 type Props = {
   width: number;
   height: number;
   phrase: Phrase;
   running: boolean;
-
-  /** Recorder anchor in ms (aligns visual time with audio engine) */
   startAtMs?: number | null;
-
-  /** Pre-roll lead-in (sec) — reserves space before note 1 */
   leadInSec?: number;
 
-  /** Static staff engraving band from VexScore (x coordinates) */
+  /** Legacy single-row alignment (still supported) */
   staffStartX?: number | null;
   staffEndX?: number | null;
 
-  /** Musical transport (badge only) */
+  /** NEW: multi-row layout (preferred if provided) */
+  systems?: SystemLayout[];
+
   bpm: number;
   tsNum: number;
   den: number;
 
-  /** Live pitch */
   livePitchHz?: number | null;
   confidence?: number;
   confThreshold?: number;
@@ -42,9 +46,10 @@ export default function SheetOverlay({
   leadInSec = 1.5,
   staffStartX = null,
   staffEndX = null,
-  bpm,
-  tsNum,
-  den,
+  systems,
+  bpm,        // kept in props for future use if needed
+  tsNum,      // ^
+  den,        // ^
   livePitchHz = null,
   confidence = 0,
   confThreshold = 0.5,
@@ -55,7 +60,7 @@ export default function SheetOverlay({
   const dpr = useMemo(() => (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1), []);
 
   const { minMidi, maxMidi } = useMemo(() => {
-    if (!phrase?.notes?.length) return { minMidi: 60 - 6, maxMidi: 60 + 6 };
+    if (!phrase?.notes?.length) return { minMidi: 54, maxMidi: 66 };
     const r = getMidiRange(phrase, 2);
     return { minMidi: r.minMidi, maxMidi: r.maxMidi };
   }, [phrase]);
@@ -69,7 +74,6 @@ export default function SheetOverlay({
     const cnv = canvasRef.current;
     if (!cnv) return;
 
-    // retina backing store
     const wantW = Math.round(width * dpr);
     const wantH = Math.round(height * dpr);
     if (cnv.width !== wantW) cnv.width = wantW;
@@ -82,59 +86,51 @@ export default function SheetOverlay({
 
     const isLive = running && startAtMs != null;
 
-    // ----- Tempo / meter badge (top-right) -----
-    ctx.save();
-    const badge = `${bpm} BPM • ${tsNum}/${den}`;
-    ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI";
-    const bw = ctx.measureText(badge).width + 10;
-    const xBadge = width - bw - 8;
-    const yBadge = 6;
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.fillRect(xBadge, yBadge, bw, 18);
-    ctx.strokeStyle = "rgba(0,0,0,0.2)";
-    ctx.strokeRect(xBadge + 0.5, yBadge + 0.5, bw - 1, 18 - 1);
-    ctx.fillStyle = "#0f0f0f";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText(badge, xBadge + 5, yBadge + 9);
-    ctx.restore();
-
-    // ----- Moving playhead ONLY (no dynamic beat/measure grid) -----
-    const xBandStart = Number.isFinite(staffStartX as number) ? (staffStartX as number) : 0;
-    const xBandEnd = Number.isFinite(staffEndX as number) ? (staffEndX as number) : width;
-    const bandWidth = Math.max(1, xBandEnd - xBandStart);
+    // (Removed) tempo/meter badge
 
     const tNow = isLive ? (nowMs - (startAtMs as number)) / 1000 : 0;
-    const headTime = Math.max(0, Math.min(totalSec, tNow)); // clamp within staff duration
-    const ratio = headTime / totalSec;
-    const xGuide = Math.round(xBandStart + ratio * bandWidth) + 0.5;
+    const headTime = Math.max(0, Math.min(totalSec, tNow));
 
-    // Find active note's vertical band to draw a partial-height playhead
-    let activeY = 0, activeH = height;
-    for (let i = 0; i < phrase.notes.length; i++) {
-      const n = phrase.notes[i];
-      const nextStart = phrase.notes[i + 1]?.startSec ?? n.startSec + n.durSec;
-      if (headTime >= n.startSec && headTime < nextStart) {
-        const rect = midiCellRect(n.midi, height, minMidi, maxMidi);
-        activeY = rect.y;
-        activeH = Math.max(8, rect.h);
-        break;
+    // --- Compute playhead X (+ system Y span if provided) ---
+    let xGuide = 0.5;
+    let yTop = 0;
+    let yBottom = height;
+
+    if (Array.isArray(systems) && systems.length) {
+      let sys = systems[0];
+      for (let i = 0; i < systems.length; i++) {
+        const s = systems[i];
+        if (headTime >= s.startSec && headTime < s.endSec) { sys = s; break; }
+        if (headTime >= s.endSec) sys = s;
       }
+      const dur = Math.max(1e-6, sys.endSec - sys.startSec);
+      const u = (headTime - sys.startSec) / dur;
+      xGuide = Math.round(sys.x0 + u * (sys.x1 - sys.x0)) + 0.5;
+      yTop = sys.y0;
+      yBottom = sys.y1;
+    } else {
+      const x0 = Number.isFinite(staffStartX as number) ? (staffStartX as number) : 0;
+      const x1 = Number.isFinite(staffEndX as number) ? (staffEndX as number) : width;
+      const bandW = Math.max(1, x1 - x0);
+      const ratio = headTime / totalSec;
+      xGuide = Math.round(x0 + ratio * bandW) + 0.5;
+      yTop = 0;
+      yBottom = height;
     }
 
     // green playhead
     ctx.strokeStyle = "#22c55e";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(xGuide, activeY);
-    ctx.lineTo(xGuide, activeY + activeH);
+    ctx.moveTo(xGuide, yTop);
+    ctx.lineTo(xGuide, yBottom);
     ctx.stroke();
 
-    // ----- Live pitch dot (optional) -----
-    if (isLive && livePitchHz && confidence >= (confThreshold ?? 0.5)) {
+    // live pitch dot (optional)
+    if (isLive && livePitchHz && confidence! >= (confThreshold ?? 0.5)) {
       const midi = hzToMidi(livePitchHz, a4Hz);
       if (Number.isFinite(midi)) {
-        const y = midiToY(midi, height, minMidi, maxMidi);
+        const y = Math.max(yTop, Math.min(yBottom, midiToY(midi, height, minMidi, maxMidi)));
         ctx.fillStyle = PR_COLORS.dotFill;
         ctx.beginPath();
         ctx.arc(xGuide, y, 5, 0, Math.PI * 2);
@@ -145,16 +141,14 @@ export default function SheetOverlay({
       }
     }
   }, [
-    width, height, dpr, phrase, running, startAtMs, leadInSec, totalSec,
-    bpm, den, tsNum, livePitchHz, confidence, confThreshold, a4Hz, minMidi, maxMidi,
-    staffStartX, staffEndX
+    width, height, dpr, running, startAtMs, totalSec,
+    livePitchHz, confidence, confThreshold, a4Hz, minMidi, maxMidi,
+    staffStartX, staffEndX, systems
   ]);
 
-  // keep draw stable
   const drawRef = useRef(draw);
   useEffect(() => { drawRef.current = draw; }, [draw]);
 
-  // RAF loop
   useEffect(() => {
     if (running) {
       const step = (ts: number) => { drawRef.current(ts); rafRef.current = requestAnimationFrame(step); };
@@ -162,7 +156,7 @@ export default function SheetOverlay({
     } else {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
-      drawRef.current(performance.now()); // static frame
+      drawRef.current(performance.now());
     }
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null; };
   }, [running]);
