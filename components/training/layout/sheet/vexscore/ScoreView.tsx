@@ -36,7 +36,6 @@ export default function ScoreView({
   const secPerBar = useMemo(() => tsNum * secPerBeat, [tsNum, secPerBeat]);
 
   // Total musical content length — **melody only**.
-  // Rhythm staff length is intentionally ignored so it can’t extend the score.
   const contentSec = useMemo(() => {
     const fromPhrase = Math.max(0, phrase?.durationSec ?? 0);
     const fromMelodyRhy =
@@ -46,7 +45,7 @@ export default function ScoreView({
     return Math.max(fromPhrase, fromMelodyRhy);
   }, [phrase?.durationSec, melodyRhythm, bpm, den]);
 
-  // Include lead-in, then round UP to the next whole bar so we never clip a bar
+  // Include lead-in, then round UP to the next whole bar
   const totalSec = useMemo(() => {
     const raw = Math.max(leadInSec + contentSec, 1e-3);
     return Math.ceil(raw / Math.max(1e-9, secPerBar)) * secPerBar;
@@ -56,10 +55,8 @@ export default function ScoreView({
     const el = hostRef.current;
     if (!el || !dims.w) return;
 
-    // Hide before the very first draw only to avoid FOUC; preserve layout.
     if (!hasDrawnOnceRef.current) el.style.visibility = "hidden";
 
-    // Ensure music/text fonts are ready before drawing to avoid fallback flashes
     const ensureVexFonts = async () => {
       if (typeof document !== "undefined" && (document as any).fonts) {
         try {
@@ -72,9 +69,7 @@ export default function ScoreView({
               (document as any).fonts.load('12px "Arial"'),
             ]),
           ]);
-        } catch {
-          // ignore font loading errors; we’ll draw anyway
-        }
+        } catch {/* ignore */}
       }
     };
 
@@ -84,7 +79,7 @@ export default function ScoreView({
       await ensureVexFonts();
       if (cancelled) return;
 
-      // build once (whole piece)
+      // Build once (whole piece)
       const mel = buildMelodyTickables({
         phrase,
         clef,
@@ -93,9 +88,9 @@ export default function ScoreView({
         wnPerSec,
         secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
         secPerBeat,
-        secPerBar, // ensure builders can pad to bar boundaries
+        secPerBar,
         lyrics,
-        rhythm: melodyRhythm, // authoritative rhythm for the melody only
+        rhythm: melodyRhythm,
       });
 
       const rhy = buildRhythmTickables({
@@ -103,13 +98,16 @@ export default function ScoreView({
         leadInSec,
         wnPerSec,
         secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
-        secPerBar, // ensure builders can pad to bar boundaries
+        secPerBar,
       });
 
-      // We may still *show* the rhythm staff, but it must not extend the score.
       const haveRhythm = Array.isArray(rhythm) && rhythm.length > 0;
 
-      const systems = computeSystems(totalSec, secPerBar);
+      // ⬇️ PICK bars-per-row from FIRST LINE density; lock for all systems
+      const { systems, barsPerRow } = computeSystems(totalSec, secPerBar, {
+        melodyStarts: mel.starts,
+        maxBarsPerRow: 4,
+      });
 
       // renderer + canvas
       el.innerHTML = "";
@@ -149,13 +147,13 @@ export default function ScoreView({
           mel,
           rhy,
           secPerBar,
+          barsPerRow, // NEW: consistent columns per row across the piece
         });
 
         layouts.push(layout);
         currentY = nextY + SYSTEM_GAP_Y;
       });
 
-      // multi-row overlay payload only
       if (onLayout && layouts.length) {
         const total = {
           startSec: 0,
@@ -168,7 +166,6 @@ export default function ScoreView({
         onLayout({ systems: layouts, total });
       }
 
-      // polish SVG
       const svg = el.querySelector("svg") as SVGSVGElement | null;
       if (svg) {
         svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
@@ -177,7 +174,6 @@ export default function ScoreView({
         svg.style.height = "100%";
       }
 
-      // Reveal after first complete draw
       hasDrawnOnceRef.current = true;
       el.style.visibility = "visible";
     })();

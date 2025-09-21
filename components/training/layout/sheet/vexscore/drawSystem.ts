@@ -1,6 +1,6 @@
 // components/training/layout/sheet/vexscore/drawSystem.ts
 import { Stave, StaveConnector, Voice, Formatter } from "vexflow";
-import { BARS_PER_ROW, STAFF_GAP_Y } from "./layout";
+import { STAFF_GAP_Y } from "./layout";
 import { buildBeams } from "./builders";
 import type { SystemLayout } from "./types";
 
@@ -17,6 +17,8 @@ type DrawParams = {
   mel: { ticks: any[]; starts: number[]; tuplets?: any[] };
   rhy: { ticks: any[]; starts: number[]; tuplets: any[] };
   secPerBar: number;
+  /** NEW: bars per row for this score (consistent across systems). */
+  barsPerRow: 4 | 3 | 2;
 };
 
 export function drawSystem({
@@ -32,6 +34,7 @@ export function drawSystem({
   mel,
   rhy,
   secPerBar,
+  barsPerRow,
 }: DrawParams) {
   const { startSec, endSec, contentEndSec } = systemWindow;
 
@@ -65,18 +68,18 @@ export function drawSystem({
       : melStave.getX() + melStave.getWidth() - 12;
 
   const bandW = Math.max(1, noteEndX - noteStartX);
-  const barW = bandW / BARS_PER_ROW;
+  const barW = bandW / barsPerRow;
 
-  // tolerances (seconds) — very tight; all times come from PPQ → sec now
-  const eps = Math.max(1e-6, secPerBar / (tsNum * 512));   // ~1/512 beat
+  // tolerances (seconds)
+  const eps = Math.max(1e-6, secPerBar / (tsNum * 512));
   const secPerBeat = secPerBar / tsNum;
-  const downbeatEps = Math.max(1e-6, secPerBeat / 128);    // strict
-  const dupEps = Math.max(1e-6, secPerBeat / 512);         // same-start dedupe
+  const downbeatEps = Math.max(1e-6, secPerBeat / 128);
+  const dupEps = Math.max(1e-6, secPerBeat / 512);
 
   const windowEnd = Math.min(endSec, contentEndSec);
 
-  // full-width bar segments (don’t clamp to content)
-  const segments = Array.from({ length: BARS_PER_ROW }, (_, i) => {
+  // full-width bar segments
+  const segments = Array.from({ length: barsPerRow }, (_, i) => {
     const segStartSec = startSec + i * secPerBar;
     const segEndSec = segStartSec + secPerBar;
     const barX0 = noteStartX + i * barW;
@@ -91,11 +94,10 @@ export function drawSystem({
     const rel = Math.max(0, t0 - startSec);
     let idx = Math.floor((rel + eps) / secPerBar);
     if (idx < 0) idx = 0;
-    if (idx >= BARS_PER_ROW) idx = BARS_PER_ROW - 1;
+    if (idx >= barsPerRow) idx = barsPerRow - 1;
     return idx;
   };
 
-  // strict musical time → X within each bar
   const xAt = (t0: number) => {
     const idx = barIndexOf(t0);
     const seg = segments[idx];
@@ -141,10 +143,8 @@ export function drawSystem({
       if (!outS.length) { outT.push(curT); outS.push(curS); continue; }
       const j = outS.length - 1;
       if (Math.abs(curS - outS[j]) <= dupEps) {
-        // prefer NOTE over REST when colliding
         const keepIncoming = isRest(outT[j]) && !isRest(curT);
         if (keepIncoming) { outT[j] = curT; outS[j] = curS; }
-        // else drop incoming
       } else {
         outT.push(curT); outS.push(curS);
       }
@@ -202,14 +202,33 @@ export function drawSystem({
     } catch { return 0; }
   };
 
-  // 2) per-bar Δx so the first *true* downbeat tickable’s LEFT edge sits one 16th into the bar
-  const barShiftX: number[] = Array(BARS_PER_ROW).fill(0);
-
-  for (let b = 0; b < BARS_PER_ROW; b++) {
+  // === Density-aware bar padding shrink ===
+  // we reduce the initial downbeat padding as measures get denser.
+  const densityOfBar = (b: number) => {
     const seg = segments[b];
-    const gapPx16 = (seg.x1 - seg.x0) * (den / (16 * tsNum)); // exact music-time gap
+    let c = 0;
+    for (let i = 0; i < melSel.s.length; i++) {
+      const t0 = melSel.s[i];
+      if (t0 >= seg.startSec - eps && t0 < seg.endSec - eps) c++;
+    }
+    return c;
+  };
 
-    // find first tickable that starts exactly at bar downbeat (± downbeatEps)
+  const barShiftX: number[] = Array(barsPerRow).fill(0);
+
+  for (let b = 0; b < barsPerRow; b++) {
+    const seg = segments[b];
+
+    // base gap is one 16th of the bar; shrink it when dense
+    const baseGapPx16 = (seg.x1 - seg.x0) * (den / (16 * tsNum));
+    const d = densityOfBar(b);
+    const shrink =
+      d >= 12 ? 0.15 :   // very dense
+      d >= 8  ? 0.35 :   // dense
+                1.0;     // normal
+    const gapPx16 = baseGapPx16 * shrink;
+
+    // find first tickable at exact downbeat
     let idx = -1;
     for (let i = 0; i < melSel.t.length; i++) {
       const t0 = melSel.s[i];
@@ -222,11 +241,11 @@ export function drawSystem({
       const targetLeft = seg.x0 + gapPx16;
       barShiftX[b] = targetLeft - curLeft;
     } else {
-      barShiftX[b] = 0; // no downbeat in this bar → don't drag pickups
+      barShiftX[b] = 0;
     }
   }
 
-  // apply uniform per-bar shift (keeps timing linear)
+  // apply uniform per-bar shift (keeps timing linear inside each bar)
   const applyBarShift = (ticks: any[], starts: number[]) => {
     for (let i = 0; i < ticks.length; i++) {
       const n = ticks[i] as any;
@@ -250,7 +269,7 @@ export function drawSystem({
     rhyBeams = buildBeams(rhySel.t, { groupKeys: rhyGroupKeys, allowMixed: true, sameStemOnly: true });
   }
 
-  // 4) manual draw (avoid any auto justification)
+  // 4) manual draw
   const drawTickables = (ticks: any[], stave: Stave) => {
     for (const t of ticks) {
       if (typeof t.setStave === "function") t.setStave(stave);
@@ -261,7 +280,6 @@ export function drawSystem({
   drawTickables(melSel.t, melStave);
   melBeams.forEach((b) => b.setContext(ctx).draw());
 
-  // draw ONLY tuplets present in this system (avoid cross-row overlaps)
   const tupletHasAny = (tp: any, pool: any[]) => {
     const notes = typeof tp.getNotes === "function" ? tp.getNotes() : [];
     return notes.some((n: any) => pool.includes(n));
@@ -291,7 +309,7 @@ export function drawSystem({
     ctx.stroke();
   };
   drawBarAtX(noteStartX);
-  for (let k = 1; k < BARS_PER_ROW; k++) drawBarAtX(noteStartX + (k / BARS_PER_ROW) * bandW);
+  for (let k = 1; k < barsPerRow; k++) drawBarAtX(noteStartX + (k / barsPerRow) * bandW);
   drawBarAtX(noteEndX);
 
   const layout: SystemLayout = {
