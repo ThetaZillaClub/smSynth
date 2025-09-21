@@ -20,11 +20,13 @@ export type RhythmConfig =
       /** Rhythm line (blue) rest controls */
       restProb?: number;
       allowRests?: boolean;
-      /** Phrase (scale content) rest controls — NEW */
+      /** Phrase (scale content) rest controls */
       contentRestProb?: number;
       contentAllowRests?: boolean;
       /** Shared pool of note values */
       available?: NoteValue[];
+      /** Random/legacy length (used when switching back to random) */
+      lengthBars?: number;
       /** legacy seed fields (not surfaced in UI) */
       seed?: number;
     }
@@ -33,9 +35,11 @@ export type RhythmConfig =
       available?: NoteValue[];
       restProb?: number;
       allowRests?: boolean;
-      /** Phrase (scale content) rest controls — NEW */
+      /** Phrase (scale content) rest controls */
       contentRestProb?: number;
       contentAllowRests?: boolean;
+      /** Exercise length in bars (now lives on rhythm) */
+      lengthBars?: number;
       seed?: number;
     };
 
@@ -44,8 +48,12 @@ export type ViewMode = "piano" | "sheet";
 export type SessionConfig = {
   bpm: number;
   ts: TimeSignature;
+  /** Count-in, in bars */
   leadBars: number;
+  /** Rest between takes, in bars */
   restBars: number;
+  /** DEPRECATED (UI moved to rhythm.lengthBars): exercise length, in whole bars */
+  exerciseBars: number;
   noteValue?: NoteValue;
   noteDurSec?: number;
   lyricStrategy: "solfege";
@@ -53,7 +61,7 @@ export type SessionConfig = {
   rhythm?: RhythmConfig;
   customPhrase?: Phrase | null;
   customWords?: string[] | null;
-  /** NEW: session view mode */
+  /** session view mode */
   view: ViewMode;
 };
 
@@ -62,6 +70,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   ts: { num: 4, den: 4 },
   leadBars: 1,
   restBars: 1,
+  exerciseBars: 2, // legacy default for backwards compatibility
   noteValue: "quarter",
   noteDurSec: 0.5,
   lyricStrategy: "solfege",
@@ -73,6 +82,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
     allowRests: true,
     contentRestProb: 0.3,
     contentAllowRests: true,
+    lengthBars: 2, // NEW canonical source for exercise length
     seed: 0xA5F3D7,
   },
   customPhrase: null,

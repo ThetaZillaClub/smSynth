@@ -1,6 +1,6 @@
 // components/training/curriculum-layout/ScaleRhythm/ScaleRhythmCard.tsx
 "use client";
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect } from "react";
 import type { SessionConfig } from "../../layout/session/types";
 import type { ScaleName } from "@/utils/phrase/scales";
 import type { NoteValue } from "@/utils/time/tempo";
@@ -41,7 +41,7 @@ function FancyCheckbox({
           <svg
             viewBox="0 0 20 20"
             aria-hidden="true"
-            className="h-3 w-3 text-[#0f0f0f]"
+            className="h-3 w-3"
             fill="none"
             stroke="currentColor"
             strokeWidth="3"
@@ -150,7 +150,16 @@ export default function ScaleRhythmCard({
     allowRests: true,
     contentRestProb: 0.3,
     contentAllowRests: true,
+    lengthBars: cfg.exerciseBars ?? 2, // legacy fallback
   }) as any;
+
+  // LEGACY BRIDGE: if we still have exerciseBars but rhythm.lengthBars is missing, copy it in once
+  useEffect(() => {
+    if (cfg.exerciseBars != null && (rhythmCfg.lengthBars == null)) {
+      onChange({ rhythm: { ...rhythmCfg, lengthBars: cfg.exerciseBars } as any });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selected = new Set<NoteValue>(rhythmCfg.available ?? ["quarter"]);
 
@@ -260,11 +269,11 @@ export default function ScaleRhythmCard({
                         mode: "sequence",
                         pattern: rhythmCfg.pattern ?? "asc",
                         available: rhythmCfg.available ?? ["quarter"],
-                        // keep both rest control sets when toggling
                         restProb: rhythmCfg.restProb ?? 0.3,
                         allowRests: rhythmCfg.allowRests ?? true,
                         contentRestProb: rhythmCfg.contentRestProb ?? 0.3,
                         contentAllowRests: rhythmCfg.contentAllowRests ?? true,
+                        lengthBars: rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2), // keep for when switching back
                       } as any)
                     : ({
                         mode: "random",
@@ -273,6 +282,7 @@ export default function ScaleRhythmCard({
                         allowRests: rhythmCfg.allowRests ?? true,
                         contentRestProb: rhythmCfg.contentRestProb ?? 0.3,
                         contentAllowRests: rhythmCfg.contentAllowRests ?? true,
+                        lengthBars: rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2),
                       } as any),
               });
             }}
@@ -329,6 +339,30 @@ export default function ScaleRhythmCard({
           </div>
         </div>
       </div>
+
+      {/* Length (bars) — Random mode only */}
+      {rhythmCfg.mode === "random" ? (
+        <div className="grid grid-cols-1 gap-2 mt-3">
+          <Field label="Length (bars)">
+            <input
+              type="number"
+              inputMode="numeric"
+              className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+              min={1}
+              step={1}
+              value={Math.max(1, Number(rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2)))}
+              onChange={(e) =>
+                onChange({
+                  rhythm: {
+                    ...rhythmCfg,
+                    lengthBars: Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                  } as any,
+                })
+              }
+            />
+          </Field>
+        </div>
+      ) : null}
 
       {/* Available note lengths (shared) */}
       <div className="grid grid-cols-1 gap-2 mt-3">

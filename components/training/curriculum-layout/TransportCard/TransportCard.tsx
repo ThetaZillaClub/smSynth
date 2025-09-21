@@ -8,7 +8,13 @@ type Props = Pick<SessionConfig, "bpm" | "ts" | "leadBars" | "restBars"> & {
   onChange: (patch: Partial<SessionConfig>) => void;
 };
 
-export default function TransportCard({ bpm, ts, leadBars, restBars, onChange }: Props) {
+export default function TransportCard({
+  bpm,
+  ts,
+  leadBars,
+  restBars,
+  onChange,
+}: Props) {
   return (
     <TransportPanelControlled
       bpm={bpm}

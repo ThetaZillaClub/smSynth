@@ -9,11 +9,23 @@ type Props = {
   ts: TimeSignature;
   /** Lead-in in bars (not beats) */
   leadBars: number;
+  /** Rest between takes, in bars */
   restBars: number;
-  onChange: (v: { bpm?: number; ts?: TimeSignature; leadBars?: number; restBars?: number }) => void;
+  onChange: (v: {
+    bpm?: number;
+    ts?: TimeSignature;
+    leadBars?: number;
+    restBars?: number;
+  }) => void;
 };
 
-export default function TransportPanelControlled({ bpm, ts, leadBars, restBars, onChange }: Props) {
+export default function TransportPanelControlled({
+  bpm,
+  ts,
+  leadBars,
+  restBars,
+  onChange,
+}: Props) {
   const onNum = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>, fn: (n: number) => void) => {
       const v = Number(e.target.value);
@@ -81,7 +93,7 @@ export default function TransportPanelControlled({ bpm, ts, leadBars, restBars, 
             min={0}
             step={0.5}
             onChange={(e) => onNum(e, (n) => onChange({ leadBars: Math.max(0, Number(n) || 0) }))}
-          />
+/>
         </Field>
 
         {/* Rest (bars) */}

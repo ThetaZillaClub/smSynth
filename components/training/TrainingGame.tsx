@@ -47,7 +47,6 @@ export default function TrainingGame({
   const { studentRowId, studentName, genderLabel } = useStudentRow({ studentIdFromQuery: studentId });
   const { lowHz, highHz, loading: rangeLoading, error: rangeError } = useStudentRange(studentRowId);
 
-  // Fixed step flow now: no range capture step inside the game
   const step: "play" = "play";
 
   const {
@@ -56,11 +55,12 @@ export default function TrainingGame({
     customPhrase, customWords,
     scale, rhythm,
     view,
+    exerciseBars, // legacy fallback
   } = sessionConfig;
 
   /* ----------------------- Transport math ----------------------- */
   const secPerBeat = secondsPerBeat(bpm, ts.den);
-  const secPerBar = ts.num * secPerBeat; // NEW: bar length in seconds
+  const secPerBar = ts.num * secPerBeat;
   const leadBeats = barsToBeats(leadBars, ts.num);
   const leadInSec = beatsToSeconds(leadBeats, bpm, ts.den);
   const restBeats = barsToBeats(restBars, ts.num);
@@ -79,10 +79,15 @@ export default function TrainingGame({
   const usingOverrides = !!customPhrase || !!customWords;
   const haveRange = lowHz != null && highHz != null;
 
-  // session-scoped random seeds (don’t expose in UI)
   const rhythmSeed = useMemo(() => rand32(), []);
   const scaleSeed  = useMemo(() => rand32(), []);
   const syncSeed   = useMemo(() => rand32(), []);
+
+  // Canonical exercise length (bars): rhythm.lengthBars -> legacy exerciseBars -> 2
+  const lengthBars = Math.max(
+    1,
+    Number((rhythm as any)?.lengthBars ?? exerciseBars ?? 2)
+  );
 
   /* -------------------- Sync line rhythm ONLY -------------------- */
   const syncRhythmFabric: RhythmEvent[] | null = useMemo(() => {
@@ -91,7 +96,7 @@ export default function TrainingGame({
     const available =
       (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
 
-    const allowRests: boolean = (rhythm as any).allowRests !== false; // rhythm-line rests
+    const allowRests: boolean = (rhythm as any).allowRests !== false;
     const restProbRaw = (rhythm as any).restProb ?? 0.3;
     const restProb = allowRests ? restProbRaw : 0;
 
@@ -117,9 +122,10 @@ export default function TrainingGame({
         restProb,
         allowRests,
         seed: syncSeed,
+        bars: lengthBars,
       });
     }
-  }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed]);
+  }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed, lengthBars]);
 
   /* ------------------ Phrase generation (content) ------------------ */
   const generated = useMemo((): { phrase: Phrase | null; melodyRhythm: RhythmEvent[] | null } => {
@@ -129,7 +135,6 @@ export default function TrainingGame({
     const available =
       (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
 
-    // separate "phrase" (scale) rest controls
     const contentAllowRests: boolean = (rhythm as any).contentAllowRests !== false;
     const contentRestProbRaw = (rhythm as any).contentRestProb ?? 0.3;
     const contentRestProb = contentAllowRests ? contentRestProbRaw : 0;
@@ -171,6 +176,7 @@ export default function TrainingGame({
         restProb: contentRestProb,
         allowRests: contentAllowRests,
         seed: rhythmSeed,
+        bars: lengthBars,
       });
 
       const phrase = buildPhraseFromScaleWithRhythm({
@@ -200,6 +206,7 @@ export default function TrainingGame({
     rhythm,
     rhythmSeed,
     scaleSeed,
+    lengthBars,
   ]);
 
   /* --------------- Phrase selection + lyrics ---------------- */
@@ -209,9 +216,7 @@ export default function TrainingGame({
     return null;
   }, [customPhrase, generated]);
 
-  const melodyRhythm: RhythmEvent[] | null = useMemo(() => {
-    return generated.melodyRhythm ?? null;
-  }, [generated]);
+  const melodyRhythm: RhythmEvent[] | null = useMemo(() => generated.melodyRhythm ?? null, [generated]);
 
   const words: string[] | null = useMemo(() => {
     if (Array.isArray(customWords) && customWords.length) {
@@ -258,11 +263,10 @@ export default function TrainingGame({
       ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
       : phraseSec;
 
-  // NEW: always extend to the end of the last full measure (bar-aligned)
   const recordWindowSec = Math.ceil(lastEndSec / Math.max(1e-9, secPerBar)) * secPerBar;
 
   const loop = usePracticeLoop({
-    step, // always "play"
+    step,
     lowHz: haveRange ? (lowHz as number) : null,
     highHz: haveRange ? (highHz as number) : null,
     phrase,
@@ -341,7 +345,7 @@ export default function TrainingGame({
       melodyRhythm={melodyRhythm ?? undefined}
       bpm={bpm}
       den={ts.den}
-      tsNum={ts.num}  // NEW: plumb numerator
+      tsNum={ts.num}
       view={view}
     >
       {haveRange && phrase && (
