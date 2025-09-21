@@ -22,12 +22,13 @@ export function pickClef(
   return below > ns.length / 2 ? "bass" : "treble";
 }
 
-/* ------------------ Key signature helpers (NEW) ------------------ */
+/* ------------------ Key signature helpers (UPDATED) ------------------ */
 
 // Circle-of-fifths orders
 const ORDER_SHARPS = ["F","C","G","D","A","E","B"] as const;
 const ORDER_FLATS  = ["B","E","A","D","G","C","F"] as const;
 
+// Major key fifth counts (circle-of-fifths index)
 const MAJOR_KEY_FIFTHS: Record<string, number> = {
   "C": 0,  "G": 1,  "D": 2,  "A": 3,  "E": 4,  "B": 5,  "F#": 6, "C#": 7,
   "F": -1, "Bb":-2, "Eb":-3, "Ab":-4, "Db":-5, "Gb":-6, "Cb":-7,
@@ -54,12 +55,54 @@ type ScaleName =
   | "dorian" | "phrygian" | "lydian" | "mixolydian" | "locrian"
   | "major_pentatonic" | "minor_pentatonic" | "chromatic";
 
-/** Compute a sensible major-key name from tonicPc + scale (modes/minor → relative major). */
+/* --- Enharmonic spelling helpers to choose FEWEST accidentals --- */
+
+const SHARP_NAMES: Record<number,string> = {
+  0:"C", 1:"C#", 2:"D", 3:"D#", 4:"E", 5:"F", 6:"F#", 7:"G", 8:"G#", 9:"A", 10:"A#", 11:"B"
+};
+const FLAT_NAMES: Record<number,string>  = {
+  0:"C", 1:"Db", 2:"D", 3:"Eb", 4:"E", 5:"F", 6:"Gb", 7:"G", 8:"Ab", 9:"A", 10:"Bb", 11:"Cb"
+};
+
+const NAME_TO_PC: Record<string, number> = (() => {
+  const m: Record<string, number> = {};
+  for (let pc = 0; pc < 12; pc++) {
+    m[SHARP_NAMES[pc]!] = pc;
+    m[FLAT_NAMES[pc]!]  = pc;
+  }
+  return m;
+})();
+
+function accidentalCost(name: string): number {
+  const f = MAJOR_KEY_FIFTHS[name];
+  return typeof f === "number" ? Math.abs(f) : Number.POSITIVE_INFINITY;
+}
+
+/** Given a pitch class, choose the major-key spelling with FEWEST sharps/flats.
+ *  Ties break to flats, except keep B over Cb (more conventional). */
+function fewestAccidentalsForPc(pc: number): string {
+  const sharp = SHARP_NAMES[pc];
+  const flat  = FLAT_NAMES[pc];
+  const cs = accidentalCost(sharp);
+  const cf = accidentalCost(flat);
+  if (cs < cf) return sharp;
+  if (cf < cs) return flat;
+  if (sharp === "B" && flat === "Cb") return "B"; // tie-break exception
+  return flat; // default tie-break: flats (e.g., prefer Gb over F#)
+}
+
+/** Normalize a user-entered major key name to the “fewest accidentals” spelling. */
+export function normalizeMajorKeyName(name: string): string {
+  const pc = NAME_TO_PC[name];
+  return typeof pc === "number" ? fewestAccidentalsForPc(pc) : name;
+}
+
+/** Compute a sensible major-key name from tonicPc + scale (modes/minor → relative major).
+ *  Always returns the enharmonic with FEWEST accidentals. */
 export function keyNameFromTonicPc(
   tonicPc: number,
   scaleName: ScaleName = "major",
-  // FLIPPED: prefer flats for ambiguous major keys by default
-  preferSharps: boolean = false
+  _preferSharps: boolean = false // kept for API compatibility; ignored
 ): string {
   // mode → semitone offset (major degrees): 0,2,4,5,7,9,11
   const OFF: Record<ScaleName, number> = {
@@ -77,85 +120,43 @@ export function keyNameFromTonicPc(
     chromatic: 0,
   };
   const parentMajPc = ((tonicPc - (OFF[scaleName] ?? 0)) % 12 + 12) % 12;
+  return fewestAccidentalsForPc(parentMajPc);
+}
 
-  const SHARP_NAMES: Record<number,string> = { 0:"C", 1:"C#", 2:"D", 3:"D#", 4:"E", 5:"F", 6:"F#", 7:"G", 8:"G#", 9:"A", 10:"A#", 11:"B" };
-  const FLAT_NAMES:  Record<number,string> = { 0:"C", 1:"Db", 2:"D", 3:"Eb", 4:"E", 5:"F", 6:"Gb", 7:"G", 8:"Ab", 9:"A", 10:"Bb", 11:"Cb" };
-
-  const sharpName = SHARP_NAMES[parentMajPc];
-  const flatName  = FLAT_NAMES[parentMajPc];
-  const pick = (n: string) => (n in MAJOR_KEY_FIFTHS) ? n : null;
-
-  const candSharp = pick(sharpName);
-  const candFlat  = pick(flatName);
-
-  if (candSharp && candFlat) {
-    if (preferSharps) return candSharp;
-    // Prefer flats for ambiguous keys, except keep B over Cb (more conventional)
-    if (parentMajPc === 11) return candSharp; // B, not Cb
-    return candFlat;
-  }
-  return candSharp ?? candFlat ?? "C";
+/** Decide note-name preference for rendering: sharps for sharp/neutral keys, flats for flat keys. */
+export function preferSharpsForKeySig(key: string | null | undefined): boolean {
+  if (!key) return true;
+  const k = normalizeMajorKeyName(key);
+  const fifths = MAJOR_KEY_FIFTHS[k];
+  if (typeof fifths !== "number") return true;
+  return fifths >= 0; // sharps/neutral → sharps; flats → flats
 }
 
 /**
  * Convert MIDI → VexFlow key string + (only-if-needed) accidental **relative to key signature**.
- * If `keyMap` is omitted, we fall back to the old behavior (always attach '#'/'b' when present).
- * NEW: when `keyMap` is provided, choose the enharmonic (sharp/flat) that best matches the signature.
+ * If `keyMap` is omitted, fallback is to attach accidentals directly from the pitch spelling.
  */
 export function midiToVexKey(
   midi: number,
   useSharps: boolean,
   keyMap?: Record<"A"|"B"|"C"|"D"|"E"|"F"|"G", ""|"#"|"b">
 ): { key: string; accidental: "#"|"b"|"n"|null } {
-  // Helper to get a spelling
-  const pickName = (preferSharps: boolean) =>
-    midiToNoteName(midi, { useSharps: preferSharps, octaveAnchor: "C" });
+  const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
+  const letter = name[0]!.toUpperCase() as "A"|"B"|"C"|"D"|"E"|"F"|"G";
+  const actualAcc = (name.length > 1 ? name.slice(1) : "") as ""|"#"|"b";
+  const key = actualAcc ? `${letter.toLowerCase()}${actualAcc}/${octave}` : `${letter.toLowerCase()}/${octave}`;
 
-  // Default choice respects caller preference
-  let chosen = pickName(useSharps);
-
-  if (keyMap) {
-    const sharpName = pickName(true);
-    const flatName  = pickName(false);
-
-    const score = (nm: { name: string }) => {
-      const L = nm.name[0]!.toUpperCase() as "A"|"B"|"C"|"D"|"E"|"F"|"G";
-      const acc = (nm.name.length > 1 ? nm.name.slice(1) : "") as ""|"#"|"b";
-      const exp = keyMap[L] || "";
-      if (acc === exp) return 3;               // exact match to signature for that letter
-      if (exp === "" && acc === "") return 2;  // natural where natural expected
-      // soft bias toward the family's accidentals if neither is exact
-      const flats  = Object.values(keyMap).filter(a => a === "b").length;
-      const sharps = Object.values(keyMap).filter(a => a === "#").length;
-      const preferSharpsFamily = sharps > flats;
-      if (preferSharpsFamily && acc === "#") return 1;
-      if (!preferSharpsFamily && acc === "b") return 1;
-      return 0;
-    };
-
-    // Choose the better-scoring enharmonic (e.g., Eb over D# in flat keys)
-    chosen = score(flatName) > score(sharpName) ? flatName : sharpName;
-  }
-
-  const letter = chosen.name[0]!.toUpperCase() as "A"|"B"|"C"|"D"|"E"|"F"|"G";
-  const accidentalActual = (chosen.name.length > 1 ? chosen.name.slice(1) : "") as ""|"#"|"b";
-  const key = accidentalActual
-    ? `${letter.toLowerCase()}${accidentalActual}/${chosen.octave}`
-    : `${letter.toLowerCase()}/${chosen.octave}`;
-
-  // If we don't have a key signature, emit whatever accidental is present.
   if (!keyMap) {
-    return { key, accidental: accidentalActual || null };
+    return { key, accidental: actualAcc || null };
   }
 
-  // Otherwise, emit accidentals **relative to the key signature**.
   const expected = keyMap[letter] || "";
-  if (accidentalActual === expected) return { key, accidental: null };
-  if (accidentalActual === "" && (expected === "#" || expected === "b")) return { key, accidental: "n" };
-  if ((accidentalActual === "#" && expected === "") || (accidentalActual === "b" && expected === "")) {
-    return { key, accidental: accidentalActual };
+  if (actualAcc === expected) return { key, accidental: null };
+  if (actualAcc === "" && (expected === "#" || expected === "b")) return { key, accidental: "n" };
+  if ((actualAcc === "#" && expected === "") || (actualAcc === "b" && expected === "")) {
+    return { key, accidental: actualAcc };
   }
-  return { key, accidental: (accidentalActual || "n") as "#"|"b"|"n" };
+  return { key, accidental: (actualAcc || "n") as "#"|"b"|"n" };
 }
 
 /** Convert token to VexFlow duration string. */

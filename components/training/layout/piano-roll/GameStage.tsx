@@ -1,13 +1,13 @@
 // components/training/layout/piano-roll/GameStage.tsx
 "use client";
-import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useLayoutEffect, useRef, useState, useMemo } from "react";
 import PianoRollCanvas, { type Phrase } from "@/components/training/layout/piano-roll/PianoRollCanvas";
 import RhythmRollCanvas from "@/components/training/layout/piano-roll/RhythmRollCanvas";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import VexScore from "@/components/training/layout/sheet/VexScore";
 import SheetOverlay from "@/components/training/layout/sheet/SheetOverlay";
 import type { SystemLayout } from "@/components/training/layout/sheet/vexscore/types";
-import { pickClef } from "@/components/training/layout/sheet/vexscore/builders";
+import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/sheet/vexscore/builders";
 
 type Props = {
   phrase?: Phrase | null;
@@ -105,6 +105,9 @@ export default function GameStage({
 
   const sheetReady = Boolean(systems && systems.length);
 
+  // Prefer sharps in sharp/neutral keys, flats in flat keys (fewer-accidentals policy).
+  const useSharpsPref = useMemo(() => preferSharpsForKeySig(keySig || null), [keySig]);
+
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
       <div className="w-full">
@@ -126,9 +129,8 @@ export default function GameStage({
                 onLayout={handleLayout}
                 rhythm={rhythm}
                 melodyRhythm={melodyRhythm}
-                keySig={keySig || null}    // NEW
-                /* keep your naming prefs; builders will pick Eb vs D# based on keySig */
-                useSharps={true}
+                keySig={keySig || null}
+                useSharps={useSharpsPref}   // ← choose sharps or flats from key signature
               />
               {/* Render overlay only after systems are ready to avoid initial misalignment */}
               {sheetW && sheetW > 4 && sheetReady ? (
