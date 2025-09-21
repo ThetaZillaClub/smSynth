@@ -134,7 +134,9 @@ export default function ScoreView({
       const layouts: SystemLayout[] = [];
       let currentY = padding.top;
 
-      systems.forEach((meta) => {
+      systems.forEach((meta, idx) => {
+        const isLastSystem = idx === systems.length - 1;
+
         const { layout, nextY } = drawSystem({
           ctx,
           padding,
@@ -154,6 +156,7 @@ export default function ScoreView({
           secPerBar,
           barsPerRow,
           keySig, // NEW
+          isLastSystem, // NEW
         });
 
         layouts.push(layout);

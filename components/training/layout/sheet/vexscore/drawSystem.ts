@@ -1,5 +1,5 @@
 // components/training/layout/sheet/vexscore/drawSystem.ts
-import { Stave, StaveConnector, Voice, Formatter } from "vexflow";
+import { Stave, StaveConnector, Voice, Formatter, Barline } from "vexflow";
 import { STAFF_GAP_Y } from "./layout";
 import { buildBeams } from "./builders";
 import type { SystemLayout } from "./types";
@@ -18,8 +18,10 @@ type DrawParams = {
   rhy: { ticks: any[]; starts: number[]; tuplets: any[] };
   secPerBar: number;
   barsPerRow: 4 | 3 | 2;
-  /** NEW: VexFlow key signature name (e.g., "Bb", "F#", "C"). */
+  /** VexFlow key signature name (e.g., "Bb", "F#", "C"). */
   keySig?: string | null;
+  /** If true, draw a FINAL (thin+thick) double barline at the far right. */
+  isLastSystem?: boolean;
 };
 
 export function drawSystem({
@@ -37,6 +39,7 @@ export function drawSystem({
   secPerBar,
   barsPerRow,
   keySig,
+  isLastSystem = false,
 }: DrawParams) {
   const { startSec, endSec, contentEndSec } = systemWindow;
 
@@ -45,6 +48,8 @@ export function drawSystem({
   melStave.setClef(clef);
   if (keySig) melStave.addKeySignature(keySig);
   melStave.addTimeSignature(`${tsNum}/${den}`);
+  // Ensure correct right barline for the last system (final thin+thick)
+  melStave.setEndBarType(isLastSystem ? Barline.type.END : Barline.type.SINGLE);
   melStave.setContext(ctx).draw();
 
   let rhyStave: Stave | null = null;
@@ -54,11 +59,16 @@ export function drawSystem({
     rhyStave.setClef("bass");
     if (keySig) rhyStave.addKeySignature(keySig);
     rhyStave.addTimeSignature(`${tsNum}/${den}`);
+    rhyStave.setEndBarType(isLastSystem ? Barline.type.END : Barline.type.SINGLE);
     rhyStave.setContext(ctx).draw();
 
     new StaveConnector(melStave, rhyStave).setType(StaveConnector.type.BRACE).setContext(ctx).draw();
     new StaveConnector(melStave, rhyStave).setType(StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw();
-    new StaveConnector(melStave, rhyStave).setType(StaveConnector.type.SINGLE_RIGHT).setContext(ctx).draw();
+    // On the far right, use a FINAL bold double connector on the last system
+    new StaveConnector(melStave, rhyStave)
+      .setType(isLastSystem ? StaveConnector.type.BOLD_DOUBLE_RIGHT : StaveConnector.type.SINGLE_RIGHT)
+      .setContext(ctx)
+      .draw();
   }
 
   // ----- geometry across the row -----
@@ -284,20 +294,29 @@ export function drawSystem({
       .forEach((t: any) => t.setContext(ctx).draw());
   }
 
-  const staffTopY = melStave.getYForLine(0) - 6;
-  const staffBottomY = (haveRhythm && rhyStave ? rhyStave : melStave).getYForLine(4) + 6;
+  // ---- Barline drawing (visual guides INSIDE the system band) ----
+  // Make them a bit thicker, and exactly span the staves (no overhang).
+  const staffTopY = melStave.getYForLine(0);
+  const staffBottomY = (haveRhythm && rhyStave ? rhyStave : melStave).getYForLine(4);
+  const BARLINE_W = 1.6;
+  const BARLINE_COLOR = "rgba(15,15,15,1)";
+
   const drawBarAtX = (x: number) => {
     const xi = Math.round(x);
     ctx.beginPath();
     ctx.moveTo(xi, staffTopY);
     ctx.lineTo(xi, staffBottomY);
-    ctx.setLineWidth(1);
-    ctx.setStrokeStyle("rgba(15,15,15,1)");
+    ctx.setLineWidth(BARLINE_W);
+    ctx.setStrokeStyle(BARLINE_COLOR);
     ctx.stroke();
   };
+
+  // Left edge of the first bar
   drawBarAtX(noteStartX);
+  // Internal bars within the row
   for (let k = 1; k < barsPerRow; k++) drawBarAtX(noteStartX + (k / barsPerRow) * bandW);
-  drawBarAtX(noteEndX);
+  // Right edge: skip manual line on the LAST system (final barline handled by VexFlow)
+  if (!isLastSystem) drawBarAtX(noteEndX);
 
   const layout: SystemLayout = {
     startSec,
