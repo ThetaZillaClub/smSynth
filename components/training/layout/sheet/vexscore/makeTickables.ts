@@ -12,12 +12,7 @@ import {
 import type { Phrase } from "@/utils/piano-roll/scale";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import type { NoteValue } from "@/utils/time/tempo";
-import {
-  midiToVexKey,
-  secondsToTokens,
-  tokToDuration,
-  type Tok,
-} from "./builders";
+import { midiToVexKey, tokToDuration, type Tok } from "./builders";
 import { noteValueInQuarterUnits } from "@/utils/time/tempo";
 
 /** PPQ grid: 960 ticks per quarter */
@@ -48,6 +43,18 @@ function tokToTicks(tok: Tok): number {
 function noteValueToTicks(v: NoteValue): number {
   const q = noteValueInQuarterUnits(v);
   return Math.round(q * PPQ);
+}
+
+/** Triplet-able base durations. (No whole or 32nd here.) */
+type TripletDurBase = "h" | "q" | "8" | "16";
+
+/** Map triplet quarter-units → base head duration inside the tuplet group. */
+function tripletBaseForQ(q: number): TripletDurBase | null {
+  if (q === 4 / 3) return "h";  // half-note triplet member
+  if (q === 2 / 3) return "q";  // quarter-note triplet member
+  if (q === 1 / 3) return "8";  // eighth-note triplet member
+  if (q === 1 / 6) return "16"; // sixteenth-note triplet member
+  return null;
 }
 
 /* ---------- draw helpers ---------- */
@@ -89,19 +96,38 @@ function makeManualRest(
   return rn as StaveNote;
 }
 
+/** Transparent **rest** tickable used inside triplet groups so beams/tuplets see 3 members. */
+function makeInvisibleTripletRest(base: TripletDurBase, clef: "treble" | "bass") {
+  const key = clef === "treble" ? "b/4" : "d/3";
+  const rn = new StaveNote({
+    keys: [key],
+    duration: (base + "r") as any, // real REST duration for beaming/tuplet math
+    clef,
+    autoStem: true,
+  }) as any;
+  // make it invisible but keep it in tick calc & beaming
+  if (typeof rn.setStyle === "function") {
+    rn.setStyle({ fillStyle: "rgba(0,0,0,0)", strokeStyle: "rgba(0,0,0,0)" });
+  }
+  // mark “restish” so our deduper won’t suppress manual rests
+  rn.isRest = () => true;
+  (rn as any).getCategory = () => "rests";
+  return rn as StaveNote;
+}
+
 /* ---------- tokenization in TICKS for bar-accurate padding ---------- */
 const TOK_LADDER: Tok[] = [
-  { dur: "w", dots: 0 },      // 4q = 3840
-  { dur: "h", dots: 1 },      // 3q = 2880
-  { dur: "h", dots: 0 },      // 2q = 1920
-  { dur: "q", dots: 1 },      // 1.5q = 1440
-  { dur: "q", dots: 0 },      // 1q = 960
-  { dur: "8", dots: 1 },      // 0.75q = 720
-  { dur: "8", dots: 0 },      // 0.5q = 480
-  { dur: "16", dots: 1 },     // 0.375q = 360
-  { dur: "16", dots: 0 },     // 0.25q = 240
-  { dur: "32", dots: 1 },     // 0.1875q = 180
-  { dur: "32", dots: 0 },     // 0.125q = 120
+  { dur: "w", dots: 0 },  // 4q = 3840
+  { dur: "h", dots: 1 },  // 3q = 2880
+  { dur: "h", dots: 0 },  // 2q = 1920
+  { dur: "q", dots: 1 },  // 1.5q = 1440
+  { dur: "q", dots: 0 },  // 1q = 960
+  { dur: "8", dots: 1 },  // 0.75q = 720
+  { dur: "8", dots: 0 },  // 0.5q = 480
+  { dur: "16", dots: 1 }, // 0.375q = 360
+  { dur: "16", dots: 0 }, // 0.25q = 240
+  { dur: "32", dots: 1 }, // 0.1875q = 180
+  { dur: "32", dots: 0 }, // 0.125q = 120
 ];
 
 function ticksToToks(remTicks: number): Tok[] {
@@ -118,6 +144,28 @@ function ticksToToks(remTicks: number): Tok[] {
   return toks;
 }
 
+/* ---------- shared triplet helpers ---------- */
+type TripletSlot = {
+  base: TripletDurBase; // h/q/8/16
+  /** the actual tickable in the voice for this slot (note or transparent rest) */
+  node: StaveNote;
+  /** absolute time (sec) and bar index of this slot — for bookkeeping only */
+  start: number;
+  barIdx: number;
+};
+
+function buildTupletFromSlots(
+  slots: TripletSlot[],
+  tuplets: Tuplet[]
+) {
+  if (slots.length !== 3) return;
+  const b = slots[0].base;
+  if (!(slots[1].base === b && slots[2].base === b)) return;
+  const nodes = slots.map((s) => s.node);
+  // three explicit members → clean bracket and proper beaming context
+  tuplets.push(new Tuplet(nodes as any, { bracketed: true, ratioed: false, numNotes: 3 }));
+}
+
 /* ---------- core builders ---------- */
 export function buildMelodyTickables(params: {
   phrase: Phrase;
@@ -131,7 +179,7 @@ export function buildMelodyTickables(params: {
   den: number;
   lyrics?: string[];
   rhythm?: RhythmEvent[];
-  keyAccidentals?: Record<"A"|"B"|"C"|"D"|"E"|"F"|"G", ""|"#"|"b"> | null;
+  keyAccidentals?: Record<"A" | "B" | "C" | "D" | "E" | "F" | "G", "" | "#" | "b"> | null;
 }) {
   const {
     phrase,
@@ -162,31 +210,32 @@ export function buildMelodyTickables(params: {
     manualRests.push({ note, start, barIndex: bidx });
   };
 
+  const appendTickable = (n: StaveNote, start: number, bidx: number) => {
+    ticksOut.push(n);
+    startsSec.push(start);
+    barIndex.push(bidx);
+  };
+
   const emitRestToks = (toks: Tok[], { visible = true }: { visible?: boolean } = {}) => {
     for (const tok of toks) {
       const start = ticksToSeconds(tTicks, secPerQuarter);
       const bidx = Math.floor(tTicks / BAR_TICKS);
-      // timing-only ghost
       const g = makeGhost(tok);
-      ticksOut.push(g);
-      startsSec.push(start);
-      barIndex.push(bidx);
+      appendTickable(g as any, start, bidx);
       tTicks += tokToTicks(tok);
 
       if (visible) {
-        const r = makeManualRest(tok.dur, tok.dots as 0|1|2, clef);
+        const r = makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, clef);
         pushManualRest(r, start, bidx);
       }
     }
   };
 
   const emitMeasureRestBar = () => {
-    // push timing ghosts that sum to BAR_TICKS
     const toks = ticksToToks(BAR_TICKS);
     const start = ticksToSeconds(tTicks, secPerQuarter);
     const bidx = Math.floor(tTicks / BAR_TICKS);
     emitRestToks(toks, { visible: false }); // timing only
-    // single centered whole-bar rest glyph
     const mr = makeManualRest("wr", 0, clef, { center: true });
     pushManualRest(mr, start, bidx);
   };
@@ -199,9 +248,9 @@ export function buildMelodyTickables(params: {
     }
   };
 
-  // -------- LEAD-IN (bars) — exact tick math, with 1 centered glyph per full bar
+  // Lead-in (bars) — exact tick math, with 1 centered glyph per full bar
   if (leadInSec > 1e-9) {
-    const leadBarsFloat = (leadInSec / Math.max(1e-9, secPerBar));
+    const leadBarsFloat = leadInSec / Math.max(1e-9, secPerBar);
     const fullBars = Math.floor(leadBarsFloat + 1e-9);
     const remSec = leadInSec - fullBars * secPerBar;
 
@@ -220,39 +269,53 @@ export function buildMelodyTickables(params: {
     let ni = 0;
     let lyricIndex = 0;
 
-    let tripletBuf: { base: Tok["dur"]; note: any }[] = [];
-    const flush = () => {
-      for (let i = 0; i + 2 < tripletBuf.length; i += 3) {
-        const a = tripletBuf[i], b = tripletBuf[i + 1], c = tripletBuf[i + 2];
-        if (a.base === b.base && b.base === c.base) {
-          tuplets.push(new Tuplet([a.note, b.note, c.note] as any, { bracketed: true, ratioed: false }));
-        }
+    let tripletBuf: TripletSlot[] = [];
+
+    const flush = (forceAll = false) => {
+      while (tripletBuf.length >= 3) {
+        const group = tripletBuf.slice(0, 3);
+        buildTupletFromSlots(group, tuplets);
+        tripletBuf.splice(0, 3);
       }
-      tripletBuf = [];
+      if (forceAll) tripletBuf = [];
     };
 
     for (const ev of rhythm) {
       const durTicks = noteValueToTicks(ev.value);
       const q = noteValueInQuarterUnits(ev.value);
+      const tripBase = tripletBaseForQ(q);
 
       const start = ticksToSeconds(tTicks, secPerQuarter);
       const bidx = Math.floor(tTicks / BAR_TICKS);
 
       if (ev.type === "rest") {
-        const toks = ticksToToks(durTicks);
-        // visible rest tokens inside content bars
-        for (const tok of toks) {
-          const s = ticksToSeconds(tTicks, secPerQuarter);
-          const bi = Math.floor(tTicks / BAR_TICKS);
-          const g = makeGhost(tok);
-          ticksOut.push(g);
-          startsSec.push(s);
-          barIndex.push(bi);
-          tTicks += tokToTicks(tok);
-          const r = makeManualRest(tok.dur, tok.dots as 0|1|2, clef);
-          pushManualRest(r, s, bi);
+        if (tripBase) {
+          // Triplet REST: use an **invisible rest tickable** (beamable context) + draw manual rest glyph.
+          const restTick = makeInvisibleTripletRest(tripBase, clef);
+          appendTickable(restTick, start, bidx);
+
+          const r = makeManualRest(tripBase, 0, clef);
+          pushManualRest(r, start, bidx);
+
+          tTicks += durTicks;
+
+          tripletBuf.push({ base: tripBase, node: restTick, start, barIdx: bidx });
+          if (tripletBuf.length >= 3) flush();
+        } else {
+          // non-triplet rest → normal tokenization (ghost timing + manual glyphs)
+          const toks = ticksToToks(durTicks);
+          for (const tok of toks) {
+            const s = ticksToSeconds(tTicks, secPerQuarter);
+            const bi = Math.floor(tTicks / BAR_TICKS);
+            const g = makeGhost(tok);
+            appendTickable(g as any, s, bi);
+            tTicks += tokToTicks(tok);
+            const r = makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, clef);
+            pushManualRest(r, s, bi);
+          }
+          // non-triplet breaks any partial tuplet
+          flush(true);
         }
-        flush();
         continue;
       }
 
@@ -261,11 +324,17 @@ export function buildMelodyTickables(params: {
       const midi = src?.midi ?? 60;
       const { key, accidental } = midiToVexKey(midi, useSharps, keyMap || undefined);
 
-      // choose a base duration for the head; timing is taken from durTicks with ghosts if needed
-      // but here we emit a single head StaveNote sized by the largest non-dotted within this duration
-      // then add extra ghosts if duration > head
-      const headTok: Tok = q >= 1 ? { dur: "q", dots: 0 } : q >= 0.5 ? { dur: "8", dots: 0 } :
-                           q >= 0.25 ? { dur: "16", dots: 0 } : { dur: "32", dots: 0 };
+      // choose a head token:
+      // - triplets: use base (h/q/8/16)
+      // - non-triplets: use first token from greedy tokenization (handles whole/half/dotted)
+      let headTok: Tok;
+      if (tripBase) {
+        headTok = { dur: tripBase, dots: 0 };
+      } else {
+        const toks = ticksToToks(durTicks);
+        headTok = toks[0] ?? { dur: "q", dots: 0 };
+      }
+
       const sn = new StaveNote({
         keys: [key],
         duration: headTok.dur as any,
@@ -274,6 +343,7 @@ export function buildMelodyTickables(params: {
         stemDirection: 1,
       });
       if (accidental) sn.addModifier(new Accidental(accidental), 0);
+      if (headTok.dots) Dot.buildAndAttach([sn as any], { all: true });
 
       if (lyrics && lyrics[lyricIndex]) {
         const ann = new Annotation(lyrics[lyricIndex])
@@ -283,43 +353,38 @@ export function buildMelodyTickables(params: {
         sn.addModifier(ann, 0);
       }
 
-      // put the head into the voice timeline at the *current* start
-      ticksOut.push(sn);
-      startsSec.push(start);
-      barIndex.push(bidx);
+      appendTickable(sn, start, bidx);
 
-      // advance using full durTicks with zero-width ghosts after head
-      const headTicks = tokToTicks(headTok);
-      tTicks += headTicks;
-      const tailTicks = Math.max(0, durTicks - headTicks);
-      if (tailTicks) {
-        const toks = ticksToToks(tailTicks);
-        for (const tok of toks) {
-          const s2 = ticksToSeconds(tTicks, secPerQuarter);
-          const bi2 = Math.floor(tTicks / BAR_TICKS);
-          const g = makeGhost(tok);
-          ticksOut.push(g);
-          startsSec.push(s2);
-          barIndex.push(bi2);
-          tTicks += tokToTicks(tok);
-        }
-      }
-
-      // triplet grouping (visual only)
-      const isTriplet = q === 4/3 || q === 2/3 || q === 1/3 || q === 1/6;
-      if (isTriplet) {
-        const baseDur = q === 4/3 ? "h" : q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
-        tripletBuf.push({ base: baseDur as Tok["dur"], note: sn });
-        if (tripletBuf.length === 3) flush();
+      // advance ticks and manage triplet grouping
+      if (tripBase) {
+        tTicks += durTicks; // exact triplet slot duration
+        tripletBuf.push({ base: tripBase, node: sn, start, barIdx: bidx });
+        if (tripletBuf.length >= 3) flush();
       } else {
-        flush();
+        const headTicks = tokToTicks(headTok);
+        tTicks += headTicks;
+
+        // timing-only ghosts for the remainder (if any)
+        const tailTicks = Math.max(0, durTicks - headTicks);
+        if (tailTicks) {
+          const tailToks = ticksToToks(tailTicks);
+          for (const tok of tailToks) {
+            const s2 = ticksToSeconds(tTicks, secPerQuarter);
+            const bi2 = Math.floor(tTicks / BAR_TICKS);
+            const g = makeGhost(tok);
+            appendTickable(g as any, s2, bi2);
+            tTicks += tokToTicks(tok);
+          }
+        }
+        // non-triplet element — flush any pending tuplet group
+        flush(true);
       }
 
       ni++;
       lyricIndex++;
     }
 
-    flush();
+    flush(true);
     padToNextBarTicks(); // timing-only pad; cannot spill
     return { ticks: ticksOut, starts: startsSec, barIndex, tuplets, manualRests };
   }
@@ -327,7 +392,6 @@ export function buildMelodyTickables(params: {
   // -------- Fallback: phrase.seconds
   const notes = [...(phrase?.notes ?? [])].sort((a, b) => a.startSec - b.startSec);
   if (!notes.length) {
-    // make one centered measure rest if we’re at bar start, otherwise visible partials
     if (tTicks % BAR_TICKS === 0) {
       emitMeasureRestBar();
     } else {
@@ -375,14 +439,12 @@ export function buildMelodyTickables(params: {
             sn.addModifier(ann, 0);
           }
 
-          ticksOut.push(sn);
+          appendTickable(sn, start, bidx);
         } else {
           const g = makeGhost(tok);
-          ticksOut.push(g);
+          appendTickable(g as any, start, bidx);
         }
 
-        startsSec.push(start);
-        barIndex.push(bidx);
         tTicks += tokToTicks(tok);
       });
 
@@ -418,18 +480,22 @@ export function buildRhythmTickables(params: {
     manualRests.push({ note, start, barIndex: bidx });
   };
 
+  const appendTickable = (n: StaveNote, start: number, bidx: number) => {
+    ticksOut.push(n);
+    startsSec.push(start);
+    barIndex.push(bidx);
+  };
+
   const emitRestToks = (toks: Tok[], { visible = true }: { visible?: boolean } = {}) => {
     for (const tok of toks) {
       const start = ticksToSeconds(tTicks, secPerQuarter);
       const bidx = Math.floor(tTicks / BAR_TICKS);
       const g = makeGhost(tok);
-      ticksOut.push(g);
-      startsSec.push(start);
-      barIndex.push(bidx);
+      appendTickable(g as any, start, bidx);
       tTicks += tokToTicks(tok);
 
       if (visible) {
-        const r = makeManualRest(tok.dur, tok.dots as 0|1|2, "bass");
+        const r = makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, "bass");
         pushManualRest(r, start, bidx);
       }
     }
@@ -448,13 +514,13 @@ export function buildRhythmTickables(params: {
     const rem = tTicks % BAR_TICKS === 0 ? 0 : BAR_TICKS - (tTicks % BAR_TICKS);
     if (rem > 0) {
       const toks = ticksToToks(rem);
-      emitRestToks(toks, { visible: false }); // timing-only
+      emitRestToks(toks, { visible: false });
     }
   };
 
   // Lead-in bars as single centered rests
   if (leadInSec > 1e-9) {
-    const leadBarsFloat = (leadInSec / Math.max(1e-9, secPerBar));
+    const leadBarsFloat = leadInSec / Math.max(1e-9, secPerBar);
     const fullBars = Math.floor(leadBarsFloat + 1e-9);
     const remSec = leadInSec - fullBars * secPerBar;
 
@@ -472,78 +538,95 @@ export function buildRhythmTickables(params: {
     return { ticks: ticksOut, starts: startsSec, barIndex, tuplets, manualRests };
   }
 
-  let tripletBuf: { base: Tok["dur"]; note: any }[] = [];
-  const flush = () => {
-    for (let i = 0; i + 2 < tripletBuf.length; i += 3) {
-      const a = tripletBuf[i], b = tripletBuf[i + 1], c = tripletBuf[i + 2];
-      if (a.base === b.base && b.base === c.base) {
-        tuplets.push(new Tuplet([a.note, b.note, c.note] as any, { bracketed: true, ratioed: false }));
-      }
+  let tripletBuf: TripletSlot[] = [];
+
+  const flush = (forceAll = false) => {
+    while (tripletBuf.length >= 3) {
+      const group = tripletBuf.slice(0, 3);
+      buildTupletFromSlots(group, tuplets);
+      tripletBuf.splice(0, 3);
     }
-    tripletBuf = [];
+    if (forceAll) tripletBuf = [];
   };
 
   for (const ev of rhythm) {
     const durTicks = noteValueToTicks(ev.value);
     const q = noteValueInQuarterUnits(ev.value);
+    const tripBase = tripletBaseForQ(q);
 
     const start = ticksToSeconds(tTicks, secPerQuarter);
     const bidx = Math.floor(tTicks / BAR_TICKS);
 
     if (ev.type === "rest") {
-      const toks = ticksToToks(durTicks);
-      for (const tok of toks) {
-        const s = ticksToSeconds(tTicks, secPerQuarter);
-        const bi = Math.floor(tTicks / BAR_TICKS);
-        const g = makeGhost(tok);
-        ticksOut.push(g);
-        startsSec.push(s);
-        barIndex.push(bi);
-        tTicks += tokToTicks(tok);
-        const r = makeManualRest(tok.dur, tok.dots as 0|1|2, "bass");
-        pushManualRest(r, s, bi);
+      if (tripBase) {
+        // Invisible **rest tickable** so beaming/tuplets see 3 members.
+        const restTick = makeInvisibleTripletRest(tripBase, "bass");
+        appendTickable(restTick, start, bidx);
+
+        const r = makeManualRest(tripBase, 0, "bass");
+        pushManualRest(r, start, bidx);
+
+        tTicks += durTicks;
+        tripletBuf.push({ base: tripBase, node: restTick, start, barIdx: bidx });
+        if (tripletBuf.length >= 3) flush();
+      } else {
+        const toks = ticksToToks(durTicks);
+        for (const tok of toks) {
+          const s = ticksToSeconds(tTicks, secPerQuarter);
+          const bi = Math.floor(tTicks / BAR_TICKS);
+          const g = makeGhost(tok);
+          appendTickable(g as any, s, bi);
+          tTicks += tokToTicks(tok);
+          const r = makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, "bass");
+          pushManualRest(r, s, bi);
+        }
+        flush(true);
       }
-      flush();
       continue;
+    }
+
+    // note slot
+    let headTok: Tok;
+    if (tripBase) {
+      headTok = { dur: tripBase, dots: 0 };
+    } else {
+      const toks = ticksToToks(durTicks);
+      headTok = toks[0] ?? { dur: "q", dots: 0 };
     }
 
     const sn = new StaveNote({
       keys: ["d/3"],
-      duration: (q >= 1 ? "q" : q >= 0.5 ? "8" : q >= 0.25 ? "16" : "32") as any,
+      duration: headTok.dur as any,
       clef: "bass",
       autoStem: true,
     });
-    ticksOut.push(sn);
-    startsSec.push(start);
-    barIndex.push(bidx);
+    if (headTok.dots) Dot.buildAndAttach([sn as any], { all: true });
 
-    const headTicks = tokToTicks({ dur: sn.getDuration() as any, dots: 0 });
-    tTicks += headTicks;
-    const tailTicks = Math.max(0, durTicks - headTicks);
-    if (tailTicks) {
-      const toks = ticksToToks(tailTicks);
-      for (const tok of toks) {
-        const s2 = ticksToSeconds(tTicks, secPerQuarter);
-        const bi2 = Math.floor(tTicks / BAR_TICKS);
-        const g = makeGhost(tok);
-        ticksOut.push(g);
-        startsSec.push(s2);
-        barIndex.push(bi2);
-        tTicks += tokToTicks(tok);
-      }
-    }
+    appendTickable(sn, start, bidx);
 
-    const isTriplet = q === 2/3 || q === 1/3 || q === 1/6;
-    if (isTriplet) {
-      const baseDur = q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
-      tripletBuf.push({ base: baseDur as Tok["dur"], note: sn });
-      if (tripletBuf.length === 3) flush();
+    if (tripBase) {
+      tTicks += durTicks; // exact triplet length
+      tripletBuf.push({ base: tripBase, node: sn, start, barIdx: bidx });
+      if (tripletBuf.length >= 3) flush();
     } else {
-      flush();
+      const headTicks = tokToTicks(headTok);
+      tTicks += headTicks;
+      const tailTicks = Math.max(0, durTicks - headTicks);
+      if (tailTicks) {
+        const toks = ticksToToks(tailTicks);
+        for (const tok of toks) {
+          const s2 = ticksToSeconds(tTicks, secPerQuarter);
+          const bi2 = Math.floor(tTicks / BAR_TICKS);
+          const g = makeGhost(tok);
+          appendTickable(g as any, s2, bi2);
+          tTicks += tokToTicks(tok);
+        }
+      }
+      flush(true);
     }
   }
 
-  flush();
+  flush(true);
   padToNextBarTicks();
   return { ticks: ticksOut, starts: startsSec, barIndex, tuplets, manualRests };
 }

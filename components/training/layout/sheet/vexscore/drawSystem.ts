@@ -55,6 +55,7 @@ export function drawSystem({
   // ----- staves -----
   const melStave = new Stave(padding.left, currentY, staffWidth);
   melStave.setClef(clef);
+  melStave.setBegBarType(Barline.type.NONE);
   if (keySig) melStave.addKeySignature(keySig);
   melStave.addTimeSignature(`${tsNum}/${den}`);
   melStave.setEndBarType(isLastSystem ? Barline.type.END : Barline.type.SINGLE);
@@ -65,6 +66,7 @@ export function drawSystem({
     const yR = melStave.getBottomY() + STAFF_GAP_Y;
     rhyStave = new Stave(padding.left, yR, staffWidth);
     rhyStave.setClef("bass");
+    rhyStave.setBegBarType(Barline.type.NONE);
     if (keySig) rhyStave.addKeySignature(keySig);
     rhyStave.addTimeSignature(`${tsNum}/${den}`);
     rhyStave.setEndBarType(isLastSystem ? Barline.type.END : Barline.type.SINGLE);
@@ -388,7 +390,7 @@ export function drawSystem({
     ctx.stroke();
   };
 
-  drawBarAtX(noteStartX);
+  
   for (let k = 1; k < barsPerRow; k++) drawBarAtX(noteStartX + (k / barsPerRow) * bandW);
   if (!isLastSystem) drawBarAtX(noteEndX);
 
