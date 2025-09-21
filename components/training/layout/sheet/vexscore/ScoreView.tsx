@@ -25,18 +25,20 @@ export default function ScoreView({
   melodyRhythm,
   onLayout,
   className,
-  keySig = null, // NEW
+  keySig = null,
 }: VexScoreProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const hasDrawnOnceRef = useRef<boolean>(false);
   const dims = useResizeObserver(hostRef as any, 120, heightPx);
 
   const clef = clefProp ?? pickClef(phrase);
-  const wnPerSec = useMemo(() => bpm / (60 * den), [bpm, den]);
+
+  // timing helpers
   const secPerBeat = useMemo(() => (60 / Math.max(1, bpm)) * (4 / Math.max(1, den)), [bpm, den]);
   const secPerBar = useMemo(() => tsNum * secPerBeat, [tsNum, secPerBeat]);
+  // whole-notes per second (for seconds→tokens conversions)
+  const wnPerSec = useMemo(() => bpm / (60 * Math.max(1, den)), [bpm, den]);
 
-  // Total musical content length — **melody only**.
   const contentSec = useMemo(() => {
     const fromPhrase = Math.max(0, phrase?.durationSec ?? 0);
     const fromMelodyRhy =
@@ -46,9 +48,9 @@ export default function ScoreView({
     return Math.max(fromPhrase, fromMelodyRhy);
   }, [phrase?.durationSec, melodyRhythm, bpm, den]);
 
-  // Include lead-in, then round UP to the next whole bar
+  // Total length = ceil((lead-in + content) to whole bars) — used only for page/system planning
   const totalSec = useMemo(() => {
-    const raw = Math.max(leadInSec + contentSec, 1e-3);
+    const raw = Math.max(leadInSec + contentSec, 1e-6);
     return Math.ceil(raw / Math.max(1e-9, secPerBar)) * secPerBar;
   }, [leadInSec, contentSec, secPerBar]);
 
@@ -70,7 +72,7 @@ export default function ScoreView({
               (document as any).fonts.load('12px "Arial"'),
             ]),
           ]);
-        } catch {/* ignore */}
+        } catch { /* noop */ }
       }
     };
 
@@ -80,10 +82,9 @@ export default function ScoreView({
       await ensureVexFonts();
       if (cancelled) return;
 
-      // Build key-accidental map once for this render
       const keyMap = keyAccidentals(keySig || null);
 
-      // Build once (whole piece)
+      // Build tickables using tick-accurate bar math (den-aware)
       const mel = buildMelodyTickables({
         phrase,
         clef,
@@ -91,11 +92,12 @@ export default function ScoreView({
         leadInSec,
         wnPerSec,
         secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
-        secPerBeat,
         secPerBar,
+        tsNum,
+        den, // ✅ denominator-aware bars
         lyrics,
         rhythm: melodyRhythm,
-        keyAccidentals: keySig ? keyMap : null, // NEW
+        keyAccidentals: keySig ? keyMap : null,
       });
 
       const rhy = buildRhythmTickables({
@@ -104,11 +106,13 @@ export default function ScoreView({
         wnPerSec,
         secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
         secPerBar,
+        tsNum,
+        den, // ✅
       });
 
       const haveRhythm = Array.isArray(rhythm) && rhythm.length > 0;
 
-      // Bars-per-row from FIRST LINE density; lock for all systems
+      // bars-per-row from first line density, then lock
       const { systems, barsPerRow } = computeSystems(totalSec, secPerBar, {
         melodyStarts: mel.starts,
         maxBarsPerRow: 4,
@@ -155,8 +159,8 @@ export default function ScoreView({
           rhy,
           secPerBar,
           barsPerRow,
-          keySig, // NEW
-          isLastSystem, // NEW
+          keySig,
+          isLastSystem,
         });
 
         layouts.push(layout);
@@ -209,7 +213,7 @@ export default function ScoreView({
     clef,
     onLayout,
     contentSec,
-    keySig, // NEW
+    keySig,
   ]);
 
   return (

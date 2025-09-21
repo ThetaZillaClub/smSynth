@@ -8,6 +8,7 @@ import VexScore from "@/components/training/layout/sheet/VexScore";
 import SheetOverlay from "@/components/training/layout/sheet/SheetOverlay";
 import type { SystemLayout } from "@/components/training/layout/sheet/vexscore/types";
 import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/sheet/vexscore/builders";
+import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
 
 type Props = {
   phrase?: Phrase | null;
@@ -19,6 +20,7 @@ type Props = {
   confThreshold?: number;
   startAtMs?: number | null;
   lyrics?: string[];
+  /** If provided, used directly; otherwise we compute from leadBars/ts/bpm. */
   leadInSec?: number;
   /** Blue rhythm line (independent of melody) */
   rhythm?: RhythmEvent[];
@@ -27,6 +29,8 @@ type Props = {
   bpm?: number;
   den?: number;
   tsNum?: number;
+  /** Optionally provide bars of lead-in (preferred source). */
+  leadBars?: number;
   /** NEW: key signature name for the staves (e.g., "G", "Bb", "F#"). */
   keySig?: string | null;
   view?: "piano" | "sheet";
@@ -42,12 +46,13 @@ export default function GameStage({
   confThreshold = 0.5,
   startAtMs = null,
   lyrics,
-  leadInSec = 1.5,
+  leadInSec,              // may be undefined
   rhythm,
   melodyRhythm,
   bpm = 80,
   den = 4,
   tsNum = 4,
+  leadBars,               // may be undefined
   keySig = null,          // NEW
   view = "piano",
 }: Props) {
@@ -108,6 +113,14 @@ export default function GameStage({
   // Prefer sharps in sharp/neutral keys, flats in flat keys (fewer-accidentals policy).
   const useSharpsPref = useMemo(() => preferSharpsForKeySig(keySig || null), [keySig]);
 
+  // --------- Compute effective lead-in seconds (pass down consistently) ----------
+  const leadInSecEff = useMemo(() => {
+    if (typeof leadInSec === "number" && isFinite(leadInSec)) return Math.max(0, leadInSec);
+    // fallback: compute from leadBars (default 1 bar) and current transport
+    const bars = typeof leadBars === "number" ? leadBars : 1;
+    return beatsToSeconds(barsToBeats(bars, tsNum), bpm, den);
+  }, [leadInSec, leadBars, tsNum, bpm, den]);
+
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
       <div className="w-full">
@@ -124,7 +137,7 @@ export default function GameStage({
                 bpm={bpm}
                 den={den}
                 tsNum={tsNum}
-                leadInSec={leadInSec}
+                leadInSec={leadInSecEff}
                 clef={clef}
                 onLayout={handleLayout}
                 rhythm={rhythm}
@@ -140,7 +153,7 @@ export default function GameStage({
                   phrase={phrase}
                   running={running}
                   startAtMs={startAtMs}
-                  leadInSec={leadInSec}
+                  leadInSec={leadInSecEff}
                   livePitchHz={livePitchHz}
                   confidence={confidence}
                   confThreshold={confThreshold}
@@ -159,7 +172,7 @@ export default function GameStage({
             livePitchHz={livePitchHz}
             confidence={confidence}
             confThreshold={confThreshold}
-            leadInSec={leadInSec}
+            leadInSec={leadInSecEff}
             startAtMs={startAtMs}
             lyrics={lyrics}
           />
@@ -173,7 +186,7 @@ export default function GameStage({
             rhythm={rhythm}
             running={running}
             startAtMs={startAtMs}
-            leadInSec={leadInSec}
+            leadInSec={leadInSecEff}
             bpm={bpm}
             den={den}
           />
