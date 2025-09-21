@@ -1,3 +1,4 @@
+// components/training/layout/piano-roll/GameStage.tsx
 "use client";
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import PianoRollCanvas, { type Phrase } from "@/components/training/layout/piano-roll/PianoRollCanvas";
@@ -26,6 +27,8 @@ type Props = {
   bpm?: number;
   den?: number;
   tsNum?: number;
+  /** NEW: key signature name for the staves (e.g., "G", "Bb", "F#"). */
+  keySig?: string | null;
   view?: "piano" | "sheet";
 };
 
@@ -45,6 +48,7 @@ export default function GameStage({
   bpm = 80,
   den = 4,
   tsNum = 4,
+  keySig = null,          // NEW
   view = "piano",
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -122,6 +126,9 @@ export default function GameStage({
                 onLayout={handleLayout}
                 rhythm={rhythm}
                 melodyRhythm={melodyRhythm}
+                keySig={keySig || null}    // NEW
+                /* keep your naming prefs; builders will pick Eb vs D# based on keySig */
+                useSharps={true}
               />
               {/* Render overlay only after systems are ready to avoid initial misalignment */}
               {sheetW && sheetW > 4 && sheetReady ? (

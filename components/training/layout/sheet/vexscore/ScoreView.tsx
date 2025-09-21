@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef } from "react";
 import { Renderer } from "vexflow";
-import { pickClef } from "./builders";
+import { pickClef, keyAccidentals } from "./builders";
 import { computeSystems, EST_STAVE_H, SYSTEM_GAP_Y, STAFF_GAP_Y } from "./layout";
 import { useResizeObserver } from "./useResizeObserver";
 import { buildMelodyTickables, buildRhythmTickables } from "./makeTickables";
@@ -25,6 +25,7 @@ export default function ScoreView({
   melodyRhythm,
   onLayout,
   className,
+  keySig = null, // NEW
 }: VexScoreProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const hasDrawnOnceRef = useRef<boolean>(false);
@@ -79,6 +80,9 @@ export default function ScoreView({
       await ensureVexFonts();
       if (cancelled) return;
 
+      // Build key-accidental map once for this render
+      const keyMap = keyAccidentals(keySig || null);
+
       // Build once (whole piece)
       const mel = buildMelodyTickables({
         phrase,
@@ -91,6 +95,7 @@ export default function ScoreView({
         secPerBar,
         lyrics,
         rhythm: melodyRhythm,
+        keyAccidentals: keySig ? keyMap : null, // NEW
       });
 
       const rhy = buildRhythmTickables({
@@ -103,7 +108,7 @@ export default function ScoreView({
 
       const haveRhythm = Array.isArray(rhythm) && rhythm.length > 0;
 
-      // ⬇️ PICK bars-per-row from FIRST LINE density; lock for all systems
+      // Bars-per-row from FIRST LINE density; lock for all systems
       const { systems, barsPerRow } = computeSystems(totalSec, secPerBar, {
         melodyStarts: mel.starts,
         maxBarsPerRow: 4,
@@ -147,7 +152,8 @@ export default function ScoreView({
           mel,
           rhy,
           secPerBar,
-          barsPerRow, // NEW: consistent columns per row across the piece
+          barsPerRow,
+          keySig, // NEW
         });
 
         layouts.push(layout);
@@ -200,6 +206,7 @@ export default function ScoreView({
     clef,
     onLayout,
     contentSec,
+    keySig, // NEW
   ]);
 
   return (

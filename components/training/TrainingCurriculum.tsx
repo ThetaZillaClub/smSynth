@@ -53,6 +53,12 @@ export default function TrainingCurriculum({
   const { lowHz, highHz } = useStudentRange(studentRowId);
   const haveRange = lowHz != null && highHz != null;
 
+  // prefer-flat labels for ambiguous PCs
+  const PC_LABELS_FLAT = useMemo(
+    () => ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"],
+    []
+  );
+
   // allowed tonics (need ≥ 1 octave inside [low..high])
   const allowedTonicPcs = useMemo<Set<number>>(() => {
     if (!haveRange) return new Set<number>();
@@ -100,7 +106,7 @@ export default function TrainingCurriculum({
     const hiName = midiToNoteName(hiM, { useSharps: true });
     const allowedLabels = Array.from(allowedTonicPcs)
       .sort((a, b) => a - b)
-      .map((pc) => ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][pc])
+      .map((pc) => PC_LABELS_FLAT[pc])
       .join(", ");
     return {
       lo: `${loName.name}${loName.octave}`,
@@ -108,7 +114,7 @@ export default function TrainingCurriculum({
       list: allowedLabels,
       none: allowedTonicPcs.size === 0,
     };
-  }, [haveRange, lowHz, highHz, allowedTonicPcs]);
+  }, [haveRange, lowHz, highHz, allowedTonicPcs, PC_LABELS_FLAT]);
 
   // simple typed setter
   const pushChange = useCallback((patch: Partial<SessionConfig>) => {

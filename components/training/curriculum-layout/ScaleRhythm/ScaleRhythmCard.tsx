@@ -5,7 +5,7 @@ import type { SessionConfig } from "../../layout/session/types";
 import type { ScaleName } from "@/utils/phrase/scales";
 import type { NoteValue } from "@/utils/time/tempo";
 import Field from "../Field";
-import { NOTE_VALUE_OPTIONS, TONIC_OPTIONS, SCALE_OPTIONS } from "../Options";
+import { NOTE_VALUE_OPTIONS, SCALE_OPTIONS } from "../Options"; // <- removed TONIC_OPTIONS import
 
 /* --------------------------------- Types --------------------------------- */
 type RangeHint = { lo: string; hi: string; list: string; none: boolean } | null;
@@ -142,6 +142,12 @@ export default function ScaleRhythmCard({
   const scaleCfg =
     cfg.scale ?? ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2 } as const);
 
+  // Flat-preferred labels
+  const PC_LABELS_FLAT = useMemo(
+    () => ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"],
+    []
+  );
+
   // bring forward defaults + ensure separate rest controls exist
   const rhythmCfg = (cfg.rhythm ?? {
     mode: "random",
@@ -205,16 +211,16 @@ export default function ScaleRhythmCard({
               })
             }
           >
-            {TONIC_OPTIONS.map((o) => {
-              const disabled = haveRange && !allowedTonicPcs.has(o.value);
+            {Array.from({ length: 12 }, (_, pc) => pc).map((pc) => {
+              const disabled = haveRange && !allowedTonicPcs.has(pc);
               return (
                 <option
-                  key={o.value}
-                  value={o.value}
+                  key={pc}
+                  value={pc}
                   disabled={disabled}
                   title={disabled ? "Out of your range" : ""}
                 >
-                  {o.label}
+                  {PC_LABELS_FLAT[pc]}
                 </option>
               );
             })}
@@ -302,7 +308,12 @@ export default function ScaleRhythmCard({
                 onChange({ rhythm: { ...rhythmCfg, pattern: e.target.value as any } })
               }
             >
-              {SEQ_PATTERN_OPTIONS.map((o) => (
+              {[
+                { label: "Ascending", value: "asc" },
+                { label: "Descending", value: "desc" },
+                { label: "Asc → Desc", value: "asc-desc" },
+                { label: "Desc → Asc", value: "desc-asc" },
+              ].map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>

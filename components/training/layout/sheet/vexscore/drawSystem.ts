@@ -17,8 +17,9 @@ type DrawParams = {
   mel: { ticks: any[]; starts: number[]; tuplets?: any[] };
   rhy: { ticks: any[]; starts: number[]; tuplets: any[] };
   secPerBar: number;
-  /** Bars per row for this score (consistent across systems). */
   barsPerRow: 4 | 3 | 2;
+  /** NEW: VexFlow key signature name (e.g., "Bb", "F#", "C"). */
+  keySig?: string | null;
 };
 
 export function drawSystem({
@@ -35,12 +36,14 @@ export function drawSystem({
   rhy,
   secPerBar,
   barsPerRow,
+  keySig,
 }: DrawParams) {
   const { startSec, endSec, contentEndSec } = systemWindow;
 
   // ----- staves -----
   const melStave = new Stave(padding.left, currentY, staffWidth);
   melStave.setClef(clef);
+  if (keySig) melStave.addKeySignature(keySig);
   melStave.addTimeSignature(`${tsNum}/${den}`);
   melStave.setContext(ctx).draw();
 
@@ -49,6 +52,7 @@ export function drawSystem({
     const yR = melStave.getBottomY() + STAFF_GAP_Y;
     rhyStave = new Stave(padding.left, yR, staffWidth);
     rhyStave.setClef("bass");
+    if (keySig) rhyStave.addKeySignature(keySig);
     rhyStave.addTimeSignature(`${tsNum}/${den}`);
     rhyStave.setContext(ctx).draw();
 
@@ -70,7 +74,6 @@ export function drawSystem({
   const bandW = Math.max(1, noteEndX - noteStartX);
   const barW = bandW / barsPerRow;
 
-  // tolerances (seconds)
   const eps = Math.max(1e-6, secPerBar / (tsNum * 512));
   const secPerBeat = secPerBar / tsNum;
   const downbeatEps = Math.max(1e-6, secPerBeat / 128);
@@ -87,7 +90,6 @@ export function drawSystem({
     return { startSec: segStartSec, endSec: segEndSec, x0: barX0, x1: barX1 };
   });
 
-  // half-open window [start, windowEnd)
   const inWindow = (t0: number) => t0 >= startSec - eps && t0 < windowEnd - eps;
 
   const barIndexOf = (t0: number) => {
@@ -109,7 +111,6 @@ export function drawSystem({
     return seg.x0 + u * (seg.x1 - seg.x0);
   };
 
-  // Filter tickables to system window
   const sel = (ticks: any[], starts: number[]) => {
     const outT: any[] = [];
     const outS: number[] = [];
@@ -122,7 +123,6 @@ export function drawSystem({
   let melSel = sel(mel.ticks, mel.starts);
   let rhySel = haveRhythm && rhyStave ? sel(rhy.ticks, rhy.starts) : { t: [] as any[], s: [] as number[] };
 
-  // helpers
   const isRest = (note: any): boolean => {
     if (typeof note?.isRest === "function") return !!note.isRest();
     const d = note?.getDuration?.();
@@ -132,7 +132,6 @@ export function drawSystem({
     return false;
   };
 
-  // De-duplicate events with the same start time (floating rounding)
   const dedupeSameStart = (selObj: { t: any[]; s: number[] }) => {
     const T = selObj.t, S = selObj.s;
     if (T.length <= 1) return selObj;
@@ -155,7 +154,6 @@ export function drawSystem({
   melSel = dedupeSameStart(melSel);
   if (haveRhythm && rhyStave) rhySel = dedupeSameStart(rhySel);
 
-  // create tick contexts only (no justification)
   const melVoice = new Voice({ numBeats: tsNum, beatValue: den }).setStrict(false);
   melVoice.addTickables(melSel.t as any);
   const melFmt = new Formatter();
@@ -173,7 +171,6 @@ export function drawSystem({
     rhyFmt.preFormat();
   }
 
-  // 1) place each tickable at its linear musical X and bind stave/context
   const placeTicks = (ticks: any[], starts: number[], stave: Stave) => {
     for (let i = 0; i < ticks.length; i++) {
       const n = ticks[i] as any;
@@ -189,7 +186,6 @@ export function drawSystem({
   placeTicks(melSel.t, melSel.s, melStave);
   if (haveRhythm && rhyVoice && rhyStave) placeTicks(rhySel.t, rhySel.s, rhyStave);
 
-  // leftmost x for the tickable’s drawn glyph (note or rest)
   const leftMostX = (n: any): number => {
     try {
       if (!isRest(n) && typeof n.getNoteHeadBeginX === "function") return n.getNoteHeadBeginX();
@@ -202,7 +198,6 @@ export function drawSystem({
     } catch { return 0; }
   };
 
-  // === Density-aware bar padding shrink ===
   const densityOfBar = (b: number) => {
     const seg = segments[b];
     let c = 0;
@@ -217,17 +212,14 @@ export function drawSystem({
 
   for (let b = 0; b < barsPerRow; b++) {
     const seg = segments[b];
-
-    // base gap is one 16th of the bar; shrink it when dense
     const baseGapPx16 = (seg.x1 - seg.x0) * (den / (16 * tsNum));
     const d = densityOfBar(b);
     const shrink =
-      d >= 12 ? 0.15 :   // very dense
-      d >= 8  ? 0.35 :   // dense
-                1.0;     // normal
+      d >= 12 ? 0.15 :
+      d >= 8  ? 0.35 :
+                1.0;
     const gapPx16 = baseGapPx16 * shrink;
 
-    // find first tickable at exact downbeat
     let idx = -1;
     for (let i = 0; i < melSel.t.length; i++) {
       const t0 = melSel.s[i];
@@ -244,7 +236,6 @@ export function drawSystem({
     }
   }
 
-  // apply uniform per-bar shift (keeps timing linear inside each bar)
   const applyBarShift = (ticks: any[], starts: number[]) => {
     for (let i = 0; i < ticks.length; i++) {
       const n = ticks[i] as any;
@@ -259,7 +250,6 @@ export function drawSystem({
   applyBarShift(melSel.t, melSel.s);
   if (haveRhythm && rhyVoice && rhyStave) applyBarShift(rhySel.t, rhySel.s);
 
-  // 3) beams after positions are final
   const melGroupKeys = melSel.s.map((t0) => barIndexOf(t0));
   const melBeams = buildBeams(melSel.t, { groupKeys: melGroupKeys, allowMixed: true, sameStemOnly: true });
   let rhyBeams: any[] = [];
@@ -268,7 +258,6 @@ export function drawSystem({
     rhyBeams = buildBeams(rhySel.t, { groupKeys: rhyGroupKeys, allowMixed: true, sameStemOnly: true });
   }
 
-  // 4) manual draw
   const drawTickables = (ticks: any[], stave: Stave) => {
     for (const t of ticks) {
       if (typeof t.setStave === "function") t.setStave(stave);
@@ -279,7 +268,6 @@ export function drawSystem({
   drawTickables(melSel.t, melStave);
   melBeams.forEach((b) => b.setContext(ctx).draw());
 
-  // Only draw tuplets whose notes are fully inside the current selection (prevents NoTickContext).
   const tupletFullyInside = (tp: any, pool: any[]) => {
     const notes = typeof tp.getNotes === "function" ? tp.getNotes() : [];
     return notes.length > 0 && notes.every((n: any) => pool.includes(n));
@@ -296,7 +284,6 @@ export function drawSystem({
       .forEach((t: any) => t.setContext(ctx).draw());
   }
 
-  // exact barlines from our geometry
   const staffTopY = melStave.getYForLine(0) - 6;
   const staffBottomY = (haveRhythm && rhyStave ? rhyStave : melStave).getYForLine(4) + 6;
   const drawBarAtX = (x: number) => {

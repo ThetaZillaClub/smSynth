@@ -22,13 +22,140 @@ export function pickClef(
   return below > ns.length / 2 ? "bass" : "treble";
 }
 
-/** Map MIDI → VexFlow key string and (optional) accidental. */
-export function midiToVexKey(midi: number, useSharps: boolean) {
-  const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
-  const letter = name[0].toLowerCase();
-  const acc = name.length > 1 ? name.slice(1) : "";
-  const key = acc ? `${letter}${acc}/${octave}` : `${letter}/${octave}`;
-  return { key, accidental: acc || null };
+/* ------------------ Key signature helpers (NEW) ------------------ */
+
+// Circle-of-fifths orders
+const ORDER_SHARPS = ["F","C","G","D","A","E","B"] as const;
+const ORDER_FLATS  = ["B","E","A","D","G","C","F"] as const;
+
+const MAJOR_KEY_FIFTHS: Record<string, number> = {
+  "C": 0,  "G": 1,  "D": 2,  "A": 3,  "E": 4,  "B": 5,  "F#": 6, "C#": 7,
+  "F": -1, "Bb":-2, "Eb":-3, "Ab":-4, "Db":-5, "Gb":-6, "Cb":-7,
+};
+
+/** Build a letter→accidental map for a given (major) key, e.g. {F:'#'} for G major. */
+export function keyAccidentals(key: string | null | undefined):
+  Record<"A"|"B"|"C"|"D"|"E"|"F"|"G", ""|"#"|"b"> {
+  const base: Record<"A"|"B"|"C"|"D"|"E"|"F"|"G",""|"#"|"b"> =
+    { A:"", B:"", C:"", D:"", E:"", F:"", G:"" };
+  if (!key) return base;
+  const fifths = MAJOR_KEY_FIFTHS[key] ?? 0;
+  if (fifths > 0) {
+    for (let i = 0; i < fifths; i++) base[ORDER_SHARPS[i]!] = "#";
+  } else if (fifths < 0) {
+    for (let i = 0; i < -fifths; i++) base[ORDER_FLATS[i]!] = "b";
+  }
+  return base;
+}
+
+/** Local alias for common scale names; adjust to your project if needed. */
+type ScaleName =
+  | "major" | "natural_minor" | "harmonic_minor" | "melodic_minor"
+  | "dorian" | "phrygian" | "lydian" | "mixolydian" | "locrian"
+  | "major_pentatonic" | "minor_pentatonic" | "chromatic";
+
+/** Compute a sensible major-key name from tonicPc + scale (modes/minor → relative major). */
+export function keyNameFromTonicPc(
+  tonicPc: number,
+  scaleName: ScaleName = "major",
+  // FLIPPED: prefer flats for ambiguous major keys by default
+  preferSharps: boolean = false
+): string {
+  // mode → semitone offset (major degrees): 0,2,4,5,7,9,11
+  const OFF: Record<ScaleName, number> = {
+    major: 0,
+    natural_minor: 9,
+    harmonic_minor: 9,
+    melodic_minor: 9,
+    dorian: 2,
+    phrygian: 4,
+    lydian: 5,
+    mixolydian: 7,
+    locrian: 11,
+    major_pentatonic: 0,
+    minor_pentatonic: 9,
+    chromatic: 0,
+  };
+  const parentMajPc = ((tonicPc - (OFF[scaleName] ?? 0)) % 12 + 12) % 12;
+
+  const SHARP_NAMES: Record<number,string> = { 0:"C", 1:"C#", 2:"D", 3:"D#", 4:"E", 5:"F", 6:"F#", 7:"G", 8:"G#", 9:"A", 10:"A#", 11:"B" };
+  const FLAT_NAMES:  Record<number,string> = { 0:"C", 1:"Db", 2:"D", 3:"Eb", 4:"E", 5:"F", 6:"Gb", 7:"G", 8:"Ab", 9:"A", 10:"Bb", 11:"Cb" };
+
+  const sharpName = SHARP_NAMES[parentMajPc];
+  const flatName  = FLAT_NAMES[parentMajPc];
+  const pick = (n: string) => (n in MAJOR_KEY_FIFTHS) ? n : null;
+
+  const candSharp = pick(sharpName);
+  const candFlat  = pick(flatName);
+
+  if (candSharp && candFlat) {
+    if (preferSharps) return candSharp;
+    // Prefer flats for ambiguous keys, except keep B over Cb (more conventional)
+    if (parentMajPc === 11) return candSharp; // B, not Cb
+    return candFlat;
+  }
+  return candSharp ?? candFlat ?? "C";
+}
+
+/**
+ * Convert MIDI → VexFlow key string + (only-if-needed) accidental **relative to key signature**.
+ * If `keyMap` is omitted, we fall back to the old behavior (always attach '#'/'b' when present).
+ * NEW: when `keyMap` is provided, choose the enharmonic (sharp/flat) that best matches the signature.
+ */
+export function midiToVexKey(
+  midi: number,
+  useSharps: boolean,
+  keyMap?: Record<"A"|"B"|"C"|"D"|"E"|"F"|"G", ""|"#"|"b">
+): { key: string; accidental: "#"|"b"|"n"|null } {
+  // Helper to get a spelling
+  const pickName = (preferSharps: boolean) =>
+    midiToNoteName(midi, { useSharps: preferSharps, octaveAnchor: "C" });
+
+  // Default choice respects caller preference
+  let chosen = pickName(useSharps);
+
+  if (keyMap) {
+    const sharpName = pickName(true);
+    const flatName  = pickName(false);
+
+    const score = (nm: { name: string }) => {
+      const L = nm.name[0]!.toUpperCase() as "A"|"B"|"C"|"D"|"E"|"F"|"G";
+      const acc = (nm.name.length > 1 ? nm.name.slice(1) : "") as ""|"#"|"b";
+      const exp = keyMap[L] || "";
+      if (acc === exp) return 3;               // exact match to signature for that letter
+      if (exp === "" && acc === "") return 2;  // natural where natural expected
+      // soft bias toward the family's accidentals if neither is exact
+      const flats  = Object.values(keyMap).filter(a => a === "b").length;
+      const sharps = Object.values(keyMap).filter(a => a === "#").length;
+      const preferSharpsFamily = sharps > flats;
+      if (preferSharpsFamily && acc === "#") return 1;
+      if (!preferSharpsFamily && acc === "b") return 1;
+      return 0;
+    };
+
+    // Choose the better-scoring enharmonic (e.g., Eb over D# in flat keys)
+    chosen = score(flatName) > score(sharpName) ? flatName : sharpName;
+  }
+
+  const letter = chosen.name[0]!.toUpperCase() as "A"|"B"|"C"|"D"|"E"|"F"|"G";
+  const accidentalActual = (chosen.name.length > 1 ? chosen.name.slice(1) : "") as ""|"#"|"b";
+  const key = accidentalActual
+    ? `${letter.toLowerCase()}${accidentalActual}/${chosen.octave}`
+    : `${letter.toLowerCase()}/${chosen.octave}`;
+
+  // If we don't have a key signature, emit whatever accidental is present.
+  if (!keyMap) {
+    return { key, accidental: accidentalActual || null };
+  }
+
+  // Otherwise, emit accidentals **relative to the key signature**.
+  const expected = keyMap[letter] || "";
+  if (accidentalActual === expected) return { key, accidental: null };
+  if (accidentalActual === "" && (expected === "#" || expected === "b")) return { key, accidental: "n" };
+  if ((accidentalActual === "#" && expected === "") || (accidentalActual === "b" && expected === "")) {
+    return { key, accidental: accidentalActual };
+  }
+  return { key, accidental: (accidentalActual || "n") as "#"|"b"|"n" };
 }
 
 /** Convert token to VexFlow duration string. */
@@ -68,9 +195,6 @@ export function tokToSeconds(tok: Tok, secPerWholeNote: number, isTriplet: boole
 
 /**
  * Greedy tokenization whole→(16th|32nd) with dot support.
- * @param sec seconds
- * @param wnPerSec whole notes per second
- * @param maxBase deepest base note to consider (default "16")
  */
 export function secondsToTokens(
   sec: number,
@@ -115,21 +239,19 @@ export function secondsToTokens(
 }
 
 /* =========================
- *  Beaming — hybrid: custom runs + VF auto-beamer
+ *  Beaming
  * ========================= */
 
 export type BuildBeamsOpts = {
   groupKeys?: Array<string | number | null | undefined>;
   getGroupKey?: (note: any, index: number) => string | number | null | undefined;
-  allowMixed?: boolean;       // default: true (kept for API compatibility)
-  /** Only beam runs that keep the same default stem direction (default: true). */
+  allowMixed?: boolean;
   sameStemOnly?: boolean;
 };
 
-/** Normalize a VexFlow duration string to an eligible beaming token. */
 function normDur(d: unknown): string | null {
   if (typeof d !== "string") return null;
-  const base = d.endsWith("r") ? d.slice(0, -1) : d; // strip trailing 'r' on rests
+  const base = d.endsWith("r") ? d.slice(0, -1) : d;
   if (
     base === "8" || base === "8d" ||
     base === "16" || base === "16d" ||
@@ -138,7 +260,6 @@ function normDur(d: unknown): string | null {
   return null;
 }
 
-/** Treat StaveNote rests *and* GhostNotes as rests. */
 function isRest(note: any): boolean {
   if (typeof note?.isRest === "function") return !!note.isRest();
   const dur = note?.getDuration?.();
@@ -154,10 +275,6 @@ function groupKeyFor(note: any, i: number, opts?: BuildBeamsOpts) {
   return note?.measureIndex ?? note?.__barIndex ?? note?.barIndex ?? null;
 }
 
-/**
- * Infer a reasonable *default* stem direction.
- * Honor explicit stem direction if it exists (so we can force up-stems on melody).
- */
 function defaultStemDir(note: any): 1 | -1 {
   try {
     if (typeof note?.getStemDirection === "function") {
@@ -171,24 +288,13 @@ function defaultStemDir(note: any): 1 | -1 {
       return avg > 2 ? 1 : -1;
     }
   } catch { /* ignore */ }
-  return 1; // benign fallback
+  return 1;
 }
 
-/**
- * Build beams (tutorial style, no cross-stem beaming):
- * 1) Split into groups (e.g., by bar).
- * 2) Within each group, make contiguous runs of beam-eligible notes (8th/16th/32nd, dotted ok),
- *    stopping on rests or stem direction flips.
- * 3) For each run, call VF auto-beamer with:
- *      - maintainStemDirections: true (preserve our stems; splits where needed)
- *      - beamRests: false (rests break groups)
- *    This gives quarter-beat grouping + secondary breaks automatically.
- */
 export function buildBeams(notes: any[], opts?: BuildBeamsOpts) {
-  const allowMixed   = opts?.allowMixed !== false;     // default: true
-  const sameStemOnly = opts?.sameStemOnly !== false;   // default: true
+  const allowMixed   = opts?.allowMixed !== false;
+  const sameStemOnly = opts?.sameStemOnly !== false;
 
-  // 1) partition by group key
   const groups = new Map<string | number | null, any[]>();
   notes.forEach((n, i) => {
     const k = groupKeyFor(n, i, opts) ?? null;
@@ -201,25 +307,23 @@ export function buildBeams(notes: any[], opts?: BuildBeamsOpts) {
 
   groups.forEach((arr) => {
     let run: any[] = [];
-    let runDur: string | null = null; // used if allowMixed === false
+    let runDur: string | null = null;
     let runStem: 1 | -1 | null = null;
 
     const flush = () => {
       if (run.length >= 2) {
-        // 3) let VexFlow split within the run as needed (per quarter, secondary breaks)
         const auto = Beam.generateBeams(run, {
           maintainStemDirections: true,
           beamRests: false,
         });
         if (auto.length) out.push(...auto);
-        else out.push(new Beam(run)); // fallback (should rarely happen)
+        else out.push(new Beam(run));
       }
       run = [];
       runDur = null;
       runStem = null;
     };
 
-    // 2) scan the group, forming runs
     for (let i = 0; i < arr.length; i++) {
       const n = arr[i];
       const nd = normDur(n?.getDuration?.());

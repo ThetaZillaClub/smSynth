@@ -49,8 +49,8 @@ function tokToTicks(tok: Tok): number {
 
 /** Convert NoteValue (includes triplets/dots) to PPQ ticks. */
 function noteValueToTicks(v: NoteValue): number {
-  const q = noteValueInQuarterUnits(v); // exact rational for all supported values
-  return Math.round(q * PPQ);           // stays integer (e.g., triplet-8th = 320)
+  const q = noteValueInQuarterUnits(v);
+  return Math.round(q * PPQ);
 }
 
 /** staff rest for a clef (visible) */
@@ -77,18 +77,7 @@ function quarterToBaseAndDots(q: number): { base: "w"|"h"|"q"|"8"|"16"|"32"; dot
 }
 
 /**
- * Build MELODY tickables.
- * If `rhythm` is provided, it is treated as authoritative for bar math (exact),
- * so note/rest durations are taken directly from it (with tuplets when needed).
- * Otherwise, we infer durations from phrase note seconds (legacy path).
- *
- * IMPORTANT: All timing is accumulated as integer PPQ ticks, then converted
- * to seconds once at the end. This removes floating-time boundary errors.
- *
- * Additionally, we **pad with visible rests to the next barline** using `secPerBar`,
- * so measures are never visually short even if the material ends early.
- *
- * Also: we force **stems up** on melody so flags always point upward.
+ * Build MELODY tickables with optional key-signature awareness.
  */
 export function buildMelodyTickables(params: {
   phrase: Phrase;
@@ -100,8 +89,9 @@ export function buildMelodyTickables(params: {
   secPerBeat: number;
   secPerBar: number;           // used to pad to bar boundaries
   lyrics?: string[];
-  /** When provided, this is the authoritative rhythm for the melody's durations. */
   rhythm?: RhythmEvent[];
+  /** NEW: letter→accidental map for the current key signature. */
+  keyAccidentals?: Record<"A"|"B"|"C"|"D"|"E"|"F"|"G", ""|"#"|"b"> | null;
 }) {
   const {
     phrase,
@@ -110,10 +100,11 @@ export function buildMelodyTickables(params: {
     leadInSec,
     wnPerSec,
     secPerWholeNote,
-    secPerBeat,   // kept for clarity in comments
+    secPerBeat,   // for comments
     secPerBar,
     lyrics,
     rhythm,
+    keyAccidentals: keyMap,
   } = params;
 
   const secPerQuarter = secPerWholeNote / 4;
@@ -130,7 +121,7 @@ export function buildMelodyTickables(params: {
     let need = nextBarEnd - curSec;
     if (need <= 1e-6) return;
     for (const tok of secondsToTokens(need, wnPerSec, "32")) {
-      const r = makeRest(tok.dur as any, clef);       // base only
+      const r = makeRest(tok.dur as any, clef);
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -138,10 +129,10 @@ export function buildMelodyTickables(params: {
     }
   };
 
-  // --- lead-in as rests (tokenized, then timed in PPQ) ---
+  // --- lead-in as rests ---
   if (leadInSec > 1e-6) {
     for (const tok of secondsToTokens(leadInSec, wnPerSec, "32")) {
-      const r = makeRest(tok.dur as any, clef);       // base only
+      const r = makeRest(tok.dur as any, clef);
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -149,13 +140,12 @@ export function buildMelodyTickables(params: {
     }
   }
 
-  // ----- Exact rhythm-driven path (preferred): keeps bar math exact -----
+  // ----- Exact rhythm-driven path -----
   if (Array.isArray(rhythm) && rhythm.length) {
     const melNotes = [...(phrase?.notes ?? [])].sort((a, b) => a.startSec - b.startSec);
-    let ni = 0; // index into melody notes (advance on NOTE events)
+    let ni = 0;
     let lyricIndex = 0;
 
-    // Triplet capture per 3 notes of the same base kind
     let tripletBuf: { base: Tok["dur"]; note: StaveNote }[] = [];
     const flush = () => {
       for (let i = 0; i + 2 < tripletBuf.length; i += 3) {
@@ -176,7 +166,7 @@ export function buildMelodyTickables(params: {
       const { base, dots } = quarterToBaseAndDots(q);
 
       if (ev.type === "rest") {
-        const rn = makeRest(base as any, clef);       // base only
+        const rn = makeRest(base as any, clef);
         if (dots) Dot.buildAndAttach([rn as any], { all: true });
         ticksOut.push(rn);
         startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -185,12 +175,10 @@ export function buildMelodyTickables(params: {
         continue;
       }
 
-      // Choose next melody pitch; if we run out, repeat the last, fallback to C4.
       const src = melNotes[ni] ?? melNotes[melNotes.length - 1] ?? null;
       const midi = src?.midi ?? 60;
-      const { key, accidental } = midiToVexKey(midi, useSharps);
+      const { key, accidental } = midiToVexKey(midi, useSharps, keyMap || undefined);
 
-      // Build note with base duration, then attach dots explicitly (if any).
       const sn = new StaveNote({
         keys: [key],
         duration: base as any,
@@ -216,7 +204,6 @@ export function buildMelodyTickables(params: {
       ni++;
       lyricIndex++;
 
-      // Triplet grouping
       const isTriplet = q === 1/3 || q === 2/3 || q === 1/6;
       if (isTriplet) {
         const baseDur = q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
@@ -228,29 +215,27 @@ export function buildMelodyTickables(params: {
     }
 
     flush();
-    // Ensure we fill to the next bar with rests so the bar isn’t visually short
     padToNextBar();
     return { ticks: ticksOut, starts: startsSec, tuplets };
   }
 
-  // ----- Legacy fallback: infer from phrase seconds (kept for compatibility) -----
+  // ----- Legacy fallback: infer from phrase seconds -----
   const notes = [...(phrase?.notes ?? [])].sort((a, b) => a.startSec - b.startSec);
   if (!notes.length) {
     const r = makeRest("w", clef);
     ticksOut.push(r);
     startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
-    tTicks += 4 * PPQ; // whole note
+    tTicks += 4 * PPQ;
   } else {
     let lyricIndex = 0;
     const tol = 1e-4;
 
     for (const n of notes) {
-      // --- fill gaps with rests (32nd resolution) ---
       const curSec = ticksToSeconds(tTicks, secPerQuarter);
       const gapSec = n.startSec - curSec;
       if (gapSec > tol) {
         for (const tok of secondsToTokens(gapSec, wnPerSec, "32")) {
-          const rn = makeRest(tok.dur as any, clef);   // base only
+          const rn = makeRest(tok.dur as any, clef);
           if (tok.dots) Dot.buildAndAttach([rn as any], { all: true });
           ticksOut.push(rn);
           startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -258,17 +243,16 @@ export function buildMelodyTickables(params: {
         }
       }
 
-      // --- split note duration into tokens (32nd resolution) ---
       const toks = secondsToTokens(n.durSec, wnPerSec, "32");
-      const { key, accidental } = midiToVexKey(n.midi, useSharps);
+      const { key, accidental } = midiToVexKey(n.midi, useSharps, keyMap || undefined);
 
       toks.forEach((tok, idx) => {
         const sn = new StaveNote({
           keys: [key],
-          duration: tok.dur as any,     // base only
+          duration: tok.dur as any,
           clef,
           autoStem: false,
-          stemDirection: 1, // force stems/flags up
+          stemDirection: 1,
         });
         if (accidental) sn.addModifier(new Accidental(accidental), 0);
         if (tok.dots) Dot.buildAndAttach([sn as any], { all: true });
@@ -290,7 +274,6 @@ export function buildMelodyTickables(params: {
     }
   }
 
-  // Pad with visible rests to complete the bar
   padToNextBar();
 
   return { ticks: ticksOut, starts: startsSec, tuplets };
@@ -301,7 +284,7 @@ export function buildRhythmTickables(params: {
   leadInSec: number;
   wnPerSec: number;
   secPerWholeNote: number;
-  secPerBar: number;          // used to pad to bar boundaries
+  secPerBar: number;
 }) {
   const { rhythm, leadInSec, wnPerSec, secPerWholeNote, secPerBar } = params;
   const secPerQuarter = secPerWholeNote / 4;
@@ -311,14 +294,13 @@ export function buildRhythmTickables(params: {
   const tuplets: Tuplet[] = [];
   let tTicks = 0;
 
-  // Helper: pad to next bar with visible rests on the rhythm staff (bass)
   const padToNextBar = () => {
     const curSec = ticksToSeconds(tTicks, secPerQuarter);
     const nextBarEnd = Math.ceil((curSec + 1e-9) / Math.max(1e-9, secPerBar)) * secPerBar;
     let need = nextBarEnd - curSec;
     if (need <= 1e-6) return;
     for (const tok of secondsToTokens(need, wnPerSec, "32")) {
-      const r = makeRest(tok.dur as any, "bass");     // base only
+      const r = makeRest(tok.dur as any, "bass");
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -327,15 +309,13 @@ export function buildRhythmTickables(params: {
   };
 
   if (!Array.isArray(rhythm) || rhythm.length === 0) {
-    // No rhythm: still ensure a full bar of rests so the measure isn't empty
     padToNextBar();
     return { ticks: ticksOut, starts: startsSec, tuplets };
   }
 
-  // --- rhythm lead-in as *visible rests* (32nd resolution) ---
   if (leadInSec > 1e-6) {
     for (const tok of secondsToTokens(leadInSec, wnPerSec, "32")) {
-      const r = makeRest(tok.dur as any, "bass");     // base only
+      const r = makeRest(tok.dur as any, "bass");
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -363,17 +343,16 @@ export function buildRhythmTickables(params: {
     const { base, dots } = quarterToBaseAndDots(q);
 
     if (ev.type === "rest") {
-      const rn = makeRest(base as any, "bass");       // base only
+      const rn = makeRest(base as any, "bass");
       if (dots) Dot.buildAndAttach([rn as any], { all: true });
       ticksOut.push(rn);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
       tTicks += durTicks;
-      flush(); // rests break triplet groups
+      flush();
     } else {
-      // neutral percussion-like head position on bass staff
       const sn = new StaveNote({
         keys: ["d/3"],
-        duration: base as any,       // base only
+        duration: base as any,
         clef: "bass",
         autoStem: true,
       });
@@ -394,7 +373,6 @@ export function buildRhythmTickables(params: {
   }
   flush();
 
-  // Pad the last bar with visible rests so it ends exactly on the barline
   padToNextBar();
 
   return { ticks: ticksOut, starts: startsSec, tuplets };

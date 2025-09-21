@@ -26,6 +26,7 @@ import {
 } from "@/utils/phrase/generator";
 
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
+import { keyNameFromTonicPc } from "./layout/sheet/vexscore/builders"; // NEW
 
 type Props = {
   title?: string;
@@ -239,6 +240,13 @@ export default function TrainingGame({
     return null;
   }, [customWords, phrase, lyricStrategy, scale]);
 
+  /* ---------------- Key signature (for sheet view) --------------- */
+  const sheetKeySig: string | null = useMemo(() => {
+    if (!scale) return null;
+    // Prefer sharps to match existing naming; modes/minor use relative-major signature.
+    return keyNameFromTonicPc(scale.tonicPc, scale.name as any, true);
+  }, [scale]);
+
   /* ---------------- Recorder + loop orchestration ---------------- */
   const {
     isRecording, start: startRec, stop: stopRec,
@@ -346,6 +354,7 @@ export default function TrainingGame({
       bpm={bpm}
       den={ts.den}
       tsNum={ts.num}
+      keySig={sheetKeySig}
       view={view}
     >
       {haveRange && phrase && (

@@ -33,10 +33,11 @@ export type VexScoreProps = {
   leadInSec?: number;
   useSharps?: boolean;
   clef?: "treble" | "bass";
-  /** Shown as the blue rhythm staff (optional, independent of melody). */
   rhythm?: RhythmEvent[];
-  /** Authoritative rhythm for the melody durations (optional, independent of the blue staff). */
   melodyRhythm?: RhythmEvent[];
   onLayout?: (m: LayoutPayload) => void;
   className?: string;
+
+  /** Key signature for the staves (e.g. "G", "Bb", "F#"). */
+  keySig?: string | null;
 };

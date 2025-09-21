@@ -50,7 +50,10 @@ type LayoutProps = {
   melodyRhythm?: RhythmEvent[];
   bpm?: number;
   den?: number;
-  tsNum?: number; // NEW
+  tsNum?: number;
+
+  /** NEW: VexFlow key signature name (e.g., "Bb", "F#", "C"). */
+  keySig?: string | null;
 
   /** session view */
   view?: "piano" | "sheet";
@@ -82,7 +85,9 @@ export default function GameLayout({
   melodyRhythm,
   bpm = 80,
   den = 4,
-  tsNum = 4, // NEW
+  tsNum = 4,
+
+  keySig = null,      // NEW
 
   view = "piano",
 
@@ -150,7 +155,8 @@ export default function GameLayout({
               melodyRhythm={melodyRhythm}
               bpm={bpm}
               den={den}
-              tsNum={tsNum}   // NEW
+              tsNum={tsNum}
+              keySig={keySig}   // NEW
               /* view mode */
               view={view}
             />
