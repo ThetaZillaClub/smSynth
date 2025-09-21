@@ -14,7 +14,6 @@ import type { NoteValue } from "@/utils/time/tempo";
 import {
   midiToVexKey,
   secondsToTokens,
-  tokToDuration,
   type Tok,
 } from "./builders";
 import { noteValueInQuarterUnits } from "@/utils/time/tempo";
@@ -55,9 +54,26 @@ function noteValueToTicks(v: NoteValue): number {
 }
 
 /** staff rest for a clef (visible) */
-function makeRest(duration: string, clef: "treble" | "bass") {
+function makeRest(durationBase: "w" | "h" | "q" | "8" | "16" | "32", clef: "treble" | "bass") {
   const key = clef === "treble" ? "b/4" : "d/3";
-  return new StaveNote({ keys: [key], duration: (duration + "r") as any, clef, autoStem: true });
+  return new StaveNote({ keys: [key], duration: (durationBase + "r") as any, clef, autoStem: true });
+}
+
+/* Map quarter-units → base duration + dot count. (Triplets return base with 0 dots.) */
+function quarterToBaseAndDots(q: number): { base: "w"|"h"|"q"|"8"|"16"|"32"; dots: 0|1|2 } {
+  if (q === 4)   return { base: "w",  dots: 0 };
+  if (q === 3)   return { base: "h",  dots: 1 };
+  if (q === 2)   return { base: "h",  dots: 0 };
+  if (q === 1.5) return { base: "q",  dots: 1 };
+  if (q === 1)   return { base: "q",  dots: 0 };
+  if (q === 0.75)return { base: "8",  dots: 1 };
+  if (q === 2/3) return { base: "q",  dots: 0 };   // triplet quarter
+  if (q === 0.5) return { base: "8",  dots: 0 };
+  if (q === 3/8) return { base: "16", dots: 1 };
+  if (q === 1/3) return { base: "8",  dots: 0 };   // triplet eighth
+  if (q === 0.25)return { base: "16", dots: 0 };
+  if (q === 1/6) return { base: "16", dots: 0 };   // triplet sixteenth
+  return { base: "32", dots: 0 };
 }
 
 /**
@@ -94,7 +110,7 @@ export function buildMelodyTickables(params: {
     leadInSec,
     wnPerSec,
     secPerWholeNote,
-    secPerBeat,
+    secPerBeat,   // kept for clarity in comments
     secPerBar,
     lyrics,
     rhythm,
@@ -114,7 +130,7 @@ export function buildMelodyTickables(params: {
     let need = nextBarEnd - curSec;
     if (need <= 1e-6) return;
     for (const tok of secondsToTokens(need, wnPerSec, "32")) {
-      const r = makeRest(tokToDuration(tok), clef);
+      const r = makeRest(tok.dur as any, clef);       // base only
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -125,7 +141,7 @@ export function buildMelodyTickables(params: {
   // --- lead-in as rests (tokenized, then timed in PPQ) ---
   if (leadInSec > 1e-6) {
     for (const tok of secondsToTokens(leadInSec, wnPerSec, "32")) {
-      const r = makeRest(tokToDuration(tok), clef);
+      const r = makeRest(tok.dur as any, clef);       // base only
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -139,38 +155,29 @@ export function buildMelodyTickables(params: {
     let ni = 0; // index into melody notes (advance on NOTE events)
     let lyricIndex = 0;
 
-    // Triplet capture per 3 notes of the same base kind (using NoteValue classification)
+    // Triplet capture per 3 notes of the same base kind
     let tripletBuf: { base: Tok["dur"]; note: StaveNote }[] = [];
     const flush = () => {
       for (let i = 0; i + 2 < tripletBuf.length; i += 3) {
         const a = tripletBuf[i], b = tripletBuf[i + 1], c = tripletBuf[i + 2];
-        if (a.base === b.base && b.base === c.base) tuplets.push(new Tuplet([a.note, b.note, c.note] as any));
+        if (a.base === b.base && b.base === c.base) {
+          tuplets.push(new Tuplet([a.note, b.note, c.note] as any, {
+            bracketed: true,
+            ratioed: false,
+          }));
+        }
       }
       tripletBuf = [];
     };
 
     for (const ev of rhythm) {
       const durTicks = noteValueToTicks(ev.value);
+      const q = noteValueInQuarterUnits(ev.value);
+      const { base, dots } = quarterToBaseAndDots(q);
 
       if (ev.type === "rest") {
-        // basic display mapping (timing controlled by durTicks)
-        const q = noteValueInQuarterUnits(ev.value);
-        const durStr =
-          q === 4 ? "w" :
-          q === 3 ? "hd" :
-          q === 2 ? "h" :
-          q === 1.5 ? "qd" :
-          q === 1 ? "q" :
-          q === 0.75 ? "8d" :
-          q === 2/3 ? "q" :
-          q === 0.5 ? "8" :
-          q === 3/8 ? "16d" :
-          q === 1/3 ? "8" :
-          q === 0.25 ? "16" :
-          q === 1/6 ? "16" :
-          q === 0.125 ? "32" : "8";
-
-        const rn = makeRest(durStr as any, clef);
+        const rn = makeRest(base as any, clef);       // base only
+        if (dots) Dot.buildAndAttach([rn as any], { all: true });
         ticksOut.push(rn);
         startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
         tTicks += durTicks;
@@ -183,31 +190,16 @@ export function buildMelodyTickables(params: {
       const midi = src?.midi ?? 60;
       const { key, accidental } = midiToVexKey(midi, useSharps);
 
-      // Visual duration string (timing driven by ticks)
-      const q = noteValueInQuarterUnits(ev.value);
-      const durStr =
-        q === 4 ? "w" :
-        q === 3 ? "hd" :
-        q === 2 ? "h" :
-        q === 1.5 ? "qd" :
-        q === 1 ? "q" :
-        q === 0.75 ? "8d" :
-        q === 2/3 ? "q" :
-        q === 0.5 ? "8" :
-        q === 3/8 ? "16d" :
-        q === 1/3 ? "8" :
-        q === 0.25 ? "16" :
-        q === 1/6 ? "16" :
-        q === 0.125 ? "32" : "8";
-
+      // Build note with base duration, then attach dots explicitly (if any).
       const sn = new StaveNote({
         keys: [key],
-        duration: durStr as any,
+        duration: base as any,
         clef,
         autoStem: false,
         stemDirection: 1,   // force stems/flags up
       });
       if (accidental) sn.addModifier(new Accidental(accidental), 0);
+      if (dots) Dot.buildAndAttach([sn as any], { all: true });
 
       if (lyrics && lyrics[lyricIndex]) {
         const ann = new Annotation(lyrics[lyricIndex])
@@ -258,7 +250,7 @@ export function buildMelodyTickables(params: {
       const gapSec = n.startSec - curSec;
       if (gapSec > tol) {
         for (const tok of secondsToTokens(gapSec, wnPerSec, "32")) {
-          const rn = makeRest(tokToDuration(tok), clef);
+          const rn = makeRest(tok.dur as any, clef);   // base only
           if (tok.dots) Dot.buildAndAttach([rn as any], { all: true });
           ticksOut.push(rn);
           startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -273,7 +265,7 @@ export function buildMelodyTickables(params: {
       toks.forEach((tok, idx) => {
         const sn = new StaveNote({
           keys: [key],
-          duration: tokToDuration(tok),
+          duration: tok.dur as any,     // base only
           clef,
           autoStem: false,
           stemDirection: 1, // force stems/flags up
@@ -326,7 +318,7 @@ export function buildRhythmTickables(params: {
     let need = nextBarEnd - curSec;
     if (need <= 1e-6) return;
     for (const tok of secondsToTokens(need, wnPerSec, "32")) {
-      const r = makeRest(tokToDuration(tok), "bass");
+      const r = makeRest(tok.dur as any, "bass");     // base only
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -343,7 +335,7 @@ export function buildRhythmTickables(params: {
   // --- rhythm lead-in as *visible rests* (32nd resolution) ---
   if (leadInSec > 1e-6) {
     for (const tok of secondsToTokens(leadInSec, wnPerSec, "32")) {
-      const r = makeRest(tokToDuration(tok), "bass");
+      const r = makeRest(tok.dur as any, "bass");     // base only
       if (tok.dots) Dot.buildAndAttach([r as any], { all: true });
       ticksOut.push(r);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
@@ -355,7 +347,12 @@ export function buildRhythmTickables(params: {
   const flush = () => {
     for (let i = 0; i + 2 < tripletBuf.length; i += 3) {
       const a = tripletBuf[i], b = tripletBuf[i + 1], c = tripletBuf[i + 2];
-      if (a.base === b.base && b.base === c.base) tuplets.push(new Tuplet([a.note, b.note, c.note] as any));
+      if (a.base === b.base && b.base === c.base) {
+        tuplets.push(new Tuplet([a.note, b.note, c.note] as any, {
+          bracketed: true,
+          ratioed: false,
+        }));
+      }
     }
     tripletBuf = [];
   };
@@ -363,24 +360,11 @@ export function buildRhythmTickables(params: {
   for (const ev of rhythm as RhythmEvent[]) {
     const durTicks = noteValueToTicks(ev.value);
     const q = noteValueInQuarterUnits(ev.value);
-    // map exact musical value → VexFlow duration string
-    const durStr =
-      q === 4 ? "w" :
-      q === 3 ? "hd" :
-      q === 2 ? "h" :
-      q === 1.5 ? "qd" :
-      q === 1 ? "q" :
-      q === 0.75 ? "8d" :
-      q === 2/3 ? "q" :
-      q === 0.5 ? "8" :
-      q === 3/8 ? "16d" :
-      q === 1/3 ? "8" :
-      q === 0.25 ? "16" :
-      q === 1/6 ? "16" :
-      q === 0.125 ? "32" : "8";
+    const { base, dots } = quarterToBaseAndDots(q);
 
     if (ev.type === "rest") {
-      const rn = makeRest(durStr as any, "bass"); // show real rest length → proper flags
+      const rn = makeRest(base as any, "bass");       // base only
+      if (dots) Dot.buildAndAttach([rn as any], { all: true });
       ticksOut.push(rn);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
       tTicks += durTicks;
@@ -389,10 +373,11 @@ export function buildRhythmTickables(params: {
       // neutral percussion-like head position on bass staff
       const sn = new StaveNote({
         keys: ["d/3"],
-        duration: durStr as any,
+        duration: base as any,       // base only
         clef: "bass",
         autoStem: true,
       });
+      if (dots) Dot.buildAndAttach([sn as any], { all: true });
       ticksOut.push(sn);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
       tTicks += durTicks;

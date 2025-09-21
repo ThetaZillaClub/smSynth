@@ -17,7 +17,7 @@ type DrawParams = {
   mel: { ticks: any[]; starts: number[]; tuplets?: any[] };
   rhy: { ticks: any[]; starts: number[]; tuplets: any[] };
   secPerBar: number;
-  /** NEW: bars per row for this score (consistent across systems). */
+  /** Bars per row for this score (consistent across systems). */
   barsPerRow: 4 | 3 | 2;
 };
 
@@ -203,7 +203,6 @@ export function drawSystem({
   };
 
   // === Density-aware bar padding shrink ===
-  // we reduce the initial downbeat padding as measures get denser.
   const densityOfBar = (b: number) => {
     const seg = segments[b];
     let c = 0;
@@ -280,19 +279,20 @@ export function drawSystem({
   drawTickables(melSel.t, melStave);
   melBeams.forEach((b) => b.setContext(ctx).draw());
 
-  const tupletHasAny = (tp: any, pool: any[]) => {
+  // Only draw tuplets whose notes are fully inside the current selection (prevents NoTickContext).
+  const tupletFullyInside = (tp: any, pool: any[]) => {
     const notes = typeof tp.getNotes === "function" ? tp.getNotes() : [];
-    return notes.some((n: any) => pool.includes(n));
+    return notes.length > 0 && notes.every((n: any) => pool.includes(n));
   };
   (mel.tuplets || [])
-    .filter((t: any) => tupletHasAny(t, melSel.t))
+    .filter((t: any) => tupletFullyInside(t, melSel.t))
     .forEach((t: any) => t.setContext(ctx).draw());
 
   if (haveRhythm && rhyStave) {
     drawTickables(rhySel.t, rhyStave);
     rhyBeams.forEach((b) => b.setContext(ctx).draw());
     (rhy.tuplets || [])
-      .filter((t: any) => tupletHasAny(t, rhySel.t))
+      .filter((t: any) => tupletFullyInside(t, rhySel.t))
       .forEach((t: any) => t.setContext(ctx).draw());
   }
 
