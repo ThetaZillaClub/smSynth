@@ -1,4 +1,3 @@
-// components/training/layout/piano-roll/GameStage.tsx
 "use client";
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import PianoRollCanvas, { type Phrase } from "@/components/training/layout/piano-roll/PianoRollCanvas";
@@ -100,6 +99,8 @@ export default function GameStage({
   const clef = pickClef(phrase);
   const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
 
+  const sheetReady = Boolean(systems && systems.length);
+
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
       <div className="w-full">
@@ -107,8 +108,8 @@ export default function GameStage({
           <div className="w-full" style={{ height: mainH }}>
             <div
               ref={sheetHostRef}
-              className="relative w-full"
-              style={{ height: sheetStaffHeight }}
+              className={`relative w-full ${sheetReady ? "opacity-100" : "opacity-0"}`}
+              style={{ height: sheetStaffHeight, transition: "opacity 150ms ease-out" }}
             >
               <VexScore
                 phrase={phrase}
@@ -122,7 +123,8 @@ export default function GameStage({
                 rhythm={rhythm}
                 melodyRhythm={melodyRhythm}
               />
-              {sheetW && sheetW > 4 ? (
+              {/* Render overlay only after systems are ready to avoid initial misalignment */}
+              {sheetW && sheetW > 4 && sheetReady ? (
                 <SheetOverlay
                   width={sheetW}
                   height={sheetStaffHeight}
@@ -134,8 +136,7 @@ export default function GameStage({
                   confidence={confidence}
                   confThreshold={confThreshold}
                   a4Hz={440}
-                  /** precise multi-row layout */
-                  systems={systems ?? undefined}
+                  systems={systems!}
                 />
               ) : null}
             </div>

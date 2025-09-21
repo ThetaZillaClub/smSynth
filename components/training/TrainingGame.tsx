@@ -60,6 +60,7 @@ export default function TrainingGame({
 
   /* ----------------------- Transport math ----------------------- */
   const secPerBeat = secondsPerBeat(bpm, ts.den);
+  const secPerBar = ts.num * secPerBeat; // NEW: bar length in seconds
   const leadBeats = barsToBeats(leadBars, ts.num);
   const leadInSec = beatsToSeconds(leadBeats, bpm, ts.den);
   const restBeats = barsToBeats(restBars, ts.num);
@@ -257,8 +258,8 @@ export default function TrainingGame({
       ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
       : phraseSec;
 
-  const padSec = Math.max(0.08, secPerBeat * 0.15);
-  const recordWindowSec = lastEndSec + padSec;
+  // NEW: always extend to the end of the last full measure (bar-aligned)
+  const recordWindowSec = Math.ceil(lastEndSec / Math.max(1e-9, secPerBar)) * secPerBar;
 
   const loop = usePracticeLoop({
     step, // always "play"
