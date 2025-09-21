@@ -62,6 +62,7 @@ function makeRest(durationBase: "w" | "h" | "q" | "8" | "16" | "32", clef: "treb
 /* Map quarter-units → base duration + dot count. (Triplets return base with 0 dots.) */
 function quarterToBaseAndDots(q: number): { base: "w"|"h"|"q"|"8"|"16"|"32"; dots: 0|1|2 } {
   if (q === 4)   return { base: "w",  dots: 0 };
+  if (q === 4/3) return { base: "h",  dots: 0 }; // triplet half (won't be generated now, but supported)
   if (q === 3)   return { base: "h",  dots: 1 };
   if (q === 2)   return { base: "h",  dots: 0 };
   if (q === 1.5) return { base: "q",  dots: 1 };
@@ -78,6 +79,7 @@ function quarterToBaseAndDots(q: number): { base: "w"|"h"|"q"|"8"|"16"|"32"; dot
 
 /**
  * Build MELODY tickables with optional key-signature awareness.
+ * (Now keeps rests inside tuplets so triplets don’t overflow.)
  */
 export function buildMelodyTickables(params: {
   phrase: Phrase;
@@ -90,7 +92,7 @@ export function buildMelodyTickables(params: {
   secPerBar: number;           // used to pad to bar boundaries
   lyrics?: string[];
   rhythm?: RhythmEvent[];
-  /** NEW: letter→accidental map for the current key signature. */
+  /** letter→accidental map for the current key signature. */
   keyAccidentals?: Record<"A"|"B"|"C"|"D"|"E"|"F"|"G", ""|"#"|"b"> | null;
 }) {
   const {
@@ -165,49 +167,50 @@ export function buildMelodyTickables(params: {
       const q = noteValueInQuarterUnits(ev.value);
       const { base, dots } = quarterToBaseAndDots(q);
 
+      // Build vex note/rest
+      let vex: StaveNote;
       if (ev.type === "rest") {
         const rn = makeRest(base as any, clef);
         if (dots) Dot.buildAndAttach([rn as any], { all: true });
-        ticksOut.push(rn);
-        startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
-        tTicks += durTicks;
-        flush();
-        continue;
+        vex = rn;
+      } else {
+        const src = melNotes[ni] ?? melNotes[melNotes.length - 1] ?? null;
+        const midi = src?.midi ?? 60;
+        const { key, accidental } = midiToVexKey(midi, useSharps, keyMap || undefined);
+
+        const sn = new StaveNote({
+          keys: [key],
+          duration: base as any,
+          clef,
+          autoStem: false,
+          stemDirection: 1,   // force stems/flags up
+        });
+        if (accidental) sn.addModifier(new Accidental(accidental), 0);
+        if (dots) Dot.buildAndAttach([sn as any], { all: true });
+
+        if (lyrics && lyrics[lyricIndex]) {
+          const ann = new Annotation(lyrics[lyricIndex])
+            .setFont("ui-sans-serif, system-ui, -apple-system, Segoe UI", 12, "")
+            .setVerticalJustification(AVJ.BOTTOM)
+            .setJustification(AHJ.CENTER);
+          sn.addModifier(ann, 0);
+        }
+
+        vex = sn;
+        ni++;
+        lyricIndex++;
       }
 
-      const src = melNotes[ni] ?? melNotes[melNotes.length - 1] ?? null;
-      const midi = src?.midi ?? 60;
-      const { key, accidental } = midiToVexKey(midi, useSharps, keyMap || undefined);
-
-      const sn = new StaveNote({
-        keys: [key],
-        duration: base as any,
-        clef,
-        autoStem: false,
-        stemDirection: 1,   // force stems/flags up
-      });
-      if (accidental) sn.addModifier(new Accidental(accidental), 0);
-      if (dots) Dot.buildAndAttach([sn as any], { all: true });
-
-      if (lyrics && lyrics[lyricIndex]) {
-        const ann = new Annotation(lyrics[lyricIndex])
-          .setFont("ui-sans-serif, system-ui, -apple-system, Segoe UI", 12, "")
-          .setVerticalJustification(AVJ.BOTTOM)
-          .setJustification(AHJ.CENTER);
-        sn.addModifier(ann, 0);
-      }
-
-      ticksOut.push(sn);
+      // Push timing
+      ticksOut.push(vex);
       startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
       tTicks += durTicks;
 
-      ni++;
-      lyricIndex++;
-
-      const isTriplet = q === 1/3 || q === 2/3 || q === 1/6;
+      // Group triplets (NOTES OR RESTS) so 2/3 duration applies correctly
+      const isTriplet = q === 4/3 || q === 2/3 || q === 1/3 || q === 1/6;
       if (isTriplet) {
-        const baseDur = q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
-        tripletBuf.push({ base: baseDur as Tok["dur"], note: sn });
+        const baseDur = q === 4/3 ? "h" : q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
+        tripletBuf.push({ base: baseDur as Tok["dur"], note: vex });
         if (tripletBuf.length === 3) flush();
       } else {
         flush();
@@ -342,13 +345,12 @@ export function buildRhythmTickables(params: {
     const q = noteValueInQuarterUnits(ev.value);
     const { base, dots } = quarterToBaseAndDots(q);
 
+    // Build vex note/rest
+    let vex: StaveNote;
     if (ev.type === "rest") {
       const rn = makeRest(base as any, "bass");
       if (dots) Dot.buildAndAttach([rn as any], { all: true });
-      ticksOut.push(rn);
-      startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
-      tTicks += durTicks;
-      flush();
+      vex = rn;
     } else {
       const sn = new StaveNote({
         keys: ["d/3"],
@@ -357,18 +359,22 @@ export function buildRhythmTickables(params: {
         autoStem: true,
       });
       if (dots) Dot.buildAndAttach([sn as any], { all: true });
-      ticksOut.push(sn);
-      startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
-      tTicks += durTicks;
+      vex = sn;
+    }
 
-      const isTriplet = q === 2/3 || q === 1/3 || q === 1/6;
-      if (isTriplet) {
-        const baseDur = q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
-        tripletBuf.push({ base: baseDur as Tok["dur"], note: sn });
-        if (tripletBuf.length === 3) flush();
-      } else {
-        flush();
-      }
+    // Push timing
+    ticksOut.push(vex);
+    startsSec.push(ticksToSeconds(tTicks, secPerQuarter));
+    tTicks += durTicks;
+
+    // Group triplets (NOTES OR RESTS)
+    const isTriplet = q === 2/3 || q === 1/3 || q === 1/6;
+    if (isTriplet) {
+      const baseDur = q === 2/3 ? "q" : q === 1/3 ? "8" : "16";
+      tripletBuf.push({ base: baseDur as Tok["dur"], note: vex });
+      if (tripletBuf.length === 3) flush();
+    } else {
+      flush();
     }
   }
   flush();

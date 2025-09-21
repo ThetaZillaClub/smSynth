@@ -65,7 +65,13 @@ function NoteLengthPicker({
   onToggle: (v: NoteValue, next: boolean) => void;
 }) {
   const allowed = NOTE_VALUE_OPTIONS.filter((o) =>
-    ["whole", "half", "quarter", "eighth", "sixteenth", "triplet-eighth", "dotted-eighth"].includes(o.value)
+    [
+      "whole",
+      "dotted-half", "half",
+      "dotted-quarter", "triplet-quarter", "quarter",
+      "dotted-eighth", "triplet-eighth", "eighth",
+      "sixteenth"
+    ].includes(o.value)
   );
   return (
     <div className="flex flex-wrap gap-2">
