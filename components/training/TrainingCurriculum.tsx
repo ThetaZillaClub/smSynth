@@ -13,17 +13,21 @@ import useStudentRange from "@/hooks/students/useStudentRange";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 
 import TransportCard from "./curriculum-layout/TransportCard/TransportCard";
-import ScaleRhythmCard from "./curriculum-layout/ScaleRhythm/ScaleRhythmCard";
 import ImportMidiCard from "./curriculum-layout/ImportMidi/ImportMidiCard";
 import AdvancedOverridesCard from "./curriculum-layout/AdvancedOverrides/AdvancedOverridesCard";
 import CustomLyricsCard from "./curriculum-layout/CustomLyrics/CustomLyricsCard";
-import Field from "./curriculum-layout/Field";
 import ViewSelectCard from "./curriculum-layout/ViewSelect/ViewSelectCard";
+
+/* NEW split cards */
+import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard";
+import ScaleCard from "./curriculum-layout/Scale/ScaleCard";
+import RhythmCard from "./curriculum-layout/Rhythm/RhythmCard";
 
 function safeParsePhrase(s: string): Phrase | null {
   try {
     const v = JSON.parse(s);
-    if (v && Array.isArray(v.notes) && typeof v.durationSec === "number") return v as Phrase;
+    if (v && Array.isArray(v.notes) && typeof v.durationSec === "number")
+      return v as Phrase;
   } catch {}
   return null;
 }
@@ -55,7 +59,7 @@ export default function TrainingCurriculum({
 
   // prefer-flat labels for ambiguous PCs
   const PC_LABELS_FLAT = useMemo(
-    () => ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"],
+    () => ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],
     []
   );
 
@@ -81,7 +85,8 @@ export default function TrainingCurriculum({
     const loM = Math.round(hzToMidi(lowHz as number));
     const hiM = Math.round(hzToMidi(highHz as number));
     const mid = Math.round((loM + (hiM - 12)) / 2);
-    let bestPc = 0, bestDist = Infinity;
+    let bestPc = 0,
+      bestDist = Infinity;
 
     allowedTonicPcs.forEach((pc) => {
       let bestForPc = Infinity;
@@ -91,10 +96,16 @@ export default function TrainingCurriculum({
           if (d < bestForPc) bestForPc = d;
         }
       }
-      if (bestForPc < bestDist) { bestDist = bestForPc; bestPc = pc; }
+      if (bestForPc < bestDist) {
+        bestDist = bestForPc;
+        bestPc = pc;
+      }
     });
 
-    setCfg((c) => ({ ...c, scale: { ...(c.scale ?? { name: "major" }), tonicPc: bestPc } as any }));
+    setCfg((c) => ({
+      ...c,
+      scale: { ...(c.scale ?? { name: "major" }), tonicPc: bestPc } as any,
+    }));
   }, [haveRange, allowedTonicPcs, lowHz, highHz, cfg.scale]);
 
   // range hint text
@@ -122,11 +133,12 @@ export default function TrainingCurriculum({
   }, []);
 
   const launch = useCallback(() => {
-    const p = phraseJson.trim() ? safeParsePhrase(phraseJson.trim()) : cfg.customPhrase ?? null;
-    const w =
-      customLyrics.trim()
-        ? customLyrics.split(",").map((s) => s.trim()).filter(Boolean)
-        : cfg.customWords ?? null;
+    const p = phraseJson.trim()
+      ? safeParsePhrase(phraseJson.trim())
+      : cfg.customPhrase ?? null;
+    const w = customLyrics.trim()
+      ? customLyrics.split(",").map((s) => s.trim()).filter(Boolean)
+      : (cfg.customWords ?? null);
 
     onStart({ ...cfg, customPhrase: p, customWords: w });
   }, [cfg, onStart, phraseJson, customLyrics]);
@@ -148,9 +160,12 @@ export default function TrainingCurriculum({
       {/* Header */}
       <div className="w-full flex justify-center pt-4 px-6 pb-2">
         <div className="w-full max-w-7xl">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Training — Curriculum</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+            Training — Curriculum
+          </h1>
           <p className="text-sm text-[#2d2d2d] mt-1">
-            Configure this session. These settings apply only to the game you launch now.
+            Configure this session. These settings apply only to the game you
+            launch now.
           </p>
         </div>
       </div>
@@ -169,14 +184,19 @@ export default function TrainingCurriculum({
           <ViewSelectCard value={cfg.view} onChange={pushChange} />
         </div>
 
-        {/* Scale / Rhythm + Import MIDI */}
+        {/* Sequence / Scale / Rhythm + Import MIDI */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <ScaleRhythmCard
-            cfg={cfg}
-            onChange={pushChange}
-            allowedTonicPcs={allowedTonicPcs}
-            rangeHint={rangeHint}
-          />
+          <div className="grid grid-cols-1 gap-3">
+            <SequenceModeCard cfg={cfg} onChange={pushChange} />
+            <ScaleCard
+              cfg={cfg}
+              onChange={pushChange}
+              allowedTonicPcs={allowedTonicPcs}
+              rangeHint={rangeHint}
+            />
+            <RhythmCard cfg={cfg} onChange={pushChange} />
+          </div>
+
           <ImportMidiCard
             hasPhrase={!!cfg.customPhrase}
             onClear={() => {
@@ -194,10 +214,7 @@ export default function TrainingCurriculum({
             phraseJson={phraseJson}
             setPhraseJson={setPhraseJson}
           />
-          <CustomLyricsCard
-            value={customLyrics}
-            onChange={setCustomLyrics}
-          />
+          <CustomLyricsCard value={customLyrics} onChange={setCustomLyrics} />
         </div>
 
         <div className="w-full max-w-7xl mx-auto">
