@@ -1,4 +1,4 @@
-// components/game-layout/stats/GameStats.tsx
+// components/training/layout/stats/GameStats.tsx
 "use client";
 import React from "react";
 import usePitchReadout from "@/hooks/pitch/usePitchReadout";
@@ -31,6 +31,12 @@ type Props = {
   /** Show “—” when confidence is below this threshold (defaults to 0.5) */
   confThreshold?: number;
 
+  /** Session context so note labels match the sheet (top staff) */
+  keySig?: string | null;
+  clef?: "treble" | "bass" | null;
+  lowHz?: number | null;
+  highHz?: number | null;
+
   /** Optional layout/style overrides */
   className?: string;
 };
@@ -41,6 +47,10 @@ export default function GameStats({
   error,
   confidence,
   confThreshold = 0.5,
+  keySig = null,
+  clef = null,
+  lowHz = null,
+  highHz = null,
   className,
 }: Props) {
   const { pitchText, noteText } = usePitchReadout({
@@ -48,6 +58,10 @@ export default function GameStats({
     isReady,
     error,
     a4Hz: 440,
+    keySig,
+    clef,
+    lowHz,
+    highHz,
   });
 
   const confText = Number.isFinite(confidence) && confidence >= confThreshold ? confidence.toFixed(2) : "—";

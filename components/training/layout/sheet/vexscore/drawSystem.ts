@@ -6,7 +6,7 @@ import {
   createVoices, placeTicks, computeBarShiftX, applyBarShift,
   buildBeamsFor, drawTickables, drawTuplets, drawManualRests, drawBarlines
 } from "./drawSystem/draw";
-import type { DrawParams, DrawReturn, TickPack } from "./drawSystem/types";
+import type { DrawParams, DrawReturn } from "./drawSystem/types";
 import type { SystemLayout } from "./types";
 
 export function drawSystem(params: DrawParams): DrawReturn {
@@ -22,6 +22,12 @@ export function drawSystem(params: DrawParams): DrawReturn {
   const { melStave, rhyStave } = createStaves({
     ctx, padding, currentY, staffWidth, tsNum, den, clef, haveRhythm, keySig, isLastSystem
   });
+
+  // --- NEW: capture exact staff bands from VexFlow staves ---
+  const melY0 = melStave.getYForLine(0); // top line
+  const melY1 = melStave.getYForLine(4); // bottom line
+  const rhyY0 = rhyStave ? rhyStave.getYForLine(0) : undefined;
+  const rhyY1 = rhyStave ? rhyStave.getYForLine(4) : undefined;
 
   // 2) geometry (band + per-bar segments + time helpers)
   const { noteStartX, noteEndX } = bandX(melStave);
@@ -87,7 +93,7 @@ export function drawSystem(params: DrawParams): DrawReturn {
     ctx, topStave: melStave, bottomStave, noteStartX, noteEndX, barsPerRow, isLastSystem
   });
 
-  // 10) layout return
+  // 10) layout return (now includes precise staff bands)
   const layout: SystemLayout = {
     startSec,
     endSec,
@@ -96,6 +102,8 @@ export function drawSystem(params: DrawParams): DrawReturn {
     y0: staffTopY,
     y1: staffBottomY,
     segments: segments.map(({ startSec, endSec, x0, x1 }) => ({ startSec, endSec, x0, x1 })),
+    melY0, melY1,
+    rhyY0, rhyY1,
   };
   const nextY = bottomStave.getBottomY();
 

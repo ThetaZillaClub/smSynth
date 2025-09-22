@@ -7,7 +7,6 @@ import GameStats from "./stats/GameStats";
 import GameLyrics from "./lyrics/GameLyrics";
 import useActiveLyricIndex from "./lyrics/useActiveLyricIndex";
 import { type Phrase } from "./piano-roll/PianoRollCanvas";
-// Use a relative import here to avoid alias resolution issues
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 
@@ -52,11 +51,16 @@ type LayoutProps = {
   den?: number;
   tsNum?: number;
 
-  /** NEW: VexFlow key signature name (e.g., "Bb", "F#", "C"). */
+  /** VexFlow key signature (e.g., "Bb", "F#", "C"). */
   keySig?: string | null;
 
   /** session view */
   view?: "piano" | "sheet";
+
+  /** Melody clef + range (for overlay & readout normalization) */
+  clef?: "treble" | "bass" | null;
+  lowHz?: number | null;
+  highHz?: number | null;
 
   children?: React.ReactNode;
 };
@@ -87,15 +91,18 @@ export default function GameLayout({
   den = 4,
   tsNum = 4,
 
-  keySig = null,      // NEW
+  keySig = null,
 
   view = "piano",
+
+  clef = null,
+  lowHz = null,
+  highHz = null,
 
   children,
 }: LayoutProps) {
   const showPlay = !!phrase;
 
-  // Co-located highlight state: resets outside of record phase
   const { activeIndex, setActiveIndex } = useActiveLyricIndex({ step, loopPhase });
 
   return (
@@ -131,6 +138,10 @@ export default function GameLayout({
                 error={error}
                 confidence={confidence}
                 confThreshold={confThreshold}
+                keySig={keySig}
+                clef={clef}
+                lowHz={lowHz}
+                highHz={highHz}
               />
             </div>
           </div>
@@ -156,9 +167,12 @@ export default function GameLayout({
               bpm={bpm}
               den={den}
               tsNum={tsNum}
-              keySig={keySig}   // NEW
+              keySig={keySig}
               /* view mode */
               view={view}
+              /* melody context */
+              lowHz={lowHz}
+              highHz={highHz}
             />
           </div>
 
@@ -184,6 +198,10 @@ export default function GameLayout({
                 error={error}
                 confidence={confidence}
                 confThreshold={confThreshold}
+                keySig={keySig}
+                clef={clef}
+                lowHz={lowHz}
+                highHz={highHz}
               />
             </div>
           </div>

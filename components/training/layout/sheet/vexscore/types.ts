@@ -16,6 +16,12 @@ export type SystemLayout = {
   y0: number; y1: number;
   /** Piecewise-linear mapping (per bar, no manual padding). */
   segments?: BarSegment[];
+
+  /** NEW: exact staff bands from VexFlow staves (pixels). */
+  melY0?: number; // melody staff TOP line Y
+  melY1?: number; // melody staff BOTTOM line Y
+  rhyY0?: number; // rhythm staff TOP line Y (if present)
+  rhyY1?: number; // rhythm staff BOTTOM line Y (if present)
 };
 
 export type LayoutPayload = {

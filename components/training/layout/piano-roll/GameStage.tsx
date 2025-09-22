@@ -34,6 +34,10 @@ type Props = {
   /** NEW: key signature name for the staves (e.g., "G", "Bb", "F#"). */
   keySig?: string | null;
   view?: "piano" | "sheet";
+
+  /** Optional singer range, used for octave normalization in the overlay */
+  lowHz?: number | null;
+  highHz?: number | null;
 };
 
 export default function GameStage({
@@ -46,15 +50,17 @@ export default function GameStage({
   confThreshold = 0.5,
   startAtMs = null,
   lyrics,
-  leadInSec,              // may be undefined
+  leadInSec, // may be undefined
   rhythm,
   melodyRhythm,
   bpm = 80,
   den = 4,
   tsNum = 4,
-  leadBars,               // may be undefined
-  keySig = null,          // NEW
+  leadBars, // may be undefined
+  keySig = null, // NEW
   view = "piano",
+  lowHz = null,
+  highHz = null,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [fillH, setFillH] = useState<number>(height ?? 360);
@@ -105,9 +111,10 @@ export default function GameStage({
     return <div ref={hostRef} className="w-full h-full min-h-[260px]" />;
   }
 
+  // Clef for the MELODY staff (can be treble or bass depending on register/singer)
   const clef = pickClef(phrase);
-  const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
 
+  const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
   const sheetReady = Boolean(systems && systems.length);
 
   // Prefer sharps in sharp/neutral keys, flats in flat keys (fewer-accidentals policy).
@@ -143,7 +150,7 @@ export default function GameStage({
                 rhythm={rhythm}
                 melodyRhythm={melodyRhythm}
                 keySig={keySig || null}
-                useSharps={useSharpsPref}   // ← choose sharps or flats from key signature
+                useSharps={useSharpsPref} // ← choose sharps or flats from key signature
               />
               {/* Render overlay only after systems are ready to avoid initial misalignment */}
               {sheetW && sheetW > 4 && sheetReady ? (
@@ -159,6 +166,10 @@ export default function GameStage({
                   confThreshold={confThreshold}
                   a4Hz={440}
                   systems={systems!}
+                  clef={clef}           // ✅ melody staff clef (treble or bass)
+                  lowHz={lowHz}         // ✅ singer range low
+                  highHz={highHz}       // ✅ singer range high
+                  useSharps={useSharpsPref} // ✅ pass enharmonic preference to overlay
                 />
               ) : null}
             </div>

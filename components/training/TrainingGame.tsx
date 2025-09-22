@@ -34,7 +34,8 @@ import {
 } from "@/utils/phrase/generator";
 
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
-import { keyNameFromTonicPc } from "./layout/sheet/vexscore/builders"; // NEW
+import { keyNameFromTonicPc } from "./layout/sheet/vexscore/builders";
+import { pickClef } from "./layout/sheet/vexscore/builders"; // NEW
 
 type Props = {
   title?: string;
@@ -119,8 +120,7 @@ export default function TrainingGame({
   const syncRhythmFabric: RhythmEvent[] | null = useMemo(() => {
     if (!rhythm) return null;
 
-    // NEW: allow turning the rhythm line off
-    const lineEnabled = (rhythm as any).lineEnabled !== false; // default ON
+    const lineEnabled = (rhythm as any).lineEnabled !== false;
     if (!lineEnabled) return null;
 
     const available =
@@ -133,7 +133,7 @@ export default function TrainingGame({
     if ((rhythm as any).mode === "sequence") {
       const base = sequenceNoteCountForScale((scale?.name ?? "major") as any);
       const want =
-        ( (rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc" )
+        ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
           ? base * 2 - 1
           : base;
 
@@ -181,7 +181,7 @@ export default function TrainingGame({
     if ((rhythm as any).mode === "sequence") {
       const base = sequenceNoteCountForScale(scale.name);
       const want =
-        ( (rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc" )
+        ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
           ? base * 2 - 1
           : base;
 
@@ -285,12 +285,17 @@ export default function TrainingGame({
     return null;
   }, [customWords, phrase, lyricStrategy, scale]);
 
-  /* ---------------- Key signature (for sheet view) --------------- */
+  /* ---------------- Key signature (for sheet + stats) --------------- */
   const sheetKeySig: string | null = useMemo(() => {
     if (!scale) return null;
-    // Prefer sharps to match existing naming; modes/minor use relative-major signature.
     return keyNameFromTonicPc(scale.tonicPc, scale.name as any, true);
   }, [scale]);
+
+  /* ---------------- Melody clef (for sheet + stats) ----------------- */
+  const melodyClef: "treble" | "bass" | null = useMemo(() => {
+    if (!phrase) return null;
+    try { return pickClef(phrase); } catch { return null; }
+  }, [phrase]);
 
   /* ---------------- Recorder + loop orchestration ---------------- */
   const {
@@ -405,6 +410,10 @@ export default function TrainingGame({
       tsNum={ts.num}
       keySig={sheetKeySig}
       view={view}
+      /* NEW: feed context so stats readout matches the sheet */
+      clef={melodyClef}
+      lowHz={lowHz ?? null}
+      highHz={highHz ?? null}
     >
       {haveRange && phrase && (
         <TrainingSessionPanel
