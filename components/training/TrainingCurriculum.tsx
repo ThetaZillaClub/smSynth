@@ -2,10 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  DEFAULT_SESSION_CONFIG,
-  type SessionConfig,
-} from "./layout/session/types";
+import { DEFAULT_SESSION_CONFIG, type SessionConfig } from "./session";
 import type { Phrase } from "@/utils/stage";
 import { parseMidiToPhraseAndLyrics } from "@/utils/midi/smf";
 import useStudentRow from "@/hooks/students/useStudentRow";

@@ -1,7 +1,7 @@
 // components/training/curriculum-layout/Scale/ScaleCard.tsx
 "use client";
 import React, { useMemo } from "react";
-import type { SessionConfig } from "../../layout/session/types";
+import type { SessionConfig } from "../../session/types";
 import type { ScaleName } from "@/utils/phrase/scales";
 import Field from "../Field";
 import { SCALE_OPTIONS } from "../Options";

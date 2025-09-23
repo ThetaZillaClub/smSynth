@@ -2,7 +2,7 @@
 "use client";
 
 import React from "react";
-import type { SessionConfig } from "@/components/training/layout/session/types";
+import type { SessionConfig } from "@/components/training/session/types";
 
 export default function ViewSelectCard({
   value,

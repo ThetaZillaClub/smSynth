@@ -2,7 +2,7 @@
 "use client";
 import React, { useMemo } from "react";
 import GameLayout from "./layout/GameLayout";
-import TrainingSessionPanel from "./layout/session/TrainingSessionPanel";
+import { SessionPanel } from "./session";
 
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
@@ -19,10 +19,7 @@ import {
   noteValueToBeats,
 } from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/stage";
-import {
-  type SessionConfig,
-  DEFAULT_SESSION_CONFIG,
-} from "./layout/session/types";
+import { type SessionConfig, DEFAULT_SESSION_CONFIG } from "./session";
 
 import {
   buildPhraseFromScaleWithRhythm,
@@ -35,7 +32,7 @@ import {
 
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
 import { keyNameFromTonicPc } from "./layout/stage/sheet/vexscore/builders";
-import { pickClef } from "./layout/stage/sheet/vexscore/builders"; // NEW
+import { pickClef } from "./layout/stage/sheet/vexscore/builders";
 
 type Props = {
   title?: string;
@@ -416,7 +413,7 @@ export default function TrainingGame({
       highHz={highHz ?? null}
     >
       {haveRange && phrase && (
-        <TrainingSessionPanel
+        <SessionPanel
           statusText={loop.statusText}
           isRecording={isRecording}
           startedAtMs={startedAtMs ?? null}

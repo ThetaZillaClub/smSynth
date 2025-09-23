@@ -1,7 +1,7 @@
 // components/training/curriculum-layout/Rhythm/RhythmCard.tsx
 "use client";
 import React, { useMemo } from "react";
-import type { SessionConfig } from "../../layout/session/types";
+import type { SessionConfig } from "../../session/types";
 import Field from "../Field";
 
 function FancyCheckbox({

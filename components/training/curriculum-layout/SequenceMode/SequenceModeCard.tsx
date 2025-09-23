@@ -1,7 +1,7 @@
 // components/training/curriculum-layout/SequenceMode/SequenceModeCard.tsx
 "use client";
 import React, { useMemo } from "react";
-import type { SessionConfig } from "../../layout/session/types";
+import type { SessionConfig } from "../../session/types";
 import type { NoteValue } from "@/utils/time/tempo";
 import Field from "../Field";
 import { NOTE_VALUE_OPTIONS } from "../Options";

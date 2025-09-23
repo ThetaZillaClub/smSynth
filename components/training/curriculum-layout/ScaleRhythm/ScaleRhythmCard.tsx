@@ -1,7 +1,7 @@
 // components/training/curriculum-layout/ScaleRhythm/ScaleRhythmCard.tsx
 "use client";
 import React, { useMemo, useEffect } from "react";
-import type { SessionConfig } from "../../layout/session/types";
+import type { SessionConfig } from "../../session/types";
 import type { ScaleName } from "@/utils/phrase/scales";
 import type { NoteValue } from "@/utils/time/tempo";
 import Field from "../Field";

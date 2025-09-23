@@ -10,7 +10,7 @@ import RangeSetup from "@/components/range/RangeSetup"; // NEW
 import {
   DEFAULT_SESSION_CONFIG,
   type SessionConfig,
-} from "@/components/training/layout/session/types";
+} from "@/components/training/session/types";
 
 export default function CurriculumRouter({ studentId = null }: { studentId?: string | null }) {
   const { view, current, startExercise, openMenu } = useAppMode();
