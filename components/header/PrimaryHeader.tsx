@@ -1,6 +1,6 @@
 // components/header/PrimaryHeader.tsx
 'use client'
-import { type FC, type MouseEvent, useState, useEffect } from 'react'
+import { type FC, type MouseEvent, useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import BeginJourneyButton from './BeginJourneyButton'
@@ -8,7 +8,6 @@ import SignOutButton from './SignOutButton'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 import Logo from './Logo'
-const supabase = createClient()
 
 export interface SectionLink { href: string; label: string }
 export interface PrimaryHeaderProps {
@@ -24,13 +23,22 @@ const scrollElementIntoView = (el: Element) => {
 }
 
 const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }) => {
+  const supabase = useMemo(() => createClient(), [])
   const [user, setUser] = useState<User | null>(null)
+
   useEffect(() => {
-    (async () => {
+    let mounted = true
+    ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
+      if (mounted) setUser(user)
     })()
-  }, [])
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      setUser(session?.user ?? null)
+    })
+    return () => { mounted = false; sub.subscription.unsubscribe() }
+  }, [supabase])
+
   const pathname = usePathname()
 
   const navLink = (href: string, label: string) => (
@@ -77,7 +85,6 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         ${className}
       `}
     >
-      {/* Brand / Home link */}
       <div className="justify-self-start">
         {pathname === '/' ? (
           <a href="#top" onClick={(e) => { e.preventDefault(); scrollToTop() }}>{brandContent}</a>
@@ -86,7 +93,6 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         )}
       </div>
 
-      {/* Optional center-column links */}
       {sections.length ? (
         <nav className="justify-self-center flex space-x-4 sm:space-x-10">
           {sections.map(({ href, label }) => (
@@ -102,7 +108,6 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         </nav>
       ) : <div className="justify-self-center" />}
 
-      {/* Right-side auth / utility */}
       <div className="justify-self-end flex items-center text-center md:text-sm space-x-1 sm:space-x-1 md:space-x-8">
         {!user ? (
           <>
@@ -111,8 +116,6 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
           </>
         ) : (
           <>
-            {/* Removed: Model Library link */}
-
             {pathname === '/profile' ? (
               <a
                 href="#top"
@@ -122,7 +125,6 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
                 Study
               </a>
             ) : (
-              // Renamed from "Model Training" → "Study"
               navLink('/profile', 'Study')
             )}
             <SignOutButton />

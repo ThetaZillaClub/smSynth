@@ -3,7 +3,6 @@
 import React, { useMemo } from "react";
 import GameLayout from "./layout/GameLayout";
 import { SessionPanel } from "./session";
-
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
@@ -11,7 +10,6 @@ import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
 import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRange from "@/hooks/students/useStudentRange";
-
 import {
   secondsPerBeat,
   beatsToSeconds,
@@ -51,15 +49,24 @@ export default function TrainingGame({
   studentId = null,
   sessionConfig = DEFAULT_SESSION_CONFIG,
 }: Props) {
-  const { studentRowId, studentName, genderLabel } = useStudentRow({
-    studentIdFromQuery: studentId,
-  });
+  const {
+    studentRowId,
+    studentName,
+    genderLabel,
+    rangeLowLabel,
+    rangeHighLabel,
+  } = useStudentRow({ studentIdFromQuery: studentId });
+
+  // pass labels to avoid a duplicate fetch
   const {
     lowHz,
     highHz,
     loading: rangeLoading,
     error: rangeError,
-  } = useStudentRange(studentRowId);
+  } = useStudentRange(studentRowId, {
+    rangeLowLabel,
+    rangeHighLabel,
+  });
 
   const step: "play" = "play";
 
@@ -430,4 +437,3 @@ export default function TrainingGame({
     </GameLayout>
   );
 }
-

@@ -6,14 +6,18 @@ import useAppMode, { type ExerciseId } from "./hooks/useAppMode";
 import CurriculumMenu from "./CurriculumMenu";
 import TrainingGame from "@/components/training/TrainingGame";
 import TrainingCurriculum from "@/components/training/TrainingCurriculum";
-import RangeSetup from "@/components/range/RangeSetup"; // NEW
+import RangeSetup from "@/components/range/RangeSetup";
 import {
   DEFAULT_SESSION_CONFIG,
   type SessionConfig,
 } from "@/components/training/session/types";
+import useStudentRow from "@/hooks/students/useStudentRow";
 
 export default function CurriculumRouter({ studentId = null }: { studentId?: string | null }) {
   const { view, current, startExercise, openMenu } = useAppMode();
+
+  // Fetch ONCE here and reuse across subviews (prevents re-fetch on Back)
+  const { studentName } = useStudentRow({ studentIdFromQuery: studentId ?? null });
 
   const [subview, setSubview] = useState<"curriculum" | "game">("curriculum");
   const [sessionCfg, setSessionCfg] = useState<SessionConfig>(DEFAULT_SESSION_CONFIG);
@@ -37,7 +41,6 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
         );
 
       case "range-setup":
-        // standalone screen — no curriculum step needed
         return <RangeSetup studentId={studentId ?? null} />;
 
       default:
@@ -46,7 +49,7 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
   }, [current, studentId, subview, sessionCfg, launchWith]);
 
   if (view === "menu") {
-    return <CurriculumMenu studentId={studentId} onStart={startExercise} />;
+    return <CurriculumMenu studentId={studentId} studentName={studentName} onStart={startExercise} />;
   }
 
   return (

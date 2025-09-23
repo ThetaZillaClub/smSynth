@@ -2,82 +2,66 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
-/**
- * Very small parser for labels like "C4", "C#4", "Db3", "A4".
- * Uses A4=440 and returns Hz. If unknown/invalid, returns null.
- */
 function labelToHz(label: string, a4Hz = 440): number | null {
-  if (!label) return null;
-  const m = String(label).trim().match(/^([A-Ga-g])([#b]?)(-?\d+)$/);
+  const m = String(label || "").trim().match(/^([A-Ga-g])([#b]?)(-?\d+)$/);
   if (!m) return null;
-
-  const note = m[1].toUpperCase();
-  const acc = m[2] || "";
-  const oct = Number(m[3]);
-  if (!Number.isFinite(oct)) return null;
-
-  // semitones from C
-  const base: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-  let pc = base[note];
-  if (pc == null) return null;
-  if (acc === "#") pc += 1;
-  if (acc === "b") pc -= 1;
-  pc = ((pc % 12) + 12) % 12;
-
-  // MIDI: C4 = 60, A4 = 69
-  const midi = 12 * (oct + 1) + pc;
+  const base: Record<string, number> = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+  const note = m[1].toUpperCase(); let pc = base[note]; if (pc == null) return null;
+  if (m[2] === "#") pc += 1; if (m[2] === "b") pc -= 1; pc = ((pc % 12)+12)%12;
+  const midi = 12 * (Number(m[3]) + 1) + pc;
   const hz = a4Hz * Math.pow(2, (midi - 69) / 12);
   return Number.isFinite(hz) ? hz : null;
 }
 
-type Result = {
-  lowHz: number | null;
-  highHz: number | null;
-  loading: boolean;
-  error: string | null;
+type Result = { lowHz: number | null; highHz: number | null; loading: boolean; error: string | null; };
+
+type Opts = {
+  /** If you already have labels from useStudentRow, pass them to suppress an extra fetch */
+  rangeLowLabel?: string | null;
+  rangeHighLabel?: string | null;
 };
 
-/**
- * Reads range_low / range_high for a student model row from Supabase (public.models).
- * Returns converted Hz (A4=440) or nulls if missing.
- */
-export default function useStudentRange(studentRowId: string | null): Result {
-  const supabase = useMemo(() => createClient(), []);
+export default function useStudentRange(studentRowId: string | null, opts?: Opts): Result {
   const [lowHz, setLowHz] = useState<number | null>(null);
   const [highHz, setHighHz] = useState<number | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  const haveBothLabels = useMemo(
+    () => (opts?.rangeLowLabel ?? null) !== null && (opts?.rangeHighLabel ?? null) !== null,
+    [opts?.rangeLowLabel, opts?.rangeHighLabel]
+  );
 
   useEffect(() => {
     let alive = true;
+
+    // Fast-path: if caller provided both labels, just compute locally.
+    if (haveBothLabels) {
+      setErr(null);
+      setLoading(false);
+      setLowHz(labelToHz(opts!.rangeLowLabel as string) ?? null);
+      setHighHz(labelToHz(opts!.rangeHighLabel as string) ?? null);
+      return () => { alive = false; };
+    }
+
     (async () => {
       setLoading(true);
       setErr(null);
       try {
-        if (!studentRowId) {
-          if (alive) {
-            setLowHz(null);
-            setHighHz(null);
-          }
-          return;
-        }
+        const url = studentRowId
+          ? `/api/students/${encodeURIComponent(studentRowId)}`
+          : `/api/students/current/range`;
+        const res = await fetch(url, { method: "GET" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
 
-        const { data, error } = await supabase
-          .from("models")
-          .select("range_low, range_high")
-          .eq("id", studentRowId)
-          .single();
-
-        if (error) throw error;
-
-        const low = data?.range_low ? labelToHz(data.range_low) : null;
-        const high = data?.range_high ? labelToHz(data.range_high) : null;
+        const range_low: string | null = json?.range_low ?? null;
+        const range_high: string | null = json?.range_high ?? null;
 
         if (!alive) return;
-        setLowHz(low ?? null);
-        setHighHz(high ?? null);
+        setLowHz(range_low ? labelToHz(range_low) : null);
+        setHighHz(range_high ? labelToHz(range_high) : null);
       } catch (e: any) {
         if (!alive) return;
         setErr(e?.message || String(e));
@@ -87,10 +71,9 @@ export default function useStudentRange(studentRowId: string | null): Result {
         if (alive) setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
-  }, [studentRowId, supabase]);
+
+    return () => { alive = false; };
+  }, [studentRowId, haveBothLabels, opts?.rangeLowLabel, opts?.rangeHighLabel]);
 
   return { lowHz, highHz, loading, error: err };
 }

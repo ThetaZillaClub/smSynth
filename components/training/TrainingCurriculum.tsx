@@ -50,8 +50,17 @@ export default function TrainingCurriculum({
   );
 
   // who
-  const { studentRowId } = useStudentRow({ studentIdFromQuery: null });
-  const { lowHz, highHz } = useStudentRange(studentRowId);
+  const {
+    studentRowId,
+    rangeLowLabel,
+    rangeHighLabel,
+  } = useStudentRow({ studentIdFromQuery: null });
+
+  // pass labels to avoid an extra fetch
+  const { lowHz, highHz } = useStudentRange(studentRowId, {
+    rangeLowLabel,
+    rangeHighLabel,
+  });
   const haveRange = lowHz != null && highHz != null;
 
   // prefer-flat labels for ambiguous PCs
@@ -228,4 +237,3 @@ export default function TrainingCurriculum({
     </div>
   );
 }
-

@@ -3,11 +3,11 @@
 
 import React from "react";
 import type { ExerciseId } from "./hooks/useAppMode";
-import useStudentRow from "@/hooks/students/useStudentRow";
 import PrimaryHeader from "@/components/header/PrimaryHeader";
 
 type Props = {
-  studentId?: string | null;
+  studentId?: string | null;      // kept for compatibility if you need it later
+  studentName?: string | null;    // <-- NEW: passed from the router
   onStart: (id: ExerciseId) => void;
 };
 
@@ -31,9 +31,7 @@ const ITEMS: Array<{
   { id: "advanced-syncopation", title: "Advanced Syncopation", subtitle: "Complex meters & melodies", emoji: "🧩", enabled: false, soon: true, gradient: "from-slate-400 via-slate-500 to-slate-600" },
 ];
 
-export default function CurriculumMenu({ studentId = null, onStart }: Props) {
-  const { studentName } = useStudentRow({ studentIdFromQuery: studentId ?? null });
-
+export default function CurriculumMenu({ studentName, onStart }: Props) {
   return (
     <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
       {/* Primary header (fixed) */}
@@ -70,7 +68,6 @@ export default function CurriculumMenu({ studentId = null, onStart }: Props) {
                     "text-white",
                   ].join(" ")}
                 >
-                  {/* Card interior */}
                   <div className="p-5 sm:p-6">
                     <div className="flex items-center justify-between">
                       <div className="text-3xl">{it.emoji}</div>
@@ -86,7 +83,6 @@ export default function CurriculumMenu({ studentId = null, onStart }: Props) {
                     </h3>
                     <p className="mt-1 text-sm sm:text-base text-white/95">{it.subtitle}</p>
 
-                    {/* CTA: light bg, dark text */}
                     <div className="mt-5">
                       <div
                         className={[
@@ -102,7 +98,6 @@ export default function CurriculumMenu({ studentId = null, onStart }: Props) {
                     </div>
                   </div>
 
-                  {/* corner flourish */}
                   <div className="absolute -bottom-6 -right-6 w-24 h-24 rounded-full bg-white/20 blur-2xl pointer-events-none" />
                 </button>
               );
@@ -111,7 +106,6 @@ export default function CurriculumMenu({ studentId = null, onStart }: Props) {
         </div>
       </div>
 
-      {/* Footnote */}
       <footer className="px-6 py-4 text-xs text-[#373737]">
         Prototype curriculum — more modes unlocking soon.
       </footer>

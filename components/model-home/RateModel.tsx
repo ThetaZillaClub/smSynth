@@ -1,12 +1,11 @@
-// components/model-home/RateModel.tsx
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import StarInput from './StarInput';
 
 export default function RateModel({ modelId }: { modelId: string }) {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [myRating, setMyRating] = useState<number>(0);
   const [avg, setAvg] = useState<number | null>(null);
   const [count, setCount] = useState<number>(0);
@@ -75,9 +74,7 @@ export default function RateModel({ modelId }: { modelId: string }) {
     <section className="w-full rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-6">
       <div className="flex flex-col items-center text-center gap-3">
         <div className="text-xs uppercase tracking-wide text-[#6b6b6b]">Rate this model</div>
-
         <StarInput value={myRating} onChange={handleRate} />
-
         <button
           type="button"
           onClick={() => handleRate(myRating)}
@@ -87,11 +84,9 @@ export default function RateModel({ modelId }: { modelId: string }) {
         >
           {busy ? 'Saving…' : 'Save'}
         </button>
-
         <div className="text-sm text-[#373737]" aria-live="polite">
           Average: <strong>{avg ?? '—'}</strong> • Ratings: <strong>{count}</strong>
         </div>
-
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
     </section>

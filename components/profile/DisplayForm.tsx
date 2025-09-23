@@ -2,9 +2,13 @@
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-export default function DisplayForm({ initialDisplayName, onSuccess }: { initialDisplayName: string, onSuccess: (newName: string) => void }) {
+export default function DisplayForm({
+  initialDisplayName,
+  onSuccess,
+}: { initialDisplayName: string, onSuccess: (newName: string) => void }) {
+  const supabase = useMemo(() => createClient(), []);
   const [displayName, setDisplayName] = useState(initialDisplayName);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -12,7 +16,6 @@ export default function DisplayForm({ initialDisplayName, onSuccess }: { initial
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const supabase = createClient();
     setIsLoading(true);
     setError(null);
     setSuccess(false);

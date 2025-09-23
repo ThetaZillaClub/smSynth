@@ -1,7 +1,6 @@
-// components/model-home/ModelHome.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import ModelTitle from './ModelTitle';
 import ModelImage from './ModelImage';
@@ -21,7 +20,7 @@ type ModelRow = {
 };
 
 export default function ModelHome({ modelId }: { modelId: string }) {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [model, setModel] = useState<ModelRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -74,8 +73,6 @@ export default function ModelHome({ modelId }: { modelId: string }) {
         gender={model.gender}
         privacy={model.privacy}
       />
-
-      {/* ⭐ Rating sits AFTER title/image/meta */}
       <section>
         <RateModel modelId={model.id} />
       </section>

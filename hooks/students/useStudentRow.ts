@@ -1,36 +1,37 @@
 // hooks/students/useStudentRow.ts
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState } from "react";
 
-// We still read from the "models" table for now.
-// Naming here is student-first; backend renaming comes later.
 type StudentRow = {
   id: string;
   creator_display_name: string;
   gender: "male" | "female" | "unspecified" | "other";
+  range_low?: string | null;
+  range_high?: string | null;
 };
 
 type ReturnShape = {
   studentRowId: string | null;
   studentName: string | null;
   genderLabel: "male" | "female" | null;
+  rangeLowLabel: string | null;
+  rangeHighLabel: string | null;
   loading: boolean;
   error: string | null;
 };
 
-export default function useStudentRow(opts: {
-  /** Still coming from ?model_id for now (backend change later) */
+export default function useStudentRow({
+  studentIdFromQuery,
+}: {
   studentIdFromQuery: string | null;
 }): ReturnShape {
-  const { studentIdFromQuery } = opts;
-
-  const supabase = useMemo(() => createClient(), []);
   const [studentRowId, setStudentRowId] = useState<string | null>(null);
   const [studentName, setStudentName] = useState<string | null>(null);
   const [genderLabel, setGenderLabel] = useState<"male" | "female" | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [rangeLowLabel, setRangeLowLabel] = useState<string | null>(null);
+  const [rangeHighLabel, setRangeHighLabel] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,58 +40,35 @@ export default function useStudentRow(opts: {
       setLoading(true);
       setErr(null);
       try {
-        const { data: userRes, error: userErr } = await supabase.auth.getUser();
-        if (userErr) throw userErr;
-        const user = userRes.user;
-        if (!user) {
-          if (!alive) return;
-          setStudentRowId(null);
-          setStudentName(null);
-          setGenderLabel(null);
-          setLoading(false);
-          return;
-        }
-
-        let row: StudentRow | null = null;
-
-        if (studentIdFromQuery) {
-          // NOTE: still selecting from "models" table
-          const { data, error } = await supabase
-            .from("models")
-            .select("id, creator_display_name, gender")
-            .eq("id", studentIdFromQuery)
-            .single();
-          if (error) throw error;
-          row = data as StudentRow;
-        } else {
-          const { data, error } = await supabase
-            .from("models")
-            .select("id, creator_display_name, gender")
-            .eq("uid", user.id)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (error) throw error;
-          row = (data ?? null) as StudentRow | null;
-        }
+        const url = studentIdFromQuery
+          ? `/api/students/${encodeURIComponent(studentIdFromQuery)}`
+          : `/api/students/current`;
+        const res = await fetch(url, { method: "GET" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const row: StudentRow | null = await res.json();
 
         if (!alive) return;
-
         if (row) {
           setStudentRowId(row.id);
           setStudentName(row.creator_display_name || null);
           setGenderLabel(row.gender === "male" || row.gender === "female" ? row.gender : null);
+          setRangeLowLabel(row.range_low ?? null);
+          setRangeHighLabel(row.range_high ?? null);
         } else {
           setStudentRowId(null);
           setStudentName(null);
           setGenderLabel(null);
+          setRangeLowLabel(null);
+          setRangeHighLabel(null);
         }
       } catch (e: any) {
         if (!alive) return;
+        setErr(e?.message || String(e));
         setStudentRowId(null);
         setStudentName(null);
         setGenderLabel(null);
-        setErr(e?.message || String(e));
+        setRangeLowLabel(null);
+        setRangeHighLabel(null);
       } finally {
         if (alive) setLoading(false);
       }
@@ -98,7 +76,15 @@ export default function useStudentRow(opts: {
     return () => {
       alive = false;
     };
-  }, [studentIdFromQuery, supabase]);
+  }, [studentIdFromQuery]);
 
-  return { studentRowId, studentName, genderLabel, loading, error: err };
+  return {
+    studentRowId,
+    studentName,
+    genderLabel,
+    rangeLowLabel,
+    rangeHighLabel,
+    loading,
+    error: err,
+  };
 }

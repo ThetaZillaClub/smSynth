@@ -1,21 +1,16 @@
-// components/profile/MyModels.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
-type ModelRow = {
-  id: string;
-  name: string;
-  image_path: string | null;
-};
+type ModelRow = { id: string; name: string; image_path: string | null };
 
 export default function MyModels() {
+  const supabase = useMemo(() => createClient(), []);
   const [models, setModels] = useState<ModelRow[]>([]);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
     (async () => {
@@ -23,37 +18,25 @@ export default function MyModels() {
         const { data: userRes, error: userErr } = await supabase.auth.getUser();
         if (userErr) throw userErr;
         const user = userRes?.user;
-        if (!user) {
-          setModels([]);
-          return;
-        }
+        if (!user) { setModels([]); return; }
 
         const { data, error } = await supabase
           .from('models')
           .select('id,name,image_path')
           .eq('uid', user.id)
           .order('created_at', { ascending: false });
-
         if (error) throw error;
 
         const rows = data ?? [];
         setModels(rows);
 
-        // Signed URLs for images (works with public or private buckets)
         const bucket = supabase.storage.from('model-images');
         const urls: Record<string, string> = {};
-        await Promise.all(
-          rows.map(async (m) => {
-            if (!m.image_path) return;
-            const { data: signed, error: signErr } = await bucket.createSignedUrl(
-              m.image_path,
-              60 * 60 // 1 hour
-            );
-            if (!signErr && signed?.signedUrl) {
-              urls[m.id] = signed.signedUrl;
-            }
-          })
-        );
+        await Promise.all(rows.map(async (m) => {
+          if (!m.image_path) return;
+          const { data: signed } = await bucket.createSignedUrl(m.image_path, 60 * 60);
+          if (signed?.signedUrl) urls[m.id] = signed.signedUrl;
+        }));
         setImageUrls(urls);
       } catch (e) {
         console.error(e);
@@ -63,9 +46,8 @@ export default function MyModels() {
     })();
   }, [supabase]);
 
-  if (loading) {
-    return <p className="text-center py-12">Loading your models…</p>;
-  }
+  if (loading) return <p className="text-center py-12">Loading your models…</p>;
+  
 
   const Grid = (
     <div className="flex flex-wrap justify-center gap-8 max-w-4xl mx-auto">
