@@ -1,45 +1,93 @@
 // components/header/PrimaryHeader.tsx
-'use client'
-import { type FC, type MouseEvent, useState, useEffect, useMemo } from 'react'
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import BeginJourneyButton from './BeginJourneyButton'
-import SignOutButton from './SignOutButton'
-import { createClient } from '@/lib/supabase/client'
-import { User } from '@supabase/supabase-js'
-import Logo from './Logo'
+'use client';
+
+import { type FC, type MouseEvent, useMemo, useState, useEffect } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import BeginJourneyButton from './BeginJourneyButton';
+import SignOutButton from './SignOutButton';
+import { createClient } from '@/lib/supabase/client';
+import Logo from './Logo';
 
 export interface SectionLink { href: string; label: string }
 export interface PrimaryHeaderProps {
-  sections?: ReadonlyArray<SectionLink>
-  scrollDuration?: number
-  className?: string
+  sections?: ReadonlyArray<SectionLink>;
+  className?: string;
 }
 
-const scrollToTop = () => { try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch { window.scrollTo(0, 0) } }
-const scrollElementIntoView = (el: Element) => {
-  try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
-  catch { const r = (el as HTMLElement).getBoundingClientRect().top; window.scrollTo(0, r + (window.scrollY || window.pageYOffset)) }
+/** augment window for our auth seed */
+declare global {
+  interface Window { __PTP_AUTH?: boolean }
 }
+
+/** read a fast local seed for SPA navigations (window global first, then cookie) */
+function readAuthSeed(): boolean | null {
+  if (typeof window === 'undefined') return null;
+  if (typeof window.__PTP_AUTH === 'boolean') return window.__PTP_AUTH;
+  const m = typeof document !== 'undefined'
+    ? document.cookie.match(/(?:^|;\s*)ptp_is_auth=(\d)(?:;|$)/)
+    : null;
+  return m ? m[1] === '1' : null;
+}
+
+/** write seed to both window + cookie so subsequent mounts have instant state */
+function writeAuthSeed(isAuthed: boolean) {
+  if (typeof window !== 'undefined') window.__PTP_AUTH = isAuthed;
+  if (typeof document !== 'undefined') {
+    const maxAge = 60 * 60 * 24 * 7; // 7 days
+    const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; secure' : '';
+    document.cookie = `ptp_is_auth=${isAuthed ? '1' : '0'}; path=/; samesite=lax; max-age=${maxAge}${secure}`;
+  }
+}
+
+const scrollToTop = () => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { window.scrollTo(0, 0); } };
+const scrollElementIntoView = (el: Element) => {
+  try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  catch {
+    const r = (el as HTMLElement).getBoundingClientRect().top;
+    window.scrollTo(0, r + (window.scrollY || window.pageYOffset));
+  }
+};
 
 const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }) => {
-  const supabase = useMemo(() => createClient(), [])
-  const [user, setUser] = useState<User | null>(null)
+  const supabase = useMemo(() => createClient(), []);
+  const pathname = usePathname();
+
+  /**
+   * Phase logic:
+   * - First SSR/first client render: no seed -> phase 'boot' => skeleton (prevents hydration mismatch & FOUC)
+   * - SPA navigations: we have a seed -> phase 'ready' immediately (no flash of Login/Study)
+   */
+  const seed = readAuthSeed();
+  const [phase, setPhase] = useState<'boot' | 'ready'>(seed == null ? 'boot' : 'ready');
+  const [authed, setAuthed] = useState<boolean>(seed ?? false);
 
   useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (mounted) setUser(user)
-    })()
+    let cancelled = false;
 
+    // resolve actual auth (local — no network) then flip to 'ready'
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (cancelled) return;
+      const isAuthed = !!data.user;
+      setAuthed(isAuthed);
+      writeAuthSeed(isAuthed);
+      setPhase('ready');
+    })();
+
+    // keep sync on any login/logout thereafter
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      setUser(session?.user ?? null)
-    })
-    return () => { mounted = false; sub.subscription.unsubscribe() }
-  }, [supabase])
+      if (cancelled) return;
+      const isAuthed = !!session?.user;
+      setAuthed(isAuthed);
+      writeAuthSeed(isAuthed);
+    });
 
-  const pathname = usePathname()
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const navLink = (href: string, label: string) => (
     <Link
@@ -54,24 +102,24 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
     >
       {label}
     </Link>
-  )
+  );
 
   const handleSectionClick =
     (href: string) =>
     (e: MouseEvent<HTMLAnchorElement>) => {
-      e.preventDefault()
-      const id = href.replace('#', '')
-      const el = document.getElementById(id)
-      if (!el) return
-      scrollElementIntoView(el)
-    }
+      e.preventDefault();
+      const id = href.replace('#', '');
+      const el = document.getElementById(id);
+      if (!el) return;
+      scrollElementIntoView(el);
+    };
 
   const brandContent = (
     <div className="flex items-center gap-2">
       <Logo className="w-12 h-12" />
       <span className="text-xl sm:text-2xl md:text-3xl font-semibold text-[#0f0f0f]">PitchTime.Pro</span>
     </div>
-  )
+  );
 
   return (
     <header
@@ -85,14 +133,16 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         ${className}
       `}
     >
+      {/* Brand / Home link */}
       <div className="justify-self-start">
         {pathname === '/' ? (
-          <a href="#top" onClick={(e) => { e.preventDefault(); scrollToTop() }}>{brandContent}</a>
+          <a href="#top" onClick={(e) => { e.preventDefault(); scrollToTop(); }}>{brandContent}</a>
         ) : (
           <Link href="/">{brandContent}</Link>
         )}
       </div>
 
+      {/* Optional center links */}
       {sections.length ? (
         <nav className="justify-self-center flex space-x-4 sm:space-x-10">
           {sections.map(({ href, label }) => (
@@ -108,8 +158,14 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         </nav>
       ) : <div className="justify-self-center" />}
 
+      {/* Right side: skeleton on first SSR/CSR; instant correct UI on SPA navs via seed */}
       <div className="justify-self-end flex items-center text-center md:text-sm space-x-1 sm:space-x-1 md:space-x-8">
-        {!user ? (
+        {phase === 'boot' ? (
+          <div className="flex items-center gap-4">
+            <div className="h-5 w-14 rounded bg-[#e5e5e5] animate-pulse" />
+            <div className="h-8 w-28 rounded-md bg-[#e5e5e5] animate-pulse" />
+          </div>
+        ) : !authed ? (
           <>
             {navLink('/auth/login', 'Login')}
             <BeginJourneyButton />
@@ -119,7 +175,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
             {pathname === '/profile' ? (
               <a
                 href="#top"
-                onClick={(e) => { e.preventDefault(); scrollToTop() }}
+                onClick={(e) => { e.preventDefault(); scrollToTop(); }}
                 className="text-base sm:text-md font-medium text-[#0f0f0f] transition duration-200 hover:underline hover:underline-offset-4"
               >
                 Study
@@ -132,6 +188,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         )}
       </div>
     </header>
-  )
-}
-export default PrimaryHeader
+  );
+};
+
+export default PrimaryHeader;
