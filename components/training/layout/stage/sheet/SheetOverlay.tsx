@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { PR_COLORS, getMidiRange, type Phrase } from "@/utils/piano-roll/scale";
+import { PR_COLORS, getMidiRange, type Phrase } from "@/utils/stage/scale";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 import type { SystemLayout } from "./vexscore/types";
 

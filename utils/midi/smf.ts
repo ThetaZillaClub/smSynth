@@ -3,7 +3,7 @@
 // Extracts a monophonic "melody" line + tempo map -> Phrase in seconds.
 // Also pulls karaoke lyrics from Meta(0x05) or Text(0x01).
 
-import type { Phrase } from "@/utils/piano-roll/scale";
+import type { Phrase } from "@/utils/stage/scale";
 
 type MidiTrackEvent = {
   absTicks: number;

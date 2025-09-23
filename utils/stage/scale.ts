@@ -1,5 +1,6 @@
-// utils/piano-roll/scale.ts
-
+// utils/stage/scale.ts
+// Stage overlay helpers: time/pitch → screen mapping and shared stage theme.
+// NOTE: not musical "scales" (see utils/phrase/scales.ts for that).
 // --- Types (moved here from types.ts) ---
 export type Note = { midi: number; startSec: number; durSec: number };
 export type Phrase = { durationSec: number; notes: Note[] };

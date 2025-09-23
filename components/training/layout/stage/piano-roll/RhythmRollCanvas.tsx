@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { PR_COLORS } from "@/utils/piano-roll/scale";
+import { PR_COLORS } from "@/utils/stage/scale";
 import { noteValueToSeconds, type NoteValue } from "@/utils/time/tempo";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 

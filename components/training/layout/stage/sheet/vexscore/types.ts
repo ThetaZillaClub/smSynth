@@ -1,5 +1,5 @@
 // components/training/layout/sheet/vexscore/types.ts
-import type { Phrase } from "@/utils/piano-roll/scale";
+import type { Phrase } from "@/utils/stage/scale";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 
 export type BarSegment = {

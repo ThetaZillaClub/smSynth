@@ -6,7 +6,7 @@ import {
   DEFAULT_SESSION_CONFIG,
   type SessionConfig,
 } from "./layout/session/types";
-import type { Phrase } from "@/utils/piano-roll/scale";
+import type { Phrase } from "@/utils/stage/scale";
 import { parseMidiToPhraseAndLyrics } from "@/utils/midi/smf";
 import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRange from "@/hooks/students/useStudentRange";

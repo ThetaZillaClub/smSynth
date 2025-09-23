@@ -1,6 +1,6 @@
 // utils/phrase/phraseBuilders.ts
 import { hzToMidi } from "@/utils/pitch/pitchMath";
-import type { Phrase } from "@/utils/piano-roll/scale";
+import type { Phrase } from "@/utils/stage/scale";
 import { degreeIndex, isInScale, scaleSemitones, type ScaleName } from "./scales";
 import { noteValueToSeconds } from "@/utils/time/tempo";
 import { choose, makeRng } from "./random";

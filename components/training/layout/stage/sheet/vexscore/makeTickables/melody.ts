@@ -4,7 +4,7 @@ import {
   AnnotationHorizontalJustify as AHJ,
   AnnotationVerticalJustify as AVJ,
 } from "vexflow";
-import type { Phrase } from "@/utils/piano-roll/scale";
+import type { Phrase } from "@/utils/stage/scale";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import type { NoteValue } from "@/utils/time/tempo";
 import { noteValueInQuarterUnits } from "@/utils/time/tempo";

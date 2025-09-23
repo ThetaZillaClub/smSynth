@@ -1,6 +1,6 @@
 // components/training/layout/session/types.ts
 import type { TimeSignature } from "@/utils/time/tempo";
-import type { Phrase } from "@/utils/piano-roll/scale";
+import type { Phrase } from "@/utils/stage/scale";
 import type { NoteValue } from "@/utils/time/tempo";
 import type { ScaleName } from "@/utils/phrase/scales";
 

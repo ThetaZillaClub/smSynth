@@ -18,7 +18,7 @@ import {
   barsToBeats,
   noteValueToBeats,
 } from "@/utils/time/tempo";
-import type { Phrase } from "@/utils/piano-roll/scale";
+import type { Phrase } from "@/utils/stage/scale";
 import {
   type SessionConfig,
   DEFAULT_SESSION_CONFIG,

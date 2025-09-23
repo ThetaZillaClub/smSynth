@@ -3,7 +3,7 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import DynamicOverlay from "./DynamicOverlay";
-import { getMidiRange, type Phrase } from "@/utils/piano-roll/scale";
+import { getMidiRange, type Phrase } from "@/utils/stage/scale";
 
 /** Re-export so upstream can import { type Phrase } from this file */
 export type { Phrase };
