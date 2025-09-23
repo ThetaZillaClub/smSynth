@@ -1,9 +1,8 @@
 // lib/supabase/middleware.ts
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { hasEnvVars } from "../utils";
 
-/** Extra safety: never guard these paths even if the root matcher changes */
+/** Never guard these paths via auth redirect */
 const SKIP_PREFIXES = [
   "/api",
   "/_next",
@@ -15,20 +14,17 @@ const SKIP_PREFIXES = [
 ];
 
 export async function updateSession(request: NextRequest) {
-  // Always start with a pass-through response that carries the request (and its cookies)
+  // Start with a pass-through response that carries the request (and its cookies)
   let supabaseResponse = NextResponse.next({ request });
-
-  // If env is not configured yet, don't run auth checks
-  if (!hasEnvVars) return supabaseResponse;
 
   const { pathname, search } = request.nextUrl;
 
-  // Extra guard (root matcher already skips most of these)
+  // Skip non-app paths
   if (SKIP_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
     return supabaseResponse;
   }
 
-  // With Fluid compute, always instantiate per-request
+  // New client per request (important for edge / fluid compute)
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY!,
@@ -49,16 +45,16 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // IMPORTANT: do not insert any code between createServerClient and getClaims()
+  // IMPORTANT: don't insert code between client creation and getClaims()
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
-  // Public & auth routes that shouldn't force-login
+  // Public routes
   const isAuthRoute = pathname.startsWith("/auth") || pathname.startsWith("/login");
-  const isPublicExact = pathname === "/"; // add more exact public paths here if needed
+  const isPublicExact = pathname === "/";
   const isPublic = isPublicExact || isAuthRoute;
 
-  // If not logged in and not on a public/auth page, send to login (preserve intended destination)
+  // Enforce auth
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
@@ -67,6 +63,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Always return the SAME response object that carried cookie updates
+  // Return the SAME response that carried any cookie updates
   return supabaseResponse;
 }
