@@ -1,7 +1,7 @@
 import PrimaryHeader from "@/components/header/PrimaryHeader";
-import Hero from "@/components/hero/Hero";
-import Features from "@/components/features/Features";
-import FaqSection from "@/components/faq/FaqSection";
+import Hero from "@/components/landing/Hero";
+import Features from "@/components/landing/Features";
+import FaqSection from "@/components/landing/FaqSection";
 import Footer from "@/components/footer/Footer";
 
 export default function Home() {

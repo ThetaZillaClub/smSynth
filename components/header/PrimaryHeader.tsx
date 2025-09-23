@@ -61,7 +61,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
   const brandContent = (
     <div className="flex items-center gap-2">
       <Logo className="w-12 h-12" />
-      <span className="text-xl sm:text-2xl md:text-3xl font-semibold text-[#0f0f0f]">PitchTune.Pro</span>
+      <span className="text-xl sm:text-2xl md:text-3xl font-semibold text-[#0f0f0f]">PitchTime.Pro</span>
     </div>
   )
 

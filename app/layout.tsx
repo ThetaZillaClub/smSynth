@@ -9,7 +9,7 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "PitchTune.Pro",
+  title: "PitchTime.Pro",
   description: "The fastest way to become a professional vocalist",
 };
 
