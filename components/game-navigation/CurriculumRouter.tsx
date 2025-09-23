@@ -17,7 +17,13 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
   const { view, current, startExercise, openMenu } = useAppMode();
 
   // Fetch ONCE here and reuse across subviews (prevents re-fetch on Back)
-  const { studentName } = useStudentRow({ studentIdFromQuery: studentId ?? null });
+  const {
+    studentRowId,
+    studentName,
+    genderLabel,
+    rangeLowLabel,
+    rangeHighLabel,
+  } = useStudentRow({ studentIdFromQuery: studentId ?? null });
 
   const [subview, setSubview] = useState<"curriculum" | "game">("curriculum");
   const [sessionCfg, setSessionCfg] = useState<SessionConfig>(DEFAULT_SESSION_CONFIG);
@@ -35,21 +41,56 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
     switch (current as ExerciseId) {
       case "training-game":
         return subview === "curriculum" ? (
-          <TrainingCurriculum onStart={launchWith} defaultConfig={sessionCfg} />
+          <TrainingCurriculum
+            onStart={launchWith}
+            defaultConfig={sessionCfg}
+            // pass range labels so the child won't fetch
+            rangeLowLabel={rangeLowLabel}
+            rangeHighLabel={rangeHighLabel}
+          />
         ) : (
-          <TrainingGame title="Training" studentId={studentId ?? null} sessionConfig={sessionCfg} />
+          <TrainingGame
+            title="Training"
+            // keep for downstream query param compatibility if needed
+            studentId={studentId ?? null}
+            sessionConfig={sessionCfg}
+            // pass everything so the child won't fetch
+            studentRowId={studentRowId}
+            studentName={studentName}
+            genderLabel={genderLabel}
+            rangeLowLabel={rangeLowLabel}
+            rangeHighLabel={rangeHighLabel}
+          />
         );
 
       case "range-setup":
+        // RangeSetup still does an update flow by design
         return <RangeSetup studentId={studentId ?? null} />;
 
       default:
         return null;
     }
-  }, [current, studentId, subview, sessionCfg, launchWith]);
+  }, [
+    current,
+    studentId,
+    subview,
+    sessionCfg,
+    launchWith,
+    studentRowId,
+    studentName,
+    genderLabel,
+    rangeLowLabel,
+    rangeHighLabel,
+  ]);
 
   if (view === "menu") {
-    return <CurriculumMenu studentId={studentId} studentName={studentName} onStart={startExercise} />;
+    return (
+      <CurriculumMenu
+        studentId={studentId}
+        studentName={studentName}
+        onStart={startExercise}
+      />
+    );
   }
 
   return (

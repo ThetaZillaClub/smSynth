@@ -8,7 +8,8 @@ import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
 import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
-import useStudentRow from "@/hooks/students/useStudentRow";
+// Removed: useStudentRow import (we receive from router)
+// import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import {
   secondsPerBeat,
@@ -34,8 +35,15 @@ import { pickClef } from "./layout/stage/sheet/vexscore/builders";
 
 type Props = {
   title?: string;
-  studentId?: string | null;
+  studentId?: string | null; // kept for downstream compatibility
   sessionConfig?: SessionConfig;
+
+  // NEW: provided by router so we don't fetch here
+  studentRowId?: string | null;
+  studentName?: string | null;
+  genderLabel?: "male" | "female" | null;
+  rangeLowLabel?: string | null;
+  rangeHighLabel?: string | null;
 };
 
 const MAX_TAKES = 24;
@@ -48,16 +56,15 @@ export default function TrainingGame({
   title = "Training",
   studentId = null,
   sessionConfig = DEFAULT_SESSION_CONFIG,
-}: Props) {
-  const {
-    studentRowId,
-    studentName,
-    genderLabel,
-    rangeLowLabel,
-    rangeHighLabel,
-  } = useStudentRow({ studentIdFromQuery: studentId });
 
-  // pass labels to avoid a duplicate fetch
+  // passed in from router
+  studentRowId = null,
+  studentName = null,
+  genderLabel = null,
+  rangeLowLabel = null,
+  rangeHighLabel = null,
+}: Props) {
+  // Convert labels locally; if both labels are present, the hook won't fetch.
   const {
     lowHz,
     highHz,
@@ -114,7 +121,6 @@ export default function TrainingGame({
   const scaleSeed = useMemo(() => rand32(), []);
   const syncSeed = useMemo(() => rand32(), []);
 
-  // Canonical exercise length (bars): rhythm.lengthBars -> legacy exerciseBars -> 2
   const lengthBars = Math.max(
     1,
     Number((rhythm as any)?.lengthBars ?? exerciseBars ?? 2)

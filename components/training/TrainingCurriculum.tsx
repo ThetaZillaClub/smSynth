@@ -5,7 +5,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_SESSION_CONFIG, type SessionConfig } from "./session";
 import type { Phrase } from "@/utils/stage";
 import { parseMidiToPhraseAndLyrics } from "@/utils/midi/smf";
-import useStudentRow from "@/hooks/students/useStudentRow";
+// Removed: useStudentRow import (no fetch here)
+// import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 
@@ -14,8 +15,6 @@ import ImportMidiCard from "./curriculum-layout/ImportMidi/ImportMidiCard";
 import AdvancedOverridesCard from "./curriculum-layout/AdvancedOverrides/AdvancedOverridesCard";
 import CustomLyricsCard from "./curriculum-layout/CustomLyrics/CustomLyricsCard";
 import ViewSelectCard from "./curriculum-layout/ViewSelect/ViewSelectCard";
-
-/* NEW split cards */
 import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard";
 import ScaleCard from "./curriculum-layout/Scale/ScaleCard";
 import RhythmCard from "./curriculum-layout/Rhythm/RhythmCard";
@@ -32,9 +31,14 @@ function safeParsePhrase(s: string): Phrase | null {
 export default function TrainingCurriculum({
   onStart,
   defaultConfig,
+  // NEW: accept labels from router to avoid fetch
+  rangeLowLabel,
+  rangeHighLabel,
 }: {
   onStart: (cfg: SessionConfig) => void;
   defaultConfig?: Partial<SessionConfig>;
+  rangeLowLabel?: string | null;
+  rangeHighLabel?: string | null;
 }) {
   const init = useMemo<SessionConfig>(
     () => ({ ...DEFAULT_SESSION_CONFIG, ...(defaultConfig || {}) }),
@@ -49,27 +53,18 @@ export default function TrainingCurriculum({
     Array.isArray(cfg.customWords) ? cfg.customWords.join(", ") : ""
   );
 
-  // who
-  const {
-    studentRowId,
-    rangeLowLabel,
-    rangeHighLabel,
-  } = useStudentRow({ studentIdFromQuery: null });
-
-  // pass labels to avoid an extra fetch
-  const { lowHz, highHz } = useStudentRange(studentRowId, {
-    rangeLowLabel,
-    rangeHighLabel,
+  // Convert provided labels locally (no network). Pass null id; the hook will fast-path.
+  const { lowHz, highHz } = useStudentRange(null, {
+    rangeLowLabel: rangeLowLabel ?? null,
+    rangeHighLabel: rangeHighLabel ?? null,
   });
   const haveRange = lowHz != null && highHz != null;
 
-  // prefer-flat labels for ambiguous PCs
   const PC_LABELS_FLAT = useMemo(
     () => ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],
     []
   );
 
-  // allowed tonics (need ≥ 1 octave inside [low..high])
   const allowedTonicPcs = useMemo<Set<number>>(() => {
     if (!haveRange) return new Set<number>();
     const loM = Math.round(hzToMidi(lowHz as number));
@@ -81,7 +76,6 @@ export default function TrainingCurriculum({
     return set;
   }, [haveRange, lowHz, highHz]);
 
-  // autocorrect tonic if now invalid
   useEffect(() => {
     if (!haveRange) return;
     const currentPc = (cfg.scale?.tonicPc ?? 0) % 12;
@@ -114,7 +108,6 @@ export default function TrainingCurriculum({
     }));
   }, [haveRange, allowedTonicPcs, lowHz, highHz, cfg.scale]);
 
-  // range hint text
   const rangeHint = useMemo(() => {
     if (!haveRange) return null;
     const loM = Math.round(hzToMidi(lowHz as number));
@@ -133,7 +126,6 @@ export default function TrainingCurriculum({
     };
   }, [haveRange, lowHz, highHz, allowedTonicPcs, PC_LABELS_FLAT]);
 
-  // simple typed setter
   const pushChange = useCallback((patch: Partial<SessionConfig>) => {
     setCfg((c) => ({ ...c, ...patch }));
   }, []);
@@ -178,7 +170,6 @@ export default function TrainingCurriculum({
 
       {/* Body */}
       <div className="w-full flex-1 flex flex-col gap-4 min-h-0 px-6 pb-6">
-        {/* Transport + View */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
           <TransportCard
             bpm={cfg.bpm}
@@ -190,7 +181,6 @@ export default function TrainingCurriculum({
           <ViewSelectCard value={cfg.view} onChange={pushChange} />
         </div>
 
-        {/* Sequence / Scale / Rhythm + Import MIDI */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="grid grid-cols-1 gap-3">
             <SequenceModeCard cfg={cfg} onChange={pushChange} />
@@ -214,7 +204,6 @@ export default function TrainingCurriculum({
           />
         </div>
 
-        {/* Overrides */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
           <AdvancedOverridesCard
             phraseJson={phraseJson}
