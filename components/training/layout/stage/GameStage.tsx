@@ -1,13 +1,13 @@
 // components/training/layout/piano-roll/GameStage.tsx
 "use client";
 import React, { useCallback, useLayoutEffect, useRef, useState, useMemo } from "react";
-import PianoRollCanvas, { type Phrase } from "@/components/training/layout/piano-roll/PianoRollCanvas";
-import RhythmRollCanvas from "@/components/training/layout/piano-roll/RhythmRollCanvas";
+import PianoRollCanvas, { type Phrase } from "@/components/training/layout/stage/piano-roll/PianoRollCanvas";
+import RhythmRollCanvas from "@/components/training/layout/stage/piano-roll/RhythmRollCanvas";
 import type { RhythmEvent } from "@/utils/phrase/generator";
-import VexScore from "@/components/training/layout/sheet/VexScore";
-import SheetOverlay from "@/components/training/layout/sheet/SheetOverlay";
-import type { SystemLayout } from "@/components/training/layout/sheet/vexscore/types";
-import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/sheet/vexscore/builders";
+import VexScore from "@/components/training/layout/stage/sheet/VexScore";
+import SheetOverlay from "@/components/training/layout/stage/sheet/SheetOverlay";
+import type { SystemLayout } from "@/components/training/layout/stage/sheet/vexscore/types";
+import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
 
 type Props = {

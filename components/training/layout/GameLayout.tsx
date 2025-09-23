@@ -2,11 +2,11 @@
 "use client";
 import React from "react";
 import GameHeader from "./header/GameHeader";
-import GameStage from "./piano-roll/GameStage";
+import GameStage from "./stage/GameStage";
 import GameStats from "./stats/GameStats";
 import GameLyrics from "./lyrics/GameLyrics";
 import useActiveLyricIndex from "./lyrics/useActiveLyricIndex";
-import { type Phrase } from "./piano-roll/PianoRollCanvas";
+import { type Phrase } from "./stage/piano-roll/PianoRollCanvas";
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 

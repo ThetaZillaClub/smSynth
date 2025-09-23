@@ -34,8 +34,8 @@ import {
 } from "@/utils/phrase/generator";
 
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
-import { keyNameFromTonicPc } from "./layout/sheet/vexscore/builders";
-import { pickClef } from "./layout/sheet/vexscore/builders"; // NEW
+import { keyNameFromTonicPc } from "./layout/stage/sheet/vexscore/builders";
+import { pickClef } from "./layout/stage/sheet/vexscore/builders"; // NEW
 
 type Props = {
   title?: string;
