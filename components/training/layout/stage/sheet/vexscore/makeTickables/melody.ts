@@ -4,7 +4,7 @@ import {
   AnnotationHorizontalJustify as AHJ,
   AnnotationVerticalJustify as AVJ,
 } from "vexflow";
-import type { Phrase } from "@/utils/stage/scale";
+import type { Phrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import type { NoteValue } from "@/utils/time/tempo";
 import { noteValueInQuarterUnits } from "@/utils/time/tempo";
@@ -13,7 +13,7 @@ import { midiToVexKey, type Tok } from "../builders";
 // 🔧 Use alias path so TS reliably resolves this module
 import {
   PPQ, ticksToSeconds, tokToTicks, ticksToToks, noteValueToTicks,
-} from "@/components/training/layout/sheet/vexscore/makeTickables/time";
+} from "@/components/training/layout/stage/sheet/vexscore/makeTickables/time";
 
 import {
   makeGhost, makeManualRest, makeInvisibleTripletRest,
@@ -267,3 +267,4 @@ export function buildMelodyTickables(params: {
   padToNextBarTicks();
   return { ticks: ticksOut, starts: startsSec, barIndex, tuplets, manualRests };
 }
+

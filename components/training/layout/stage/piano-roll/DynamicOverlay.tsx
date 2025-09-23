@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback, useMemo } from "react";
-import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS, type Phrase } from "@/utils/stage/scale";
+import { clamp, midiToY, midiToYCenter, midiCellRect, PR_COLORS, type Phrase } from "@/utils/stage";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 
 type Props = {
@@ -371,3 +371,4 @@ export default function DynamicOverlay({
     />
   );
 }
+

@@ -3,7 +3,7 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import DynamicOverlay from "./DynamicOverlay";
-import { getMidiRange, type Phrase } from "@/utils/stage/scale";
+import { getMidiRange, type Phrase } from "@/utils/stage";
 
 /** Re-export so upstream can import { type Phrase } from this file */
 export type { Phrase };
@@ -104,3 +104,4 @@ export default function PianoRollCanvas({
     </div>
   );
 }
+

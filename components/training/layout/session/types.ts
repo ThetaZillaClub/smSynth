@@ -1,6 +1,6 @@
 // components/training/layout/session/types.ts
 import type { TimeSignature } from "@/utils/time/tempo";
-import type { Phrase } from "@/utils/stage/scale";
+import type { Phrase } from "@/utils/stage";
 import type { NoteValue } from "@/utils/time/tempo";
 import type { ScaleName } from "@/utils/phrase/scales";
 
@@ -89,3 +89,4 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   customWords: null,
   view: "piano",
 };
+

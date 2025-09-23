@@ -1,6 +1,6 @@
 // utils/phrase/phraseBuilders.ts
 import { hzToMidi } from "@/utils/pitch/pitchMath";
-import type { Phrase } from "@/utils/stage/scale";
+import type { Phrase } from "@/utils/stage";
 import { degreeIndex, isInScale, scaleSemitones, type ScaleName } from "./scales";
 import { noteValueToSeconds } from "@/utils/time/tempo";
 import { choose, makeRng } from "./random";
@@ -223,3 +223,4 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
 
   return { durationSec: t, notes };
 }
+

@@ -3,7 +3,7 @@
 // Extracts a monophonic "melody" line + tempo map -> Phrase in seconds.
 // Also pulls karaoke lyrics from Meta(0x05) or Text(0x01).
 
-import type { Phrase } from "@/utils/stage/scale";
+import type { Phrase } from "@/utils/stage";
 
 type MidiTrackEvent = {
   absTicks: number;
@@ -261,3 +261,4 @@ export function parseMidiToPhraseAndLyrics(
   const idx = typeof trackIndex === "number" ? Math.max(0, Math.min(trackIndex, tracks.length - 1)) : pickMelodyTrack(tracks);
   return eventsToPhraseAndLyrics(division, tracks[idx]);
 }
+

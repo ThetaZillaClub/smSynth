@@ -18,7 +18,7 @@ import {
   barsToBeats,
   noteValueToBeats,
 } from "@/utils/time/tempo";
-import type { Phrase } from "@/utils/stage/scale";
+import type { Phrase } from "@/utils/stage";
 import {
   type SessionConfig,
   DEFAULT_SESSION_CONFIG,
@@ -433,3 +433,4 @@ export default function TrainingGame({
     </GameLayout>
   );
 }
+

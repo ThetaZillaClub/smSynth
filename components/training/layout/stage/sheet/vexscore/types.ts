@@ -1,5 +1,5 @@
 // components/training/layout/sheet/vexscore/types.ts
-import type { Phrase } from "@/utils/stage/scale";
+import type { Phrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 
 export type BarSegment = {
@@ -47,3 +47,4 @@ export type VexScoreProps = {
   /** Key signature for the staves (e.g. "G", "Bb", "F#"). */
   keySig?: string | null;
 };
+
