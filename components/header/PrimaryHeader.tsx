@@ -37,8 +37,8 @@ function writeAuthSeed(isAuthed: boolean) {
   if (typeof window !== 'undefined') window.__PTP_AUTH = isAuthed;
   if (typeof document !== 'undefined') {
     const maxAge = 60 * 60 * 24 * 7; // 7 days
-    const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; secure' : '';
-    document.cookie = `ptp_is_auth=${isAuthed ? '1' : '0'}; path=/; samesite=lax; max-age=${maxAge}${secure}`;
+    const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `ptp_is_auth=${isAuthed ? '1' : '0'}; Path=/; SameSite=Lax; Max-Age=${maxAge}${secure}`;
   }
 }
 
@@ -75,7 +75,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '', 
       }
     }
 
-    // Local-first session fetch (NO /auth/v1/user) — ONLY if we didn't get initialAuthed
+    // Local-first session fetch — ONLY if we didn't get initialAuthed
     (async () => {
       if (initialAuthed !== undefined) return;
       const { data: { session } } = await supabase.auth.getSession();

@@ -5,8 +5,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_SESSION_CONFIG, type SessionConfig } from "./session";
 import type { Phrase } from "@/utils/stage";
 import { parseMidiToPhraseAndLyrics } from "@/utils/midi/smf";
-// Removed: useStudentRow import (no fetch here)
-// import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 

@@ -38,6 +38,7 @@ export default function ModelSettingsForm() {
   const looksLikeMissingBucket = (e: unknown) => {
     const msg = (e as { message?: string })?.message?.toLowerCase?.() ?? '';
     return msg.includes('bucket') && msg.includes('not') && msg.includes('found');
+    // e.g. “bucket not found”
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -46,9 +47,11 @@ export default function ModelSettingsForm() {
     setIsLoading(true);
 
     try {
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (userErr) throw userErr;
-      const user = userRes.user;
+      // ✅ Local-only read (no /auth/v1/user)
+      const { data: { session }, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr) throw sessErr;
+
+      const user = session?.user;
       if (!user) throw new Error('You must be logged in.');
 
       const uid = user.id;
@@ -76,7 +79,7 @@ export default function ModelSettingsForm() {
         imagePath = objectName;
       }
 
-      // 2) Insert model row and RETURN its id
+      // 2) Insert model row and return id
       const { data: inserted, error: insertError } = await supabase
         .from('models')
         .insert({
@@ -87,12 +90,12 @@ export default function ModelSettingsForm() {
           privacy,
           image_path: imagePath,
         })
-        .select('id') // return the id
+        .select('id')
         .single();
 
       if (insertError) throw insertError;
 
-      // 3) Reset and redirect to training WITH model_id
+      // 3) Reset and navigate
       setName('');
       setGender('unspecified');
       setPrivacy('private');

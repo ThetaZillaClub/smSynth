@@ -13,43 +13,46 @@ const SKIP_PREFIXES = [
 ];
 
 // Best effort: reproduce Supabase auth cookie attributes when re-setting on a new response.
-// We only know name/value via .getAll(), so we re-apply sane defaults.
 function applySupabaseCookieDefaults(
-  name: string,
+  _name: string,
   request: NextRequest,
 ): { path: string; httpOnly: boolean; sameSite: "lax"; secure: boolean } {
-  // secure only when https (local dev often http)
   const xfProto = request.headers.get("x-forwarded-proto");
-  const isHttps =
-    request.nextUrl.protocol === "https:" || xfProto === "https";
-  return {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: !!isHttps,
-  };
+  const isHttps = request.nextUrl.protocol === "https:" || xfProto === "https";
+  return { path: "/", httpOnly: true, sameSite: "lax", secure: !!isHttps };
 }
 
 // Copy cookies from one NextResponse to another (used for redirects)
 function copyCookies(from: NextResponse, to: NextResponse, req: NextRequest) {
   for (const c of from.cookies.getAll()) {
     const opts = applySupabaseCookieDefaults(c.name, req);
-    to.cookies.set({
-      name: c.name,
-      value: c.value,
-      ...opts,
-    });
+    to.cookies.set({ name: c.name, value: c.value, ...opts });
   }
 }
 
 export async function updateSession(request: NextRequest, _ev?: NextFetchEvent) {
-  // Start with a pass-through response that carries the request (and its cookies)
-  let supabaseResponse = NextResponse.next({ request });
+  // Narrow WHEN the middleware does any auth work:
+  // - Only handle top-level navigations (HTML documents)
+  // - Skip prefetch/HEAD/background fetches
+  const dest = request.headers.get("sec-fetch-dest") || "";
+  const isDoc = dest === "document";
+  const isHead = request.method === "HEAD";
+  const isPrefetch =
+    request.headers.get("purpose") === "prefetch" ||
+    request.headers.get("next-router-prefetch") === "1";
 
   const { pathname, search } = request.nextUrl;
 
-  // Skip non-app paths
-  if (SKIP_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
+  // Start with a pass-through response that carries the request (and its cookies)
+  let supabaseResponse = NextResponse.next({ request });
+
+  // Skip non-app paths entirely
+  if (
+    SKIP_PREFIXES.some((p) => pathname === p || pathname.startsWith(p)) ||
+    !isDoc ||
+    isHead ||
+    isPrefetch
+  ) {
     return supabaseResponse;
   }
 
@@ -67,15 +70,15 @@ export async function updateSession(request: NextRequest, _ev?: NextFetchEvent) 
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) => {
-            // options available here → use them on the pass-through response
             supabaseResponse.cookies.set(name, value, options);
           });
         },
       },
-    },
+    }
   );
 
   // IMPORTANT: no code between client creation and getClaims()
+  // (Using getClaims() avoids the /auth/v1/user fetch in most cases.)
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
@@ -90,7 +93,7 @@ export async function updateSession(request: NextRequest, _ev?: NextFetchEvent) 
     const next = pathname + (search || "");
     if (next && next !== "/") url.searchParams.set("next", next);
 
-    // Create the redirect response and copy any Set-Cookie from supabaseResponse
+    // Preserve any Set-Cookie from Supabase
     const res = NextResponse.redirect(url);
     copyCookies(supabaseResponse, res, request);
     return res;

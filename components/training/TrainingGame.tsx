@@ -8,8 +8,6 @@ import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
 import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
-// Removed: useStudentRow import (we receive from router)
-// import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import {
   secondsPerBeat,

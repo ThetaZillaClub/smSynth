@@ -1,72 +1,91 @@
-'use client';
+'use client'
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
-import { getImageUrlCached } from '@/lib/client-cache';
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
+import { getImageUrlCached, ensureSessionReady } from '@/lib/client-cache'
 
-type ModelRow = { id: string; name: string; image_path: string | null };
+type ModelRow = { id: string; name: string; image_path: string | null }
 
 export default function MyModels() {
-  const supabase = useMemo(() => createClient(), []);
-  const [models, setModels] = useState<ModelRow[]>([]);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
+  const supabase = useMemo(() => createClient(), [])
+  const [rows, setRows] = useState<ModelRow[]>([])
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false
+
+    ;(async () => {
       try {
-        // RLS scopes to the current user; no need to fetch the user first
+        setErr(null)
+        setLoading(true)
+
+        // Wait for local session seed to avoid kicking /auth/v1/user early
+        await ensureSessionReady(supabase, 2500)
+
         const { data, error } = await supabase
           .from('models')
           .select('id,name,image_path')
-          .order('created_at', { ascending: false });
-        if (error) throw error;
+          .order('created_at', { ascending: false })
+        if (error) throw error
 
-        const rows = data ?? [];
-        setModels(rows);
+        const list = (data ?? []) as ModelRow[]
+        if (cancelled) return
+        setRows(list)
 
-        const urls: Record<string, string> = {};
-        await Promise.all(rows.map(async (m) => {
-          if (!m.image_path) return;
-          const url = await getImageUrlCached(supabase, m.image_path);
-          if (url) urls[m.id] = url;
-        }));
-        setImageUrls(urls);
-      } catch (e) {
-        console.error(e);
+        const urls: Record<string, string> = {}
+        await Promise.all(
+          list.map(async (m: ModelRow) => {
+            if (!m.image_path) return
+            const url = await getImageUrlCached(supabase, m.image_path)
+            if (url) urls[m.id] = url
+          })
+        )
+        if (!cancelled) setImageUrls(urls)
+      } catch (e: any) {
+        if (!cancelled) setErr(e?.message || 'Failed to load models.')
+        console.error(e)
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false)
       }
-    })();
-  }, [supabase]);
+    })()
 
-  if (loading) return <p className="text-center py-12">Loading your models…</p>;
+    return () => {
+      cancelled = true
+    }
+  }, [supabase])
+
+  if (loading) return <p className="text-center py-12">Loading your models…</p>
+  if (err) return <p className="text-center py-12 text-red-600">{err}</p>
 
   const Grid = (
     <div className="flex flex-wrap justify-center gap-8 max-w-4xl mx-auto">
-      {models.map((model) => (
+      {rows.map((row) => (
         <Link
-          key={model.id}
-          href={`/model/${model.id}`}
+          key={row.id}
+          href={`/model/${row.id}`}
           prefetch={false}
           className="flex flex-col items-center bg-[#ebebeb] border border-[#d2d2d2] rounded-lg shadow-md hover:shadow-lg transition-shadow basis-[calc(50%-1rem)] max-w-[calc(50%-1rem)] sm:max-w-none"
         >
           <div className="w-full aspect-square bg-gray-300 rounded-t-lg overflow-hidden">
-            {imageUrls[model.id] ? (
+            {imageUrls[row.id] ? (
               <img
-                src={imageUrls[model.id]}
-                alt={model.name}
+                src={imageUrls[row.id]}
+                alt={row.name}
                 className="w-full h-full object-cover"
                 loading="lazy"
                 decoding="async"
                 fetchPriority="low"
               />
             ) : (
-              <div className="w-full h-full grid place-items-center text-sm text-gray-600">No Image</div>
+              <div className="w-full h-full grid place-items-center text-sm text-gray-600">
+                No Image
+              </div>
             )}
           </div>
-          <p className="py-4 text-center font-medium text-[#0f0f0f]">{model.name}</p>
+          <p className="py-4 text-center font-medium text-[#0f0f0f]">{row.name}</p>
         </Link>
       ))}
 
@@ -85,9 +104,9 @@ export default function MyModels() {
         <p className="py-4 text-center font-medium text-[#0f0f0f]">Create New Model</p>
       </Link>
     </div>
-  );
+  )
 
-  if (models.length === 0) {
+  if (rows.length === 0) {
     return (
       <section className="w-full py-12">
         <h2 className="text-3xl font-bold mb-8 text-[#0f0f0f] text-center">My Models</h2>
@@ -96,7 +115,7 @@ export default function MyModels() {
         </div>
         {Grid}
       </section>
-    );
+    )
   }
 
   return (
@@ -104,5 +123,5 @@ export default function MyModels() {
       <h2 className="text-3xl font-bold mb-8 text-[#0f0f0f] text-center">My Models</h2>
       {Grid}
     </section>
-  );
+  )
 }

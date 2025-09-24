@@ -1,46 +1,51 @@
-'use client';
+'use client'
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
-import { getImageUrlCached } from '@/lib/client-cache';
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
+import { getImageUrlCached, ensureSessionReady } from '@/lib/client-cache'
 
-type ModelRow = { id: string; name: string; image_path: string | null };
+type ModelRow = { id: string; name: string; image_path: string | null }
 
 export default function MyStudents() {
-  const supabase = useMemo(() => createClient(), []);
-  const [rows, setRows] = useState<ModelRow[]>([]);
-  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
+  const supabase = useMemo(() => createClient(), [])
+  const [rows, setRows] = useState<ModelRow[]>([])
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    (async () => {
+    ;(async () => {
       try {
+        // avoid early unauthenticated query
+        await ensureSessionReady(supabase, 2500)
+
         const { data, error } = await supabase
           .from('models')
           .select('id,name,image_path')
-          .order('created_at', { ascending: false });
-        if (error) throw error;
+          .order('created_at', { ascending: false })
+        if (error) throw error
 
-        const list = data ?? [];
-        setRows(list);
+        const list = (data ?? []) as ModelRow[]
+        setRows(list)
 
-        const urls: Record<string, string> = {};
-        await Promise.all(list.map(async (m) => {
-          if (!m.image_path) return;
-          const url = await getImageUrlCached(supabase, m.image_path);
-          if (url) urls[m.id] = url;
-        }));
-        setImageUrls(urls);
+        const urls: Record<string, string> = {}
+        await Promise.all(
+          list.map(async (m: ModelRow) => {
+            if (!m.image_path) return
+            const url = await getImageUrlCached(supabase, m.image_path)
+            if (url) urls[m.id] = url
+          })
+        )
+        setImageUrls(urls)
       } catch (e) {
-        console.error(e);
+        console.error(e)
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    })();
-  }, [supabase]);
+    })()
+  }, [supabase])
 
-  if (loading) return <p className="text-center py-12">Loading your students…</p>;
+  if (loading) return <p className="text-center py-12">Loading your students…</p>
 
   const Grid = (
     <div className="flex flex-wrap justify-center gap-8 max-w-4xl mx-auto">
@@ -84,7 +89,7 @@ export default function MyStudents() {
         <p className="py-4 text-center font-medium text-[#0f0f0f]">Create New Student</p>
       </Link>
     </div>
-  );
+  )
 
   if (rows.length === 0) {
     return (
@@ -95,7 +100,7 @@ export default function MyStudents() {
         </div>
         {Grid}
       </section>
-    );
+    )
   }
 
   return (
@@ -103,5 +108,5 @@ export default function MyStudents() {
       <h2 className="text-3xl font-bold mb-8 text-[#0f0f0f] text-center">My Students</h2>
       {Grid}
     </section>
-  );
+  )
 }

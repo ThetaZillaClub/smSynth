@@ -58,7 +58,6 @@ export default function useStudentRow({
         const res = await fetch(url, {
           method: "GET",
           credentials: "include",
-          cache: "no-cache",      // 👈 avoid cached row
           signal: ac.signal,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
