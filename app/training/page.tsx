@@ -7,7 +7,7 @@ import CurriculumRouter from "@/components/game-navigation/CurriculumRouter";
 
 export default function TrainingPage() {
   const params = useSearchParams();
-  const modelId = params.get("model_id");
+  const studentId = params.get("student_id"); // ← only the new param
 
-  return <CurriculumRouter studentId={modelId} />;
+  return <CurriculumRouter studentId={studentId} />;
 }

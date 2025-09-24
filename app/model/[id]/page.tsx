@@ -16,14 +16,17 @@ export default function ModelDetailPage() {
       : Array.isArray(params?.id)
       ? params.id[0]
       : '';
+
   const sp = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
+
   const [m, setM] = useState<ModelRow | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [cardReady, setCardReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // Fire-and-forget: prime the active-student cookie
   const primeActiveStudent = useCallback((modelId: string) => {
     try {
       void fetch('/api/session/active-student', {
@@ -36,6 +39,7 @@ export default function ModelDetailPage() {
     } catch {}
   }, []);
 
+  // Load model row
   useEffect(() => {
     let cancelled = false;
     if (!id) return;
@@ -50,9 +54,7 @@ export default function ModelDetailPage() {
           credentials: 'include',
         });
         const body = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(body?.error || `Failed to load (status ${res.status})`);
-        }
+        if (!res.ok) throw new Error(body?.error || `Failed to load (status ${res.status})`);
         if (cancelled) return;
         setM((body ?? null) as ModelRow | null);
       } catch (e: any) {
@@ -67,7 +69,7 @@ export default function ModelDetailPage() {
     return () => { cancelled = true; };
   }, [id]);
 
-  // Resolve & preload the image; don’t reveal card bg until ready.
+  // Pre-sign & preload image; reveal card only when ready
   useEffect(() => {
     let cancelled = false;
 
@@ -95,29 +97,29 @@ export default function ModelDetailPage() {
     return () => { cancelled = true; };
   }, [m, supabase]);
 
+  // Build training link with NEW param name
   const sessionId = sp.get('sessionId');
   const trainingHref = sessionId
-    ? `/training?model_id=${encodeURIComponent(id)}&sessionId=${encodeURIComponent(sessionId)}`
-    : `/training?model_id=${encodeURIComponent(id)}`;
+    ? `/training?student_id=${encodeURIComponent(id)}&sessionId=${encodeURIComponent(sessionId)}`
+    : `/training?student_id=${encodeURIComponent(id)}`;
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
       <PrivateHeader />
       <div id="top" className="max-w-5xl mx-auto pt-28 p-6 w-full">
-        {loading ? (
-          null
-        ) : err ? (
+        {loading ? null : err ? (
           <p className="text-red-600 text-center">{err}</p>
         ) : !m ? (
           <p className="text-center text-[#373737]">Model not found.</p>
         ) : (
           <div className="grid grid-cols-1 gap-8">
             <StudentCard
+              key={m.id}                // ensures clean fade when switching models
               model={m}
               imgUrl={imgUrl}
               trainingHref={trainingHref}
               onPrime={() => primeActiveStudent(id)}
-              isReady={cardReady}            // ⬅️ tell the card when to show its gray bg
+              isReady={cardReady}       // whole-card fade after image ready
             />
           </div>
         )}

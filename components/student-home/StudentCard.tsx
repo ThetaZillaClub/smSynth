@@ -10,7 +10,8 @@ type Props = {
   imgUrl: string | null;
   trainingHref: string;
   onPrime: () => void;
-  isReady?: boolean; // driven by page.tsx after image preload
+  /** Driven by page.tsx after image preload/decoding. */
+  isReady?: boolean;
 };
 
 export default function StudentCard({
@@ -24,14 +25,15 @@ export default function StudentCard({
     <div
       data-ready={isReady ? '1' : '0'}
       aria-busy={!isReady}
-      className={`
-        bg-[#ebebeb] border border-[#d2d2d2] rounded-lg overflow-hidden
-        shadow-[0_10px_24px_rgba(15,15,15,0.08)]
-        transition-opacity duration-1000 will-change-[opacity]
-        ${isReady ? 'opacity-100' : 'opacity-0 pointer-events-none select-none'}
-      `}
+      className={[
+        'bg-[#ebebeb] border border-[#d2d2d2] rounded-lg overflow-hidden',
+        'shadow-[0_10px_24px_rgba(15,15,15,0.08)]',
+        // whole-card crossfade (reduced-motion aware)
+        'motion-safe:transition-opacity motion-safe:duration-700 will-change-[opacity]',
+        isReady ? 'opacity-100' : 'opacity-0 pointer-events-none select-none',
+      ].join(' ')}
     >
-      {/* Make the image instantly visible when the card isReady */}
+      {/* Image shows instantly once the card isReady (no inner fade). */}
       <StudentImage imgUrl={imgUrl} alt={model.name} visible={isReady} />
 
       <StudentMeta

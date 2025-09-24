@@ -5,16 +5,16 @@ import { useEffect, useRef, useState } from 'react';
 type Props = {
   imgUrl: string | null;
   alt: string;
-  /** When true, skip the internal fade and show immediately (card coordinates the fade). */
+  /** If true, skip internal fade (the card is doing the unified fade). */
   visible?: boolean;
 };
 
-/** Transparent reserved space; card controls the overall fade. */
+/** Transparent reserved space; outer card controls any visual transition. */
 export default function StudentImage({ imgUrl, alt, visible = false }: Props) {
   const [loaded, setLoaded] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
-  // Handle cached images (complete+naturalWidth)
+  // Handle cache hits (instant decode)
   useEffect(() => {
     setLoaded(false);
     const el = imgRef.current;
@@ -31,11 +31,12 @@ export default function StudentImage({ imgUrl, alt, visible = false }: Props) {
           ref={imgRef}
           src={imgUrl}
           alt={alt}
-          className={`
-            absolute inset-0 w-full h-full object-cover
-            transition-opacity duration-300
-            ${show ? 'opacity-100' : 'opacity-0'}
-          `}
+          // No inner fade when `visible` is true → prevents double-fade
+          className={[
+            'absolute inset-0 w-full h-full object-cover',
+            visible ? '' : 'transition-opacity duration-300',
+            show ? 'opacity-100' : 'opacity-0',
+          ].join(' ')}
           onLoad={() => setLoaded(true)}
           decoding="async"
           loading="eager"
@@ -43,7 +44,7 @@ export default function StudentImage({ imgUrl, alt, visible = false }: Props) {
           draggable={false}
         />
       ) : (
-        <div className="absolute inset-0 grid place-items-center text-sm text-[#6b6b6b]">
+        <div className="absolute inset-0 grid place-items-center text-sm text-[#6b6b6b]" aria-hidden>
           No Image
         </div>
       )}
