@@ -1,22 +1,21 @@
-// app/model/[id]/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import PrimaryHeader from '@/components/header/PrimaryHeader';
-
-type ModelRow = {
-  id: string;
-  name: string;
-  creator_display_name: string;
-  image_path: string | null;
-  privacy: 'public' | 'private';
-};
+import type { ModelRow } from '@/lib/client-cache';
+import { getImageUrlCached } from '@/lib/client-cache';
 
 export default function ModelDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const params = useParams();
+  const id =
+    typeof params?.id === 'string'
+      ? params.id
+      : Array.isArray(params?.id)
+      ? params.id[0]
+      : '';
   const sp = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const [m, setM] = useState<ModelRow | null>(null);
@@ -24,56 +23,81 @@ export default function ModelDetailPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // Fire-and-forget: prime the active-student cookie on click/tap/new-tab
+  const primeActiveStudent = useCallback((modelId: string) => {
+    try {
+      // keepalive so it survives navigation/new-tab
+      void fetch('/api/session/active-student', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: modelId }),
+        keepalive: true,
+      });
+    } catch {
+      // swallow — this is a hint, not a blocker
+    }
+  }, []);
+
   useEffect(() => {
+    let cancelled = false;
+    if (!id) return;
+
     (async () => {
       try {
         setErr(null);
         setLoading(true);
-        const { data, error } = await supabase
-          .from('models')
-          .select('id,name,creator_display_name,image_path,privacy')
-          .eq('id', id)
-          .maybeSingle();
-        if (error) throw error;
-        setM((data as any) ?? null);
+
+        // Use server route so RLS + cookies are respected (no client auth race)
+        const res = await fetch(`/api/student-session/${encodeURIComponent(id)}`, {
+          credentials: 'include',
+        });
+
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.error || `Failed to load (status ${res.status})`);
+        }
+
+        const data = (await res.json()) as ModelRow;
+        if (cancelled) return;
+        setM(data ?? null);
       } catch (e: any) {
+        if (cancelled) return;
         setErr(e?.message ?? 'Failed to load model.');
+        setM(null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [id, supabase]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
     (async () => {
-      if (!m?.image_path) { setImgUrl(null); return; }
-      try {
-        const { data: signed, error: signErr } = await supabase
-          .storage
-          .from('model-images')
-          .createSignedUrl(m.image_path, 60 * 60);
-        if (!signErr && signed?.signedUrl) {
-          if (mounted) setImgUrl(signed.signedUrl);
-          return;
-        }
-        const { data: pub } = supabase.storage.from('model-images').getPublicUrl(m.image_path);
-        if (mounted) setImgUrl(pub?.publicUrl ?? null);
-      } catch {
-        if (mounted) setImgUrl(null);
+      if (!m?.image_path) {
+        setImgUrl(null);
+        return;
       }
+      const url = await getImageUrlCached(supabase, m.image_path);
+      if (!cancelled) setImgUrl(url);
     })();
-    return () => { mounted = false; };
+    return () => {
+      cancelled = true;
+    };
   }, [m?.image_path, supabase]);
 
-  // Build training href (preserve optional ?sessionId=... passthrough if used downstream)
   const sessionId = sp.get('sessionId');
   const trainingHref = sessionId
-    ? `/training?model_id=${encodeURIComponent(String(id))}&sessionId=${encodeURIComponent(sessionId)}`
-    : `/training?model_id=${encodeURIComponent(String(id))}`;
+    ? `/training?model_id=${encodeURIComponent(id)}&sessionId=${encodeURIComponent(sessionId)}`
+    : `/training?model_id=${encodeURIComponent(id)}`;
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
+      {/* Header (no forced initialAuthed) */}
       <PrimaryHeader />
 
       <div id="top" className="max-w-5xl mx-auto pt-28 p-6 w-full">
@@ -89,13 +113,21 @@ export default function ModelDetailPage() {
               <div className="w-full aspect-square bg-gray-300">
                 {imgUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={imgUrl} alt={m.name} className="w-full h-full object-cover" />
+                  <img
+                    src={imgUrl}
+                    alt={m.name}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                    fetchPriority="low"
+                  />
                 ) : (
                   <div className="w-full h-full grid place-items-center text-sm text-gray-600">
                     No Image
                   </div>
                 )}
               </div>
+
               <div className="p-4">
                 <h1 className="text-2xl font-bold">{m.name}</h1>
                 <p className="text-sm text-[#373737] mt-1">by {m.creator_display_name}</p>
@@ -107,19 +139,22 @@ export default function ModelDetailPage() {
                 </div>
 
                 <div className="mt-4 flex gap-3">
-                  {/* Light CTA (brand) */}
                   <Link
                     href={trainingHref}
                     prefetch
                     className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] hover:bg-white transition"
+                    onMouseDown={() => primeActiveStudent(id)}
+                    onTouchStart={() => primeActiveStudent(id)}
+                    onAuxClick={() => primeActiveStudent(id)} // middle-click new tab
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') primeActiveStudent(id);
+                    }}
                   >
                     Launch Training
                   </Link>
                 </div>
               </div>
             </div>
-
-            {/* inference panel removed as before */}
           </div>
         )}
       </div>

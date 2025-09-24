@@ -1,8 +1,7 @@
 // lib/supabase/middleware.ts
 import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextRequest, type NextFetchEvent } from "next/server";
 
-/** Never guard these paths via auth redirect */
 const SKIP_PREFIXES = [
   "/api",
   "/_next",
@@ -13,7 +12,37 @@ const SKIP_PREFIXES = [
   "/icon",
 ];
 
-export async function updateSession(request: NextRequest) {
+// Best effort: reproduce Supabase auth cookie attributes when re-setting on a new response.
+// We only know name/value via .getAll(), so we re-apply sane defaults.
+function applySupabaseCookieDefaults(
+  name: string,
+  request: NextRequest,
+): { path: string; httpOnly: boolean; sameSite: "lax"; secure: boolean } {
+  // secure only when https (local dev often http)
+  const xfProto = request.headers.get("x-forwarded-proto");
+  const isHttps =
+    request.nextUrl.protocol === "https:" || xfProto === "https";
+  return {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: !!isHttps,
+  };
+}
+
+// Copy cookies from one NextResponse to another (used for redirects)
+function copyCookies(from: NextResponse, to: NextResponse, req: NextRequest) {
+  for (const c of from.cookies.getAll()) {
+    const opts = applySupabaseCookieDefaults(c.name, req);
+    to.cookies.set({
+      name: c.name,
+      value: c.value,
+      ...opts,
+    });
+  }
+}
+
+export async function updateSession(request: NextRequest, _ev?: NextFetchEvent) {
   // Start with a pass-through response that carries the request (and its cookies)
   let supabaseResponse = NextResponse.next({ request });
 
@@ -24,7 +53,7 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // New client per request (important for edge / fluid compute)
+  // New client per request
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY!,
@@ -34,25 +63,25 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          // Keep browser/server cookies in sync
+          // keep the request & response cookie views in sync
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options),
-          );
+          cookiesToSet.forEach(({ name, value, options }) => {
+            // options available here → use them on the pass-through response
+            supabaseResponse.cookies.set(name, value, options);
+          });
         },
       },
     },
   );
 
-  // IMPORTANT: don't insert code between client creation and getClaims()
+  // IMPORTANT: no code between client creation and getClaims()
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
   // Public routes
   const isAuthRoute = pathname.startsWith("/auth") || pathname.startsWith("/login");
-  const isPublicExact = pathname === "/";
-  const isPublic = isPublicExact || isAuthRoute;
+  const isPublic = pathname === "/" || isAuthRoute;
 
   // Enforce auth
   if (!user && !isPublic) {
@@ -60,7 +89,11 @@ export async function updateSession(request: NextRequest) {
     url.pathname = "/auth/login";
     const next = pathname + (search || "");
     if (next && next !== "/") url.searchParams.set("next", next);
-    return NextResponse.redirect(url);
+
+    // Create the redirect response and copy any Set-Cookie from supabaseResponse
+    const res = NextResponse.redirect(url);
+    copyCookies(supabaseResponse, res, request);
+    return res;
   }
 
   // Return the SAME response that carried any cookie updates

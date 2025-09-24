@@ -13,6 +13,8 @@ export interface SectionLink { href: string; label: string }
 export interface PrimaryHeaderProps {
   sections?: ReadonlyArray<SectionLink>;
   className?: string;
+  /** Passed from a Server Component so SSR and first client render match */
+  initialAuthed?: boolean;
 }
 
 /** augment window for our auth seed */
@@ -20,7 +22,7 @@ declare global {
   interface Window { __PTP_AUTH?: boolean }
 }
 
-/** read a fast local seed for SPA navigations (window global first, then cookie) */
+/** read a fast local seed for SPA navigations (window global first, then cookie) — only after mount */
 function readAuthSeed(): boolean | null {
   if (typeof window === 'undefined') return null;
   if (typeof window.__PTP_AUTH === 'boolean') return window.__PTP_AUTH;
@@ -49,33 +51,42 @@ const scrollElementIntoView = (el: Element) => {
   }
 };
 
-const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }) => {
+const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '', initialAuthed }) => {
   const supabase = useMemo(() => createClient(), []);
   const pathname = usePathname();
 
-  /**
-   * Phase logic:
-   * - First SSR/first client render: no seed -> phase 'boot' => skeleton (prevents hydration mismatch & FOUC)
-   * - SPA navigations: we have a seed -> phase 'ready' immediately (no flash of Login/Study)
-   */
-  const seed = readAuthSeed();
-  const [phase, setPhase] = useState<'boot' | 'ready'>(seed == null ? 'boot' : 'ready');
-  const [authed, setAuthed] = useState<boolean>(seed ?? false);
+  // SSR and the first client render are identical when `initialAuthed` is provided.
+  // If rendered without the server wrapper, we fall back to a 'boot' skeleton.
+  const [phase, setPhase] = useState<'boot' | 'ready'>(initialAuthed === undefined ? 'boot' : 'ready');
+  const [authed, setAuthed] = useState<boolean>(initialAuthed ?? false);
 
   useEffect(() => {
     let cancelled = false;
 
-    // resolve actual auth (local — no network) then flip to 'ready'
+    // Keep the seed in sync with SSR-provided value (no network)
+    if (initialAuthed !== undefined) writeAuthSeed(initialAuthed);
+
+    // Fast local seed AFTER mount (only used if no initialAuthed)
+    if (initialAuthed === undefined) {
+      const seeded = readAuthSeed();
+      if (seeded != null) {
+        setAuthed(seeded);
+        setPhase('ready');
+      }
+    }
+
+    // Local-first session fetch (NO /auth/v1/user) — ONLY if we didn't get initialAuthed
     (async () => {
-      const { data } = await supabase.auth.getUser();
+      if (initialAuthed !== undefined) return;
+      const { data: { session } } = await supabase.auth.getSession();
       if (cancelled) return;
-      const isAuthed = !!data.user;
+      const isAuthed = !!session?.user;
       setAuthed(isAuthed);
       writeAuthSeed(isAuthed);
       setPhase('ready');
     })();
 
-    // keep sync on any login/logout thereafter
+    // Live updates for login/logout/refresh — local-first
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       if (cancelled) return;
       const isAuthed = !!session?.user;
@@ -87,12 +98,13 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [supabase, initialAuthed]);
 
   const navLink = (href: string, label: string) => (
     <Link
       key={href}
       href={href}
+      prefetch={false}
       className={`
         text-base sm:font-medium font-medium
         text-[#0f0f0f]
@@ -138,7 +150,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         {pathname === '/' ? (
           <a href="#top" onClick={(e) => { e.preventDefault(); scrollToTop(); }}>{brandContent}</a>
         ) : (
-          <Link href="/">{brandContent}</Link>
+          <Link href="/" prefetch={false}>{brandContent}</Link>
         )}
       </div>
 
@@ -158,7 +170,7 @@ const PrimaryHeader: FC<PrimaryHeaderProps> = ({ sections = [], className = '' }
         </nav>
       ) : <div className="justify-self-center" />}
 
-      {/* Right side: skeleton on first SSR/CSR; instant correct UI on SPA navs via seed */}
+      {/* Right side */}
       <div className="justify-self-end flex items-center text-center md:text-sm space-x-1 sm:space-x-1 md:space-x-8">
         {phase === 'boot' ? (
           <div className="flex items-center gap-4">

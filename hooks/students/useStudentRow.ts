@@ -34,8 +34,19 @@ export default function useStudentRow({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // bump this whenever we hear “student-range-updated”
+  const [refreshTick, setRefreshTick] = useState(0);
+
   useEffect(() => {
+    const onRangeUpdated = () => setRefreshTick((t) => t + 1);
+    window.addEventListener("student-range-updated", onRangeUpdated as EventListener);
+    return () => window.removeEventListener("student-range-updated", onRangeUpdated as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const ac = new AbortController();
     let alive = true;
+
     (async () => {
       setLoading(true);
       setErr(null);
@@ -43,7 +54,13 @@ export default function useStudentRow({
         const url = studentIdFromQuery
           ? `/api/students/${encodeURIComponent(studentIdFromQuery)}`
           : `/api/students/current`;
-        const res = await fetch(url, { method: "GET" });
+
+        const res = await fetch(url, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-cache",      // 👈 avoid cached row
+          signal: ac.signal,
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const row: StudentRow | null = await res.json();
 
@@ -62,7 +79,7 @@ export default function useStudentRow({
           setRangeHighLabel(null);
         }
       } catch (e: any) {
-        if (!alive) return;
+        if (!alive || ac.signal.aborted) return;
         setErr(e?.message || String(e));
         setStudentRowId(null);
         setStudentName(null);
@@ -73,10 +90,12 @@ export default function useStudentRow({
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
+      ac.abort();
     };
-  }, [studentIdFromQuery]);
+  }, [studentIdFromQuery, refreshTick]); // 👈 refetch when the event bumps tick
 
   return {
     studentRowId,

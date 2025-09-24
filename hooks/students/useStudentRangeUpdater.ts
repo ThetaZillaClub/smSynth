@@ -1,3 +1,4 @@
+// hooks/students/useStudentRangeUpdater.ts
 "use client";
 import { useRef, useEffect, useCallback } from "react";
 
@@ -13,8 +14,18 @@ export default function useStudentRangeUpdater(studentRowId: string | null) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        credentials: "include",
+        keepalive: true,
       });
-      if (!res.ok) {
+
+      if (res.ok) {
+        // 🔔 tell the app someone changed the range
+        try {
+          window.dispatchEvent(new CustomEvent("student-range-updated", {
+            detail: { which, label: noteLabel, studentRowId: idRef.current },
+          }));
+        } catch {}
+      } else {
         const err = await res.json().catch(() => ({}));
         // eslint-disable-next-line no-console
         console.warn(`[student range] update failed:`, err?.error || `HTTP ${res.status}`);

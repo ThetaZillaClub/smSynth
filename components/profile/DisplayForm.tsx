@@ -2,32 +2,44 @@
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function DisplayForm({
   initialDisplayName,
   onSuccess,
-}: { initialDisplayName: string, onSuccess: (newName: string) => void }) {
+}: { initialDisplayName: string; onSuccess: (newName: string) => void }) {
   const supabase = useMemo(() => createClient(), []);
-  const [displayName, setDisplayName] = useState(initialDisplayName);
+  const [displayName, setDisplayName] = useState(initialDisplayName ?? "");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // keep input in sync if parent passes a fresh name after save
+  useEffect(() => {
+    setDisplayName(initialDisplayName ?? "");
+  }, [initialDisplayName]);
+
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const next = displayName.trim();
+
+    if (!next) { setError("Display name can’t be empty."); return; }
+    if (next === (initialDisplayName ?? "").trim()) {
+      setError("That’s already your display name."); return;
+    }
+
     setIsLoading(true);
     setError(null);
     setSuccess(false);
+
     try {
-      const { error } = await supabase.auth.updateUser({
-        data: { display_name: displayName }
-      });
+      const { data, error } = await supabase.auth.updateUser({ data: { display_name: next } });
       if (error) throw error;
+      const saved = (data?.user?.user_metadata as any)?.display_name ?? next;
       setSuccess(true);
-      onSuccess(displayName);
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+      onSuccess(saved);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
     } finally {
       setIsLoading(false);
     }
@@ -41,6 +53,7 @@ export default function DisplayForm({
         <Input
           id="displayName"
           type="text"
+          autoComplete="name"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
           className="h-10 rounded-md bg-[#ebebeb] text-[#0f0f0f] border border-[#d2d2d2] focus:border-[#0f0f0f] focus:ring-0"
