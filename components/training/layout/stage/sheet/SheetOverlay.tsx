@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { PR_COLORS, getMidiRange, type Phrase } from "@/utils/stage";
-import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
+import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { SystemLayout } from "./vexscore/types";
 
 type Props = {
@@ -88,8 +88,13 @@ function yFromMidiOnStaff(
 ): number {
   const nearest = Math.round(midiFloat);
 
-  // Name & octave are scientific, C-anchored (so A3 really is A3, etc.)
-  const { name, octave } = midiToNoteName(nearest, { useSharps, octaveAnchor: "C" });
+  // C-anchored scientific pitch (MIDI 60 -> C4)
+  const pc = ((nearest % 12) + 12) % 12;
+  const octave = Math.floor(nearest / 12) - 1;
+  const name = (useSharps
+    ? ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
+    : ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","Cb"]
+  )[pc];
 
   // Diatonic step relative to the clef’s bottom line (no folding!)
   const L = LETTER_TO_IDX[name[0] as keyof typeof LETTER_TO_IDX] ?? 0;
@@ -328,4 +333,3 @@ export default function SheetOverlay({
     />
   );
 }
-

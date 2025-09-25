@@ -80,6 +80,10 @@ export default function TrainingGame({
     exerciseLoops,
     regenerateBetweenTakes,
     metronome,
+    // 👇 NEW: pass these through to the generators
+    tonicMidis,
+    randomIncludeUnder,
+    randomIncludeOver,
   } = sessionConfig;
 
   const secPerBeat = secondsPerBeat(bpm, ts.den);
@@ -174,6 +178,8 @@ export default function TrainingGame({
         ],
         gapRhythm: [{ type: "rest", value: "eighth" }],
         seed: scaleSeed,
+        // ✅ honor tonic windows
+        tonicMidis: tonicMidis ?? null,
       });
       return { phrase, melodyRhythm: null };
     }
@@ -206,6 +212,8 @@ export default function TrainingGame({
         pattern: (rhythm as any).pattern,
         noteQuota: want,
         seed: scaleSeed,
+        // ✅ clamp to selected tonic window(s): do→do
+        tonicMidis: tonicMidis ?? null,
       });
       return { phrase, melodyRhythm: fabric };
     }
@@ -231,6 +239,10 @@ export default function TrainingGame({
       rhythm: fabric,
       maxPerDegree: scale.maxPerDegree ?? 2,
       seed: scaleSeed,
+      // ✅ enforce windows; allow explicit under/over only if toggled
+      tonicMidis: tonicMidis ?? null,
+      includeUnder: !!randomIncludeUnder,
+      includeOver: !!randomIncludeOver,
     });
     return { phrase, melodyRhythm: fabric };
   }, [
@@ -247,6 +259,9 @@ export default function TrainingGame({
     rhythmSeed,
     scaleSeed,
     lengthBars,
+    tonicMidis,
+    randomIncludeUnder,
+    randomIncludeOver,
   ]);
 
   const phrase: Phrase | null = useMemo(() => {
@@ -378,7 +393,6 @@ export default function TrainingGame({
   });
 
   // ------------------------ METRONOME LEAD-IN (single-shot, anchor keyed) ----
-  // Schedule ticks **once per take**, keyed to the loop's anchor timestamp.
   const scheduledLeadAnchorRef = useRef<number | null>(null);
   useEffect(() => {
     if (pretestActive) return;               // never tick during pre-test
@@ -439,7 +453,6 @@ export default function TrainingGame({
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
     >
-      {/* Panels */}
       {pretestActive ? (
         <PretestPanel
           statusText={statusText}
@@ -467,7 +480,6 @@ export default function TrainingGame({
         )
       )}
 
-      {/* Minimal post-pretest confirm (no extra "Begin" step) */}
       {!pretestActive && (callResponseSequence?.length ?? 0) > 0 && pretest.status === "done" && !pretestDismissed ? (
         <div className="mt-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
           <div className="flex items-center justify-between">

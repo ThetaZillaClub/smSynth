@@ -85,6 +85,12 @@ export type SessionConfig = {
 
   /** NEW: if true, regenerate a new phrase between takes */
   regenerateBetweenTakes: boolean;
+  /** NEW: Absolute tonic(s) to anchor exercises (MIDI numbers, e.g., B2=47). */
+  tonicMidis?: number[] | null;
+  /** NEW: Random mode only — also allow notes *below the lowest selected tonic* window. */
+  randomIncludeUnder?: boolean;
+  /** NEW: Random mode only — also allow notes *above the highest selected tonic* window. */
+  randomIncludeOver?: boolean;
 };
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
@@ -117,4 +123,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   callResponseSequence: [],          // no defaults: user chooses
   exerciseLoops: 24,                 // 24 takes
   regenerateBetweenTakes: false,     // optional
+  tonicMidis: null,
+  randomIncludeUnder: false,
+  randomIncludeOver: false,
 };

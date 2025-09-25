@@ -1,5 +1,4 @@
 // components/training/layout/sheet/vexscore/builders.ts
-import { midiToNoteName } from "@/utils/pitch/pitchMath";
 import type { NoteValue } from "@/utils/time/tempo";
 import { Beam } from "vexflow";
 
@@ -134,17 +133,24 @@ export function preferSharpsForKeySig(key: string | null | undefined): boolean {
 
 /**
  * Convert MIDI → VexFlow key string + (only-if-needed) accidental **relative to key signature**.
- * If `keyMap` is omitted, fallback is to attach accidentals directly from the pitch spelling.
+ * Uses SCIENTIFIC pitch: MIDI 60 → C4. Independent of any external octave-anchor.
  */
 export function midiToVexKey(
   midi: number,
   useSharps: boolean,
   keyMap?: Record<"A"|"B"|"C"|"D"|"E"|"F"|"G", ""|"#"|"b">
 ): { key: string; accidental: "#"|"b"|"n"|null } {
-  const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
+  const m = Math.round(midi);
+  const pc = ((m % 12) + 12) % 12;
+  const octave = Math.floor(m / 12) - 1; // SCIENTIFIC: MIDI 60 -> 4
+
+  const name = (useSharps ? SHARP_NAMES : FLAT_NAMES)[pc]; // e.g. "C#", "Bb", "E"
   const letter = name[0]!.toUpperCase() as "A"|"B"|"C"|"D"|"E"|"F"|"G";
   const actualAcc = (name.length > 1 ? name.slice(1) : "") as ""|"#"|"b";
-  const key = actualAcc ? `${letter.toLowerCase()}${actualAcc}/${octave}` : `${letter.toLowerCase()}/${octave}`;
+
+  const key = actualAcc
+    ? `${letter.toLowerCase()}${actualAcc}/${octave}`
+    : `${letter.toLowerCase()}/${octave}`;
 
   if (!keyMap) {
     return { key, accidental: actualAcc || null };

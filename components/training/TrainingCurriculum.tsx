@@ -15,6 +15,7 @@ import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard"
 import ScaleCard from "./curriculum-layout/Scale/ScaleCard";
 import RhythmCard from "./curriculum-layout/Rhythm/RhythmCard";
 import CallResponseCard from "./curriculum-layout/CallResponse/CallResponseCard";
+import RangeCard from "./curriculum-layout/Range/RangeCard";
 
 function safeParsePhrase(s: string): Phrase | null {
   try {
@@ -181,6 +182,13 @@ export default function TrainingCurriculum({
               onChange={pushChange}
               allowedTonicPcs={allowedTonicPcs}
               rangeHint={rangeHint}
+            />
+             {/* NEW: absolute-tonic windows within the saved vocal range */}
+             <RangeCard
+              cfg={cfg}
+              lowHz={lowHz ?? null}
+              highHz={highHz ?? null}
+              onChange={pushChange}
             />
             <RhythmCard cfg={cfg} onChange={pushChange} />
           </div>
