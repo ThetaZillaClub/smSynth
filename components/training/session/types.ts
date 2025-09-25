@@ -1,18 +1,17 @@
-// components/training/layout/session/types.ts
+// Updated components\training\session\types.ts (add new fields)
 import type { TimeSignature } from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/stage";
 import type { NoteValue } from "@/utils/time/tempo";
 import type { ScaleName } from "@/utils/phrase/scales";
+import type { RootPreference } from "@/utils/phrase/generator";
 
 export type LyricStrategy = "solfege";
-
 export type ScaleConfig = {
   tonicPc: number;
   name: ScaleName;
   maxPerDegree?: number;
   seed?: number; // kept for compatibility (not shown in UI)
 };
-
 export type RhythmConfig =
   | {
       mode: "sequence";
@@ -41,10 +40,23 @@ export type RhythmConfig =
       /** Exercise length in bars (now lives on rhythm) */
       lengthBars?: number;
       seed?: number;
+    }
+  | {
+      mode: "interval";
+      available?: NoteValue[];
+      restProb?: number;
+      allowRests?: boolean;
+      /** Phrase (scale content) rest controls */
+      contentRestProb?: number;
+      contentAllowRests?: boolean;
+      /** Interval mode specific */
+      intervals: number[];
+      octaves: number;
+      preference: RootPreference;
+      numIntervals: number;
+      seed?: number;
     };
-
 export type ViewMode = "piano" | "sheet";
-
 export type SessionConfig = {
   bpm: number;
   ts: TimeSignature;
@@ -56,15 +68,17 @@ export type SessionConfig = {
   exerciseBars: number;
   noteValue?: NoteValue;
   noteDurSec?: number;
-  lyricStrategy: "solfege";
+  lyricStrategy: LyricStrategy;
   scale?: ScaleConfig;
   rhythm?: RhythmConfig;
   customPhrase?: Phrase | null;
   customWords?: string[] | null;
   /** session view mode */
   view: ViewMode;
+  metronome: boolean;
+  callResponse: boolean;
+  advancedMode: boolean;
 };
-
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   bpm: 80,
   ts: { num: 4, den: 4 },
@@ -88,5 +102,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   customPhrase: null,
   customWords: null,
   view: "piano",
+  metronome: true,
+  callResponse: true,
+  advancedMode: false,
 };
-

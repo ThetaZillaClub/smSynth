@@ -1,9 +1,4 @@
-/*  GC-friendly AudioWorklet that:
- *    • buffers to an exact power-of-two size (passed in from main thread)
- *    • uses double-buffering + Transferable ArrayBuffers (zero-copy)
- *    • exposes a “flush” command so the main thread can force-send the tail
- *    • **downmixes any number of input channels to true mono**
- */
+// public/audio-processor.js
 class AudioProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() { return []; }
 
@@ -13,9 +8,7 @@ class AudioProcessor extends AudioWorkletProcessor {
     this.buffers = [new Float32Array(this.size), new Float32Array(this.size)];
     this.active = 0;
     this.offset = 0;
-
     this.mix = null; // temp mix buffer per render quantum
-
     this.port.onmessage = ({ data }) => {
       if (data === 'flush') this.flush();
     };
@@ -24,7 +17,7 @@ class AudioProcessor extends AudioWorkletProcessor {
   flush() {
     if (this.offset === 0) return;
     const view = this.buffers[this.active].subarray(0, this.offset);
-    this.port.postMessage(view, [view.buffer]);             // zero-copy
+    this.port.postMessage(view, [view.buffer]); // zero-copy
     this.buffers[this.active] = new Float32Array(this.size); // re-alloc
     this.active ^= 1;
     this.offset = 0;
@@ -33,15 +26,12 @@ class AudioProcessor extends AudioWorkletProcessor {
   process(inputs) {
     const input = inputs[0];
     if (!input || input.length === 0) return true;
-
-    const channels = input;                // [Float32Array, ...]
+    const channels = input; // [Float32Array, ...]
     const numCh = channels.length;
     const frames = channels[0]?.length || 0;
     if (!frames) return true;
-
     // ensure temp mix buffer
     if (!this.mix || this.mix.length !== frames) this.mix = new Float32Array(frames);
-
     // downmix to mono (avg all channels)
     this.mix.fill(0);
     for (let ch = 0; ch < numCh; ch++) {
@@ -50,7 +40,6 @@ class AudioProcessor extends AudioWorkletProcessor {
     }
     const inv = 1 / numCh;
     for (let i = 0; i < frames; i++) this.mix[i] *= inv;
-
     // write into our ring buffer
     let i = 0;
     while (i < frames) {

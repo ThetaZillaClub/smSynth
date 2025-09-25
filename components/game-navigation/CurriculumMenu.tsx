@@ -104,10 +104,6 @@ export default function CurriculumMenu({ studentName, onStart }: Props) {
           </div>
         </div>
       </div>
-
-      <footer className="px-6 py-4 text-xs text-[#373737]">
-        Prototype curriculum — more modes unlocking soon.
-      </footer>
     </div>
   );
 }

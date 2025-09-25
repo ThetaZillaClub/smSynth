@@ -1,9 +1,8 @@
-// components/training/curriculum-layout/Rhythm/RhythmCard.tsx
+// components\training\curriculum-layout\Rhythm\RhythmCard.tsx
 "use client";
 import React, { useMemo } from "react";
 import type { SessionConfig } from "../../session/types";
 import Field from "../Field";
-
 function FancyCheckbox({
   checked,
   onChange,
@@ -49,7 +48,6 @@ function FancyCheckbox({
     </button>
   );
 }
-
 function RestControls({
   allowRests,
   restProb,
@@ -87,7 +85,6 @@ function RestControls({
     </>
   );
 }
-
 export default function RhythmCard({
   cfg,
   onChange,
@@ -104,13 +101,10 @@ export default function RhythmCard({
       }) as any,
     [cfg.rhythm]
   );
-
   const lineEnabled: boolean = rhythmCfg.lineEnabled !== false;
-
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">Rhythm Line</div>
-
       <Field label="Rhythm line">
         <FancyCheckbox
           checked={lineEnabled}
@@ -118,7 +112,6 @@ export default function RhythmCard({
           label={<span>{lineEnabled ? "Shown" : "Hidden"}</span>}
         />
       </Field>
-
       {lineEnabled ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
           <RestControls
