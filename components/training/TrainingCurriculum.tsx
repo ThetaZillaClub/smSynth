@@ -2,28 +2,16 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_SESSION_CONFIG, type SessionConfig } from "./session";
-import type { Phrase } from "@/utils/stage";
 import { parseMidiToPhraseAndLyrics } from "@/utils/midi/smf";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 import TransportCard from "./curriculum-layout/TransportCard/TransportCard";
 import ImportMidiCard from "./curriculum-layout/ImportMidi/ImportMidiCard";
-import AdvancedOverridesCard from "./curriculum-layout/AdvancedOverrides/AdvancedOverridesCard";
-import CustomLyricsCard from "./curriculum-layout/CustomLyrics/CustomLyricsCard";
 import ViewSelectCard from "./curriculum-layout/ViewSelect/ViewSelectCard";
 import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard";
 import ScaleCard from "./curriculum-layout/Scale/ScaleCard";
-import RhythmCard from "./curriculum-layout/Rhythm/RhythmCard";
 import CallResponseCard from "./curriculum-layout/CallResponse/CallResponseCard";
 import RangeCard from "./curriculum-layout/Range/RangeCard";
-
-function safeParsePhrase(s: string): Phrase | null {
-  try {
-    const v = JSON.parse(s);
-    if (v && Array.isArray(v.notes) && typeof v.durationSec === "number") return v as Phrase;
-  } catch {}
-  return null;
-}
 
 export default function TrainingCurriculum({
   onStart,
@@ -42,12 +30,6 @@ export default function TrainingCurriculum({
   );
 
   const [cfg, setCfg] = useState<SessionConfig>(init);
-  const [phraseJson, setPhraseJson] = useState(
-    cfg.customPhrase ? JSON.stringify(cfg.customPhrase, null, 2) : ""
-  );
-  const [customLyrics, setCustomLyrics] = useState(
-    Array.isArray(cfg.customWords) ? cfg.customWords.join(", ") : ""
-  );
 
   const { lowHz, highHz } = useStudentRange(null, {
     rangeLowLabel: rangeLowLabel ?? null,
@@ -129,20 +111,14 @@ export default function TrainingCurriculum({
   }, []);
 
   const launch = useCallback(() => {
-    const p = phraseJson.trim() ? safeParsePhrase(phraseJson.trim()) : cfg.customPhrase ?? null;
-    const w = customLyrics.trim()
-      ? customLyrics.split(",").map((s) => s.trim()).filter(Boolean)
-      : cfg.customWords ?? null;
-    onStart({ ...cfg, customPhrase: p, customWords: w });
-  }, [cfg, onStart, phraseJson, customLyrics]);
+    onStart(cfg);
+  }, [cfg, onStart]);
 
   const onMidiFile = useCallback(async (file: File) => {
     const buf = await file.arrayBuffer();
     try {
       const { phrase, lyrics } = parseMidiToPhraseAndLyrics(buf);
       setCfg((c) => ({ ...c, customPhrase: phrase, customWords: lyrics }));
-      setPhraseJson(JSON.stringify(phrase, null, 2));
-      setCustomLyrics(lyrics.join(", "));
     } catch (e) {
       alert("Failed to parse MIDI: " + (e as Error)?.message);
     }
@@ -163,6 +139,7 @@ export default function TrainingCurriculum({
       {/* Body */}
       <div className="w-full flex-1 flex flex-col gap-4 min-h-0 px-6 pb-6">
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
+          {/* Column 1: Transport & Session, Import MIDI (moved here), Call & Response */}
           <div className="flex flex-col gap-3">
             <TransportCard
               bpm={cfg.bpm}
@@ -175,53 +152,47 @@ export default function TrainingCurriculum({
               onChange={pushChange}
             />
 
-            {/* Split cards: Exercise Mode, then Scale and Rhythm */}
-            <SequenceModeCard cfg={cfg} onChange={pushChange} />
+            <ImportMidiCard
+              hasPhrase={!!cfg.customPhrase}
+              onClear={() => {
+                setCfg((c) => ({ ...c, customPhrase: null, customWords: null }));
+              }}
+              onFile={onMidiFile}
+            />
+
+            {/* Pre-Test */}
+            <CallResponseCard cfg={cfg} onChange={pushChange} />
+          </div>
+
+          {/* Column 2: View, Scale, Exercise Mode, Range/Tonic Windows (moved here) */}
+          <div className="flex flex-col gap-3">
+            <ViewSelectCard value={cfg.view} onChange={pushChange} />
             <ScaleCard
               cfg={cfg}
               onChange={pushChange}
               allowedTonicPcs={allowedTonicPcs}
               rangeHint={rangeHint}
             />
-             {/* NEW: absolute-tonic windows within the saved vocal range */}
-             <RangeCard
+            <SequenceModeCard cfg={cfg} onChange={pushChange} />
+            <RangeCard
               cfg={cfg}
               lowHz={lowHz ?? null}
               highHz={highHz ?? null}
               onChange={pushChange}
             />
-            <RhythmCard cfg={cfg} onChange={pushChange} />
           </div>
 
-          <div className="flex flex-col gap-3">
-            <ViewSelectCard value={cfg.view} onChange={pushChange} />
-
-            <ImportMidiCard
-              hasPhrase={!!cfg.customPhrase}
-              onClear={() => {
-                setCfg((c) => ({ ...c, customPhrase: null, customWords: null }));
-                setPhraseJson("");
-                setCustomLyrics("");
-              }}
-              onFile={onMidiFile}
-            />
-
-            <AdvancedOverridesCard phraseJson={phraseJson} setPhraseJson={setPhraseJson} />
-            <CustomLyricsCard value={customLyrics} onChange={setCustomLyrics} />
-            <CallResponseCard cfg={cfg} onChange={pushChange} />
+          {/* Start button under column 2, slightly inset from the right edge */}
+          <div className="lg:col-start-2 flex justify-end pr-2 pt-1">
+            <button
+              type="button"
+              onClick={launch}
+              className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm"
+              title="Begin session"
+            >
+              Start session →
+            </button>
           </div>
-        </div>
-
-        {/* Start */}
-        <div className="w-full max-w-7xl mx-auto flex justify-center pt-1">
-          <button
-            type="button"
-            onClick={launch}
-            className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm"
-            title="Begin session"
-          >
-            Start session →
-          </button>
         </div>
       </div>
     </div>

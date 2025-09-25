@@ -80,10 +80,6 @@ export default function TrainingGame({
     exerciseLoops,
     regenerateBetweenTakes,
     metronome,
-    // 👇 NEW: pass these through to the generators
-    tonicMidis,
-    randomIncludeUnder,
-    randomIncludeOver,
   } = sessionConfig;
 
   const secPerBeat = secondsPerBeat(bpm, ts.den);
@@ -178,8 +174,8 @@ export default function TrainingGame({
         ],
         gapRhythm: [{ type: "rest", value: "eighth" }],
         seed: scaleSeed,
-        // ✅ honor tonic windows
-        tonicMidis: tonicMidis ?? null,
+        tonicMidis: sessionConfig.tonicMidis ?? null,
+        allowedMidis: sessionConfig.allowedMidis ?? null,
       });
       return { phrase, melodyRhythm: null };
     }
@@ -212,8 +208,8 @@ export default function TrainingGame({
         pattern: (rhythm as any).pattern,
         noteQuota: want,
         seed: scaleSeed,
-        // ✅ clamp to selected tonic window(s): do→do
-        tonicMidis: tonicMidis ?? null,
+        tonicMidis: sessionConfig.tonicMidis ?? null,
+        allowedMidis: sessionConfig.allowedMidis ?? null,
       });
       return { phrase, melodyRhythm: fabric };
     }
@@ -239,10 +235,10 @@ export default function TrainingGame({
       rhythm: fabric,
       maxPerDegree: scale.maxPerDegree ?? 2,
       seed: scaleSeed,
-      // ✅ enforce windows; allow explicit under/over only if toggled
-      tonicMidis: tonicMidis ?? null,
-      includeUnder: !!randomIncludeUnder,
-      includeOver: !!randomIncludeOver,
+      tonicMidis: sessionConfig.tonicMidis ?? null,
+      includeUnder: !!sessionConfig.randomIncludeUnder,
+      includeOver: !!sessionConfig.randomIncludeOver,
+      allowedMidis: sessionConfig.allowedMidis ?? null,
     });
     return { phrase, melodyRhythm: fabric };
   }, [
@@ -259,9 +255,10 @@ export default function TrainingGame({
     rhythmSeed,
     scaleSeed,
     lengthBars,
-    tonicMidis,
-    randomIncludeUnder,
-    randomIncludeOver,
+    sessionConfig.tonicMidis,
+    sessionConfig.allowedMidis,
+    sessionConfig.randomIncludeUnder,
+    sessionConfig.randomIncludeOver,
   ]);
 
   const phrase: Phrase | null = useMemo(() => {
@@ -395,13 +392,13 @@ export default function TrainingGame({
   // ------------------------ METRONOME LEAD-IN (single-shot, anchor keyed) ----
   const scheduledLeadAnchorRef = useRef<number | null>(null);
   useEffect(() => {
-    if (pretestActive) return;               // never tick during pre-test
-    if (!metronome) return;                  // transport toggle
+    if (pretestActive) return;
+    if (!metronome) return;
     if (leadBeats <= 0) return;
-    if (loop.loopPhase !== "record") return; // legacy flow: record phase includes pre-roll
+    if (loop.loopPhase !== "record") return;
     if (loop.anchorMs == null) return;
 
-    if (scheduledLeadAnchorRef.current === loop.anchorMs) return; // already scheduled for this take
+    if (scheduledLeadAnchorRef.current === loop.anchorMs) return;
     scheduledLeadAnchorRef.current = loop.anchorMs;
 
     void playLeadInTicks(leadBeats, secPerBeat, loop.anchorMs);
@@ -453,6 +450,7 @@ export default function TrainingGame({
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
     >
+      {/* Panels */}
       {pretestActive ? (
         <PretestPanel
           statusText={statusText}
@@ -480,6 +478,7 @@ export default function TrainingGame({
         )
       )}
 
+      {/* Minimal post-pretest confirm */}
       {!pretestActive && (callResponseSequence?.length ?? 0) > 0 && pretest.status === "done" && !pretestDismissed ? (
         <div className="mt-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
           <div className="flex items-center justify-between">
