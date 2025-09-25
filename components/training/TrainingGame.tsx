@@ -29,6 +29,8 @@ import {
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
 import { keyNameFromTonicPc, pickClef } from "./layout/stage/sheet/vexscore/builders";
 import usePretest from "@/hooks/gameplay/usePretest";
+import { hzToMidi } from "@/utils/pitch/pitchMath";
+import { isInScale } from "@/utils/phrase/scales";
 
 type Props = {
   title?: string;
@@ -296,14 +298,67 @@ export default function TrainingGame({
     return keyNameFromTonicPc(scale.tonicPc, scale.name as any, true);
   }, [scale]);
 
+  // ----- Stable clef selection derived from the user’s *selected notes* (C4 boundary) -----
   const melodyClef: "treble" | "bass" | null = useMemo(() => {
-    if (!phrase) return null;
-    try {
-      return pickClef(phrase);
-    } catch {
-      return null;
+    if (!scale || !haveRange) {
+      return phrase ? pickClef(phrase) : null;
     }
-  }, [phrase]);
+
+    const a4 = 440;
+    const loM = Math.round(hzToMidi(lowHz as number, a4));
+    const hiM = Math.round(hzToMidi(highHz as number, a4));
+    const lo = Math.min(loM, hiM);
+    const hi = Math.max(loM, hiM);
+
+    // 1) scale-filtered notes within saved range
+    let allowed: number[] = [];
+    for (let m = lo; m <= hi; m++) {
+      const pc = ((m % 12) + 12) % 12;
+      if (isInScale(pc, scale.tonicPc, scale.name as any)) allowed.push(m);
+    }
+
+    // 2) apply tonic windows (+under/over)
+    const tWins = sessionConfig.tonicMidis ?? null;
+    if (tWins && tWins.length) {
+      const sorted = Array.from(new Set(tWins.map((x) => Math.round(x)))).sort((a, b) => a - b);
+      const windows = sorted.map((T) => [T, T + 12] as const);
+      const minStart = windows[0][0];
+      const maxEnd = windows[windows.length - 1][1];
+      const inAny = (m: number) => windows.some(([s, e]) => m >= s && m <= e);
+      const underOk = !!sessionConfig.randomIncludeUnder ? (m: number) => m < minStart : () => false;
+      const overOk  = !!sessionConfig.randomIncludeOver  ? (m: number) => m > maxEnd  : () => false;
+      const filtered = allowed.filter((m) => inAny(m) || underOk(m) || overOk(m));
+      if (filtered.length) allowed = filtered;
+    }
+
+    // 3) apply per-note whitelist
+    const whitelist = sessionConfig.allowedMidis ?? null;
+    if (whitelist && whitelist.length) {
+      const allowSet = new Set(whitelist.map((m) => Math.round(m)));
+      const filtered = allowed.filter((m) => allowSet.has(m));
+      if (filtered.length) allowed = filtered;
+    }
+
+    if (!allowed.length) {
+      return phrase ? pickClef(phrase) : "treble";
+    }
+
+    // 4) majority relative to C4 (MIDI 60). Tie → treble.
+    const uniq = Array.from(new Set(allowed));
+    const below = uniq.filter((m) => m < 60).length;
+    const atOrAbove = uniq.length - below;
+    return atOrAbove >= below ? "treble" : "bass";
+  }, [
+    scale,
+    haveRange,
+    lowHz,
+    highHz,
+    sessionConfig.tonicMidis,
+    sessionConfig.randomIncludeUnder,
+    sessionConfig.randomIncludeOver,
+    sessionConfig.allowedMidis,
+    phrase,
+  ]);
 
   const {
     isRecording,

@@ -170,6 +170,8 @@ export default function GameLayout({
               keySig={keySig}
               /* view mode */
               view={view}
+              /* force a stable melody clef for the score/overlay */
+              clef={clef ?? undefined}
               /* melody context */
               lowHz={lowHz}
               highHz={highHz}

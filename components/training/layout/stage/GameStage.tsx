@@ -9,6 +9,7 @@ import SheetOverlay from "@/components/training/layout/stage/sheet/SheetOverlay"
 import type { SystemLayout } from "@/components/training/layout/stage/sheet/vexscore/types";
 import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
+
 type Props = {
   phrase?: Phrase | null;
   running: boolean;
@@ -36,7 +37,11 @@ type Props = {
   /** Optional singer range, used for octave normalization in the overlay */
   lowHz?: number | null;
   highHz?: number | null;
+
+  /** MELODY clef to force on the top staff; pass to lock clef selection. */
+  clef?: "treble" | "bass" | null;
 };
+
 export default function GameStage({
   phrase,
   running,
@@ -58,9 +63,11 @@ export default function GameStage({
   view = "piano",
   lowHz = null,
   highHz = null,
+  clef = null,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [fillH, setFillH] = useState<number>(height ?? 360);
+
   useLayoutEffect(() => {
     if (typeof height === "number") {
       setFillH(height);
@@ -74,9 +81,11 @@ export default function GameStage({
     ro.observe(el);
     return () => ro.disconnect();
   }, [height]);
+
   const [sheetW, setSheetW] = useState<number | null>(null);
   const [systems, setSystems] = useState<SystemLayout[] | null>(null);
   const sheetHostRef = useRef<HTMLDivElement | null>(null);
+
   useLayoutEffect(() => {
     if (view !== "sheet") return;
     const el = sheetHostRef.current;
@@ -90,21 +99,28 @@ export default function GameStage({
     ro.observe(el);
     return () => ro.disconnect();
   }, [view, sheetW]);
+
   const handleLayout = useCallback((m: { systems: SystemLayout[] }) => {
     setSystems(m.systems ?? null);
   }, []);
+
   const showRhythm = !!(rhythm && rhythm.length);
   const rhythmH = 72;
   const mainH = Math.max(200, fillH - (view !== "sheet" && showRhythm ? rhythmH + 8 : 0));
+
   if (!phrase || !Array.isArray(phrase.notes) || phrase.notes.length === 0) {
     return <div ref={hostRef} className="w-full h-full min-h-[260px]" />;
   }
-  // Clef for the MELODY staff (can be treble or bass depending on register/singer)
-  const clef = pickClef(phrase);
+
+  // Resolve clef: prefer the explicit prop (stable), else fall back to phrase heuristic.
+  const resolvedClef = clef ?? pickClef(phrase);
+
   const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
   const sheetReady = Boolean(systems && systems.length);
+
   // Prefer sharps in sharp/neutral keys, flats in flat keys (fewer-accidentals policy).
   const useSharpsPref = useMemo(() => preferSharpsForKeySig(keySig || null), [keySig]);
+
   // --------- Compute effective lead-in seconds (pass down consistently) ----------
   const leadInSecEff = useMemo(() => {
     if (typeof leadInSec === "number" && isFinite(leadInSec)) return Math.max(0, leadInSec);
@@ -112,6 +128,7 @@ export default function GameStage({
     const bars = typeof leadBars === "number" ? leadBars : 1;
     return beatsToSeconds(barsToBeats(bars, tsNum), bpm, den);
   }, [leadInSec, leadBars, tsNum, bpm, den]);
+
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
       <div className="w-full">
@@ -129,7 +146,7 @@ export default function GameStage({
                 den={den}
                 tsNum={tsNum}
                 leadInSec={leadInSecEff}
-                clef={clef}
+                clef={resolvedClef}
                 onLayout={handleLayout}
                 rhythm={rhythm}
                 melodyRhythm={melodyRhythm}
@@ -150,7 +167,7 @@ export default function GameStage({
                   confThreshold={confThreshold}
                   a4Hz={440}
                   systems={systems!}
-                  clef={clef} // ✅ melody staff clef (treble or bass)
+                  clef={resolvedClef} // ✅ melody staff clef (treble or bass)
                   lowHz={lowHz} // ✅ singer range low
                   highHz={highHz} // ✅ singer range high
                   useSharps={useSharpsPref} // ✅ pass enharmonic preference to overlay
