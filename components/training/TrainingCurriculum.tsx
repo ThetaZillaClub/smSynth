@@ -12,6 +12,7 @@ import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard"
 import ScaleCard from "./curriculum-layout/Scale/ScaleCard";
 import CallResponseCard from "./curriculum-layout/CallResponse/CallResponseCard";
 import RangeCard from "./curriculum-layout/Range/RangeCard";
+import RhythmCard from "./curriculum-layout/Rhythm/RhythmCard"; // ✅ re-added
 
 export default function TrainingCurriculum({
   onStart,
@@ -139,7 +140,7 @@ export default function TrainingCurriculum({
       {/* Body */}
       <div className="w-full flex-1 flex flex-col gap-4 min-h-0 px-6 pb-6">
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
-          {/* Column 1: Transport & Session, Import MIDI (moved here), Call & Response */}
+          {/* Column 1: Transport & Session, Import MIDI, Rhythm Line, Call & Response */}
           <div className="flex flex-col gap-3">
             <TransportCard
               bpm={cfg.bpm}
@@ -160,11 +161,14 @@ export default function TrainingCurriculum({
               onFile={onMidiFile}
             />
 
+            {/* ✅ Rhythm line controls (blue guide under the sheet/piano views) */}
+            <RhythmCard cfg={cfg} onChange={pushChange} />
+
             {/* Pre-Test */}
             <CallResponseCard cfg={cfg} onChange={pushChange} />
           </div>
 
-          {/* Column 2: View, Scale, Exercise Mode, Range/Tonic Windows (moved here) */}
+          {/* Column 2: View, Scale, Exercise Mode, Range/Tonic Windows */}
           <div className="flex flex-col gap-3">
             <ViewSelectCard value={cfg.view} onChange={pushChange} />
             <ScaleCard
