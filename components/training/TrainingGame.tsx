@@ -494,8 +494,13 @@ export default function TrainingGame({
       isReady={isReady && (!!phrase || pretestActive)}
       step={step}
       loopPhase={pretestActive ? "call" : loop.loopPhase}
-      rhythm={pretestActive ? undefined : (syncRhythmFabric ?? undefined)}
-      melodyRhythm={pretestActive ? undefined : (melodyRhythm ?? undefined)}
+
+      // ✅ Always provide the same first-exercise fabrics, including during pretest.
+      // Previously we hid these during CR, which made VexScore/piano-roll render with
+      // placeholder timing and then reflow (“flash”) once CR finished.
+      rhythm={syncRhythmFabric ?? undefined}
+      melodyRhythm={melodyRhythm ?? undefined}
+
       bpm={bpm}
       den={ts.den}
       tsNum={ts.num}
@@ -509,7 +514,7 @@ export default function TrainingGame({
       {pretestActive ? (
         <PretestPanel
           statusText={statusText}
-          detail="Call & Response has no metronome lead-in. You’ll still see the exercise’s lead-in rests on the stage."
+          detail="Call & Response has no metronome lead-in. You’ll still see the full exercise on the stage."
           running={pretest.running}
           onStart={pretest.start}
           onContinue={pretest.continueResponse}
@@ -536,20 +541,7 @@ export default function TrainingGame({
       {/* Minimal post-pretest confirm */}
       {!pretestActive && (callResponseSequence?.length ?? 0) > 0 && pretest.status === "done" && !pretestDismissed ? (
         <div className="mt-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold">Pre-test complete</div>
-            <button
-              type="button"
-              onClick={() => setPretestDismissed(true)}
-              className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#0f0f0f] text-[#f0f0f0] text-sm hover:opacity-90"
-              title="Confirm you passed"
-            >
-              I passed
-            </button>
-          </div>
-          <div className="text-sm text-[#2d2d2d] mt-1">
-            Use the Start button to begin the exercise (lead-in → record → rest → repeat).
-          </div>
+          ...
         </div>
       ) : null}
     </GameLayout>
