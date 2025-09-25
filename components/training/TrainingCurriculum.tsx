@@ -11,16 +11,15 @@ import ImportMidiCard from "./curriculum-layout/ImportMidi/ImportMidiCard";
 import AdvancedOverridesCard from "./curriculum-layout/AdvancedOverrides/AdvancedOverridesCard";
 import CustomLyricsCard from "./curriculum-layout/CustomLyrics/CustomLyricsCard";
 import ViewSelectCard from "./curriculum-layout/ViewSelect/ViewSelectCard";
-import LeadInCard from "./curriculum-layout/LeadIn/LeadInCard";
 import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard";
-// keep the combined card so we have a clean 4 & 4
-import ScaleRhythmCard from "./curriculum-layout/ScaleRhythm/ScaleRhythmCard";
+import ScaleCard from "./curriculum-layout/Scale/ScaleCard";
+import RhythmCard from "./curriculum-layout/Rhythm/RhythmCard";
+import CallResponseCard from "./curriculum-layout/CallResponse/CallResponseCard";
 
 function safeParsePhrase(s: string): Phrase | null {
   try {
     const v = JSON.parse(s);
-    if (v && Array.isArray(v.notes) && typeof v.durationSec === "number")
-      return v as Phrase;
+    if (v && Array.isArray(v.notes) && typeof v.durationSec === "number") return v as Phrase;
   } catch {}
   return null;
 }
@@ -40,6 +39,7 @@ export default function TrainingCurriculum({
     () => ({ ...DEFAULT_SESSION_CONFIG, ...(defaultConfig || {}) }),
     [defaultConfig]
   );
+
   const [cfg, setCfg] = useState<SessionConfig>(init);
   const [phraseJson, setPhraseJson] = useState(
     cfg.customPhrase ? JSON.stringify(cfg.customPhrase, null, 2) : ""
@@ -52,6 +52,7 @@ export default function TrainingCurriculum({
     rangeLowLabel: rangeLowLabel ?? null,
     rangeHighLabel: rangeHighLabel ?? null,
   });
+
   const haveRange = lowHz != null && highHz != null;
 
   const PC_LABELS_FLAT = useMemo(
@@ -63,21 +64,24 @@ export default function TrainingCurriculum({
     if (!haveRange) return new Set<number>();
     const loM = Math.round(hzToMidi(lowHz as number));
     const hiM = Math.round(hzToMidi(highHz as number));
-    const maxTonic = hiM - 12;
+    const maxTonic = hiM - 12; // need at least an octave above tonic
     if (maxTonic < loM) return new Set<number>();
     const set = new Set<number>();
     for (let m = loM; m <= maxTonic; m++) set.add(((m % 12) + 12) % 12);
     return set;
   }, [haveRange, lowHz, highHz]);
 
+  // Nudge tonic into allowed set if out-of-range
   useEffect(() => {
     if (!haveRange) return;
     const currentPc = (cfg.scale?.tonicPc ?? 0) % 12;
     if (allowedTonicPcs.has(((currentPc % 12) + 12) % 12)) return;
     if (allowedTonicPcs.size === 0) return;
+
     const loM = Math.round(hzToMidi(lowHz as number));
     const hiM = Math.round(hzToMidi(highHz as number));
     const mid = Math.round((loM + (hiM - 12)) / 2);
+
     let bestPc = 0,
       bestDist = Infinity;
     allowedTonicPcs.forEach((pc) => {
@@ -93,11 +97,13 @@ export default function TrainingCurriculum({
         bestPc = pc;
       }
     });
+
     setCfg((c) => ({
       ...c,
       scale: { ...(c.scale ?? { name: "major" }), tonicPc: bestPc } as any,
     }));
-  }, [haveRange, allowedTonicPcs, lowHz, highHz, cfg.scale]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [haveRange, allowedTonicPcs, lowHz, highHz]);
 
   const rangeHint = useMemo(() => {
     if (!haveRange) return null;
@@ -122,12 +128,10 @@ export default function TrainingCurriculum({
   }, []);
 
   const launch = useCallback(() => {
-    const p = phraseJson.trim()
-      ? safeParsePhrase(phraseJson.trim())
-      : cfg.customPhrase ?? null;
+    const p = phraseJson.trim() ? safeParsePhrase(phraseJson.trim()) : cfg.customPhrase ?? null;
     const w = customLyrics.trim()
       ? customLyrics.split(",").map((s) => s.trim()).filter(Boolean)
-      : (cfg.customWords ?? null);
+      : cfg.customWords ?? null;
     onStart({ ...cfg, customPhrase: p, customWords: w });
   }, [cfg, onStart, phraseJson, customLyrics]);
 
@@ -148,65 +152,59 @@ export default function TrainingCurriculum({
       {/* Header */}
       <div className="w-full flex justify-center pt-4 px-6 pb-2">
         <div className="w-full max-w-7xl">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            Training — Curriculum
-          </h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Training — Curriculum</h1>
           <p className="text-sm text-[#2d2d2d] mt-1">
-            Configure this session. These settings apply only to the game you
-            launch now.
+            Configure this session. These settings apply only to the game you launch now.
           </p>
         </div>
       </div>
 
       {/* Body */}
       <div className="w-full flex-1 flex flex-col gap-4 min-h-0 px-6 pb-6">
-        {/* Row 1 */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
-          <TransportCard
-            bpm={cfg.bpm}
-            ts={cfg.ts}
-            leadBars={cfg.leadBars}
-            restBars={cfg.restBars}
-            onChange={pushChange}
-          />
-          <ViewSelectCard value={cfg.view} onChange={pushChange} />
+          <div className="flex flex-col gap-3">
+            <TransportCard
+              bpm={cfg.bpm}
+              ts={cfg.ts}
+              leadBars={cfg.leadBars}
+              restBars={cfg.restBars}
+              exerciseLoops={cfg.exerciseLoops}
+              regenerateBetweenTakes={cfg.regenerateBetweenTakes}
+              metronome={cfg.metronome}
+              onChange={pushChange}
+            />
+
+            {/* Split cards: Exercise Mode, then Scale and Rhythm */}
+            <SequenceModeCard cfg={cfg} onChange={pushChange} />
+            <ScaleCard
+              cfg={cfg}
+              onChange={pushChange}
+              allowedTonicPcs={allowedTonicPcs}
+              rangeHint={rangeHint}
+            />
+            <RhythmCard cfg={cfg} onChange={pushChange} />
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <ViewSelectCard value={cfg.view} onChange={pushChange} />
+
+            <ImportMidiCard
+              hasPhrase={!!cfg.customPhrase}
+              onClear={() => {
+                setCfg((c) => ({ ...c, customPhrase: null, customWords: null }));
+                setPhraseJson("");
+                setCustomLyrics("");
+              }}
+              onFile={onMidiFile}
+            />
+
+            <AdvancedOverridesCard phraseJson={phraseJson} setPhraseJson={setPhraseJson} />
+            <CustomLyricsCard value={customLyrics} onChange={setCustomLyrics} />
+            <CallResponseCard cfg={cfg} onChange={pushChange} />
+          </div>
         </div>
 
-        {/* Row 2 */}
-        <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <SequenceModeCard cfg={cfg} onChange={pushChange} />
-          <ImportMidiCard
-            hasPhrase={!!cfg.customPhrase}
-            onClear={() => {
-              setCfg((c) => ({ ...c, customPhrase: null, customWords: null }));
-              setPhraseJson("");
-              setCustomLyrics("");
-            }}
-            onFile={onMidiFile}
-          />
-        </div>
-
-        {/* Row 3 */}
-        <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <ScaleRhythmCard
-            cfg={cfg}
-            onChange={pushChange}
-            allowedTonicPcs={allowedTonicPcs}
-            rangeHint={rangeHint}
-          />
-          <AdvancedOverridesCard
-            phraseJson={phraseJson}
-            setPhraseJson={setPhraseJson}
-          />
-        </div>
-
-        {/* Row 4 */}
-        <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <LeadInCard cfg={cfg} onChange={pushChange} />
-          <CustomLyricsCard value={customLyrics} onChange={setCustomLyrics} />
-        </div>
-
-        {/* Button row — centered & styled like Choose MIDI */}
+        {/* Start */}
         <div className="w-full max-w-7xl mx-auto flex justify-center pt-1">
           <button
             type="button"

@@ -193,33 +193,27 @@ export default function usePracticeLoop({
       return;
     }
 
-    // In legacy flow, we include preRollSec in the capture; in call/response we DO NOT.
-    const totalMs =
-      (callResponse ? windowOnSec : preRollSec + windowOnSec) * 1000;
+    // Total duration to stay in "record":
+    // - legacy: lead-in + phrase window
+    // - call/response: response window only
+    const totalMs = (callResponse ? windowOnSec : preRollSec + windowOnSec) * 1000;
 
     if (recordTimerRef.current == null) {
       const FRAME_MS = 16;
-      // In CR we anchor the overlay ourselves; recorder start/stop is managed elsewhere.
+      // ✨ Use TRANSPORT anchor (not recorder) to measure elapsed lead-in.
       const elapsedMs = callResponse
         ? 0
-        : Math.max(0, performance.now() - (startedAtMs ?? performance.now()));
+        : Math.max(0, performance.now() - (anchorMs ?? performance.now()));
       const delayMs = Math.max(0, totalMs - elapsedMs + FRAME_MS);
 
       recordTimerRef.current = window.setTimeout(() => {
-        setRunning(false);
+        // Keep stage running during rest; only stop when the loop stops.
         setLoopPhase("rest");
         onAdvancePhrase();
         setTakeCount((n) => n + 1);
       }, delayMs);
     }
-  }, [
-    loopPhase,
-    callResponse,
-    windowOnSec,
-    preRollSec,
-    startedAtMs,
-    onAdvancePhrase,
-  ]);
+  }, [loopPhase, callResponse, windowOnSec, preRollSec, anchorMs, onAdvancePhrase]);
 
   // rest -> next take (if looping)
   useEffect(() => {
@@ -311,6 +305,7 @@ export default function usePracticeLoop({
     if (loopPhase === "call") return "Listen…";
     if (loopPhase === "record") return "Recording…";
     if (loopPhase === "rest" && looping) return "Breather…";
+    if (looping && loopPhase === "idle") return "Counting in…";
     return "Idle";
   }, [loopPhase, looping]);
 

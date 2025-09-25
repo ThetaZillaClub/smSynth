@@ -1,11 +1,8 @@
-// hooks/timing/useUiRecordTimer.ts
+// components\training\session\useUiRecordTimer.ts
 "use client";
-
 import { useEffect, useState } from "react";
-
 export default function useUiRecordTimer(isRecording: boolean, anchorMs: number | null) {
   const [sec, setSec] = useState(0);
-
   useEffect(() => {
     let raf: number | null = null;
     const tick = () => {
@@ -22,6 +19,5 @@ export default function useUiRecordTimer(isRecording: boolean, anchorMs: number 
     }
     return () => { if (raf) cancelAnimationFrame(raf); };
   }, [isRecording, anchorMs]);
-
   return sec;
 }

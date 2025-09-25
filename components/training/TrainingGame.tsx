@@ -1,14 +1,11 @@
 // components/training/TrainingGame.tsx
-// Only changed the `running` prop to reflect real loop state (no range gate).
-// Everything else remains as in your current file.
 "use client";
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useRef, useState, useEffect } from "react";
 import GameLayout from "./layout/GameLayout";
-import { SessionPanel } from "./session";
+import { SessionPanel, PretestPanel } from "./session";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
-// import useTakeProcessing from "@/hooks/audio/useTakeProcessing";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import usePhrasePlayer from "@/hooks/audio/usePhrasePlayer";
@@ -31,6 +28,7 @@ import {
 } from "@/utils/phrase/generator";
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
 import { keyNameFromTonicPc, pickClef } from "./layout/stage/sheet/vexscore/builders";
+import usePretest from "@/hooks/gameplay/usePretest";
 
 type Props = {
   title?: string;
@@ -43,8 +41,6 @@ type Props = {
   rangeHighLabel?: string | null;
 };
 
-const MAX_TAKES = 24;
-const MAX_SESSION_SEC = 15 * 60;
 const CONF_THRESHOLD = 0.5;
 const rand32 = () => (Math.floor(Math.random() * 0xffffffff) >>> 0);
 
@@ -63,10 +59,7 @@ export default function TrainingGame({
     highHz,
     loading: rangeLoading,
     error: rangeError,
-  } = useStudentRange(studentRowId, {
-    rangeLowLabel,
-    rangeHighLabel,
-  });
+  } = useStudentRange(studentRowId, { rangeLowLabel, rangeHighLabel });
 
   const step: "play" = "play";
   const {
@@ -83,7 +76,9 @@ export default function TrainingGame({
     rhythm,
     view,
     exerciseBars,
-    callResponse,
+    callResponseSequence,
+    exerciseLoops,
+    regenerateBetweenTakes,
     metronome,
   } = sessionConfig;
 
@@ -93,6 +88,8 @@ export default function TrainingGame({
   const leadInSec = beatsToSeconds(leadBeats, bpm, ts.den);
   const restBeats = barsToBeats(restBars, ts.num);
   const restSec = beatsToSeconds(restBeats, bpm, ts.den);
+  const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 24));
+  const MAX_SESSION_SEC = 15 * 60;
 
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true,
@@ -103,11 +100,14 @@ export default function TrainingGame({
   });
   const liveHz = typeof pitch === "number" ? pitch : null;
 
+  // regeneration seed between takes
+  const [seedBump, setSeedBump] = useState(0);
+
   const usingOverrides = !!customPhrase || !!customWords;
   const haveRange = lowHz != null && highHz != null;
-  const rhythmSeed = useMemo(() => rand32(), []);
-  const scaleSeed = useMemo(() => rand32(), []);
-  const syncSeed = useMemo(() => rand32(), []);
+  const rhythmSeed = useMemo(() => rand32(), [seedBump]);
+  const scaleSeed = useMemo(() => rand32(), [seedBump]);
+  const syncSeed = useMemo(() => rand32(), [seedBump]);
   const lengthBars = Math.max(1, Number((rhythm as any)?.lengthBars ?? exerciseBars ?? 2));
 
   const syncRhythmFabric: RhythmEvent[] | null = useMemo(() => {
@@ -304,33 +304,45 @@ export default function TrainingGame({
     typeof noteValue === "string"
       ? beatsToSeconds(noteValueToBeats(noteValue, ts.den), bpm, ts.den)
       : (noteDurSec ?? secPerBeat);
+
   const fallbackPhraseSec =
     beatsToSeconds(2 * ts.num, bpm, ts.den) ?? genNoteDurSec * 8;
+
   const phraseSec =
     phrase?.durationSec && Number.isFinite(phrase.durationSec)
       ? phrase.durationSec
       : fallbackPhraseSec;
+
   const lastEndSec = phrase?.notes?.length
     ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
     : phraseSec;
+
   const recordWindowSec =
     Math.ceil(lastEndSec / Math.max(1e-9, secPerBar)) * secPerBar;
 
-  const { playPhrase } = usePhrasePlayer();
+  const { playA440, playMidiList, playLeadInTicks } = usePhrasePlayer();
 
-  const onStartCall = useCallback(() => {
-    if (!phrase) return;
-    // Metronome: ONLY ticks during lead-in; never during responses
-    playPhrase(phrase, {
-      bpm,
-      tsNum: ts.num,
-      tsDen: ts.den,
-      leadBars,
-      a4Hz: 440,
-      metronome: !!metronome,
-    });
-  }, [phrase, playPhrase, bpm, ts.num, ts.den, leadBars, metronome]);
+  // ------------------------ PRE-TEST ------------------------
+  const pretest = usePretest({
+    sequence: callResponseSequence ?? [],
+    bpm,
+    ts,
+    scale: scale ?? { tonicPc: 0, name: "major" },
+    lowHz: lowHz ?? null,
+    highHz: highHz ?? null,
+    player: {
+      playA440: async (durSec) => { await playA440(durSec); },
+      playMidiList: async (midi, noteDurSec) => { await playMidiList(midi, noteDurSec); },
+    },
+  });
 
+  const [pretestDismissed, setPretestDismissed] = useState(false);
+  const pretestActive =
+    (callResponseSequence?.length ?? 0) > 0 &&
+    !pretestDismissed &&
+    pretest.status !== "done";
+
+  // ------------------------ PRACTICE LOOP -------------------
   const loop = usePracticeLoop({
     step,
     lowHz: haveRange ? (lowHz as number) : null,
@@ -344,20 +356,50 @@ export default function TrainingGame({
     maxSessionSec: MAX_SESSION_SEC,
     isRecording,
     startedAtMs: startedAtMs ?? null,
-    callResponse: !!callResponse,
-    callWindowSec: recordWindowSec,
-    onStartCall,
-    onAdvancePhrase: () => {},
+    callResponse: false,
+    callWindowSec: 0,
+    onStartCall: undefined,
+    onAdvancePhrase: () => {
+      if (regenerateBetweenTakes) setSeedBump((n) => n + 1);
+    },
     onEnterPlay: () => {},
   });
 
+  // Recorder control
+  const shouldRecord =
+    (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
+
   useRecorderAutoSync({
     enabled: step === "play",
-    shouldRecord: loop.shouldRecord, // true only during RESPONSE
+    shouldRecord,
     isRecording,
     startRec,
     stopRec,
   });
+
+  // ------------------------ METRONOME LEAD-IN (single-shot, anchor keyed) ----
+  // Schedule ticks **once per take**, keyed to the loop's anchor timestamp.
+  const scheduledLeadAnchorRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (pretestActive) return;               // never tick during pre-test
+    if (!metronome) return;                  // transport toggle
+    if (leadBeats <= 0) return;
+    if (loop.loopPhase !== "record") return; // legacy flow: record phase includes pre-roll
+    if (loop.anchorMs == null) return;
+
+    if (scheduledLeadAnchorRef.current === loop.anchorMs) return; // already scheduled for this take
+    scheduledLeadAnchorRef.current = loop.anchorMs;
+
+    void playLeadInTicks(leadBeats, secPerBeat, loop.anchorMs);
+  }, [
+    pretestActive,
+    metronome,
+    leadBeats,
+    loop.loopPhase,
+    loop.anchorMs,
+    playLeadInTicks,
+    secPerBeat,
+  ]);
 
   const showLyrics = step === "play" && !!words?.length;
   const readinessError = rangeError
@@ -366,49 +408,84 @@ export default function TrainingGame({
     ? "No saved range found. Please set your vocal range first."
     : null;
 
+  const running = pretestActive ? pretest.running : loop.running;
+  const startAtMs = pretestActive ? pretest.anchorMs : loop.anchorMs;
+  const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
+
   return (
     <GameLayout
       title={title}
       error={error || readinessError}
-      running={loop.running}
+      running={running}
       onToggle={loop.toggle}
       phrase={phrase ?? undefined}
       lyrics={showLyrics ? (words ?? undefined) : undefined}
       livePitchHz={liveHz}
       confidence={confidence}
       confThreshold={CONF_THRESHOLD}
-      startAtMs={loop.anchorMs}
+      startAtMs={startAtMs}
       leadInSec={leadInSec}
-      isReady={isReady && (!!phrase)}
+      isReady={isReady && (!!phrase || pretestActive)}
       step={step}
-      loopPhase={loop.loopPhase}
-      rhythm={syncRhythmFabric ?? undefined}
-      melodyRhythm={melodyRhythm ?? undefined}
+      loopPhase={pretestActive ? "call" : loop.loopPhase}
+      rhythm={pretestActive ? undefined : (syncRhythmFabric ?? undefined)}
+      melodyRhythm={pretestActive ? undefined : (melodyRhythm ?? undefined)}
       bpm={bpm}
       den={ts.den}
       tsNum={ts.num}
       keySig={sheetKeySig}
       view={view}
-      /* melody context */
       clef={melodyClef}
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
     >
-      {phrase && (
-        <SessionPanel
-          statusText={loop.statusText}
-          isRecording={isRecording}
-          startedAtMs={loop.anchorMs}
-          recordSec={leadInSec + recordWindowSec} // lead-in + RESPONSE (CALL not recorded)
-          restSec={restSec}
-          maxTakes={MAX_TAKES}
-          maxSessionSec={MAX_SESSION_SEC}
-          bpm={bpm}
-          ts={ts}
-          leadBars={leadBars}
-          restBars={restBars}
+      {/* Panels */}
+      {pretestActive ? (
+        <PretestPanel
+          statusText={statusText}
+          detail="Call & Response has no metronome lead-in. You’ll still see the exercise’s lead-in rests on the stage."
+          running={pretest.running}
+          onStart={pretest.start}
+          onContinue={pretest.continueResponse}
+          onReset={pretest.reset}
         />
+      ) : (
+        phrase && (
+          <SessionPanel
+            statusText={statusText}
+            isRecording={isRecording}
+            startedAtMs={startAtMs}
+            recordSec={leadInSec + recordWindowSec}
+            restSec={restSec}
+            maxTakes={MAX_TAKES}
+            maxSessionSec={MAX_SESSION_SEC}
+            bpm={bpm}
+            ts={ts}
+            leadBars={leadBars}
+            restBars={restBars}
+          />
+        )
       )}
+
+      {/* Minimal post-pretest confirm (no extra "Begin" step) */}
+      {!pretestActive && (callResponseSequence?.length ?? 0) > 0 && pretest.status === "done" && !pretestDismissed ? (
+        <div className="mt-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold">Pre-test complete</div>
+            <button
+              type="button"
+              onClick={() => setPretestDismissed(true)}
+              className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#0f0f0f] text-[#f0f0f0] text-sm hover:opacity-90"
+              title="Confirm you passed"
+            >
+              I passed
+            </button>
+          </div>
+          <div className="text-sm text-[#2d2d2d] mt-1">
+            Use the Start button to begin the exercise (lead-in → record → rest → repeat).
+          </div>
+        </div>
+      ) : null}
     </GameLayout>
   );
 }
