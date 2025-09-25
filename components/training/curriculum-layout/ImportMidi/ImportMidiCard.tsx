@@ -40,10 +40,10 @@ export default function ImportMidiCard({
           }}
         />
 
-        {/* Styled trigger — matches the Start session button */}
+        {/* Trigger (matches Start session) */}
         <label
           htmlFor={inputId}
-          className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm cursor-pointer select-none"
+          className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm cursor-pointer select-none"
           title="Choose a .mid or .midi file"
         >
           Choose MIDI
@@ -59,7 +59,7 @@ export default function ImportMidiCard({
           </span>
         ) : null}
 
-        {/* Clear button (unchanged style) */}
+        {/* Clear */}
         {hasPhrase ? (
           <button
             type="button"
@@ -75,7 +75,7 @@ export default function ImportMidiCard({
         ) : null}
       </div>
 
-      <div className="text-xs text-[#6b6b6b] mt-1">
+      <div className="text-[11px] text-[#6b6b6b] mt-1">
         Reads Type 0/1, tempo changes, melody line (highest note when chords occur), and karaoke lyrics.
       </div>
     </div>

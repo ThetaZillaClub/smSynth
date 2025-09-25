@@ -11,10 +11,11 @@ import ImportMidiCard from "./curriculum-layout/ImportMidi/ImportMidiCard";
 import AdvancedOverridesCard from "./curriculum-layout/AdvancedOverrides/AdvancedOverridesCard";
 import CustomLyricsCard from "./curriculum-layout/CustomLyrics/CustomLyricsCard";
 import ViewSelectCard from "./curriculum-layout/ViewSelect/ViewSelectCard";
-import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard";
-import ScaleCard from "./curriculum-layout/Scale/ScaleCard";
-import RhythmCard from "./curriculum-layout/Rhythm/RhythmCard";
 import LeadInCard from "./curriculum-layout/LeadIn/LeadInCard";
+import SequenceModeCard from "./curriculum-layout/SequenceMode/SequenceModeCard";
+// keep the combined card so we have a clean 4 & 4
+import ScaleRhythmCard from "./curriculum-layout/ScaleRhythm/ScaleRhythmCard";
+
 function safeParsePhrase(s: string): Phrase | null {
   try {
     const v = JSON.parse(s);
@@ -23,10 +24,10 @@ function safeParsePhrase(s: string): Phrase | null {
   } catch {}
   return null;
 }
+
 export default function TrainingCurriculum({
   onStart,
   defaultConfig,
-  // NEW: accept labels from router to avoid fetch
   rangeLowLabel,
   rangeHighLabel,
 }: {
@@ -46,16 +47,18 @@ export default function TrainingCurriculum({
   const [customLyrics, setCustomLyrics] = useState(
     Array.isArray(cfg.customWords) ? cfg.customWords.join(", ") : ""
   );
-  // Convert provided labels locally (no network). Pass null id; the hook will fast-path.
+
   const { lowHz, highHz } = useStudentRange(null, {
     rangeLowLabel: rangeLowLabel ?? null,
     rangeHighLabel: rangeHighLabel ?? null,
   });
   const haveRange = lowHz != null && highHz != null;
+
   const PC_LABELS_FLAT = useMemo(
     () => ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],
     []
   );
+
   const allowedTonicPcs = useMemo<Set<number>>(() => {
     if (!haveRange) return new Set<number>();
     const loM = Math.round(hzToMidi(lowHz as number));
@@ -66,6 +69,7 @@ export default function TrainingCurriculum({
     for (let m = loM; m <= maxTonic; m++) set.add(((m % 12) + 12) % 12);
     return set;
   }, [haveRange, lowHz, highHz]);
+
   useEffect(() => {
     if (!haveRange) return;
     const currentPc = (cfg.scale?.tonicPc ?? 0) % 12;
@@ -94,6 +98,7 @@ export default function TrainingCurriculum({
       scale: { ...(c.scale ?? { name: "major" }), tonicPc: bestPc } as any,
     }));
   }, [haveRange, allowedTonicPcs, lowHz, highHz, cfg.scale]);
+
   const rangeHint = useMemo(() => {
     if (!haveRange) return null;
     const loM = Math.round(hzToMidi(lowHz as number));
@@ -111,9 +116,11 @@ export default function TrainingCurriculum({
       none: allowedTonicPcs.size === 0,
     };
   }, [haveRange, lowHz, highHz, allowedTonicPcs, PC_LABELS_FLAT]);
+
   const pushChange = useCallback((patch: Partial<SessionConfig>) => {
     setCfg((c) => ({ ...c, ...patch }));
   }, []);
+
   const launch = useCallback(() => {
     const p = phraseJson.trim()
       ? safeParsePhrase(phraseJson.trim())
@@ -123,6 +130,7 @@ export default function TrainingCurriculum({
       : (cfg.customWords ?? null);
     onStart({ ...cfg, customPhrase: p, customWords: w });
   }, [cfg, onStart, phraseJson, customLyrics]);
+
   const onMidiFile = useCallback(async (file: File) => {
     const buf = await file.arrayBuffer();
     try {
@@ -134,6 +142,7 @@ export default function TrainingCurriculum({
       alert("Failed to parse MIDI: " + (e as Error)?.message);
     }
   }, []);
+
   return (
     <div className="min-h-dvh h-dvh flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
       {/* Header */}
@@ -148,8 +157,10 @@ export default function TrainingCurriculum({
           </p>
         </div>
       </div>
+
       {/* Body */}
       <div className="w-full flex-1 flex flex-col gap-4 min-h-0 px-6 pb-6">
+        {/* Row 1 */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3 mt-2">
           <TransportCard
             bpm={cfg.bpm}
@@ -160,17 +171,10 @@ export default function TrainingCurriculum({
           />
           <ViewSelectCard value={cfg.view} onChange={pushChange} />
         </div>
+
+        {/* Row 2 */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <div className="grid grid-cols-1 gap-3">
-            <SequenceModeCard cfg={cfg} onChange={pushChange} />
-            <ScaleCard
-              cfg={cfg}
-              onChange={pushChange}
-              allowedTonicPcs={allowedTonicPcs}
-              rangeHint={rangeHint}
-            />
-            <RhythmCard cfg={cfg} onChange={pushChange} />
-          </div>
+          <SequenceModeCard cfg={cfg} onChange={pushChange} />
           <ImportMidiCard
             hasPhrase={!!cfg.customPhrase}
             onClear={() => {
@@ -181,19 +185,33 @@ export default function TrainingCurriculum({
             onFile={onMidiFile}
           />
         </div>
+
+        {/* Row 3 */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <ScaleRhythmCard
+            cfg={cfg}
+            onChange={pushChange}
+            allowedTonicPcs={allowedTonicPcs}
+            rangeHint={rangeHint}
+          />
           <AdvancedOverridesCard
             phraseJson={phraseJson}
             setPhraseJson={setPhraseJson}
           />
-          <CustomLyricsCard value={customLyrics} onChange={setCustomLyrics} />
         </div>
+
+        {/* Row 4 */}
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-3">
           <LeadInCard cfg={cfg} onChange={pushChange} />
+          <CustomLyricsCard value={customLyrics} onChange={setCustomLyrics} />
+        </div>
+
+        {/* Button row — centered & styled like Choose MIDI */}
+        <div className="w-full max-w-7xl mx-auto flex justify-center pt-1">
           <button
             type="button"
             onClick={launch}
-            className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm"
+            className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm"
             title="Begin session"
           >
             Start session →

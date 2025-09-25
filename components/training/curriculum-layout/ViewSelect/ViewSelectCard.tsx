@@ -12,7 +12,7 @@ export default function ViewSelectCard({
   onChange: (patch: Partial<SessionConfig>) => void;
 }) {
   return (
-    <div className="rounded-lg border border-[#d2d2d2] bg-white p-3">
+    <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
       <div className="text-sm font-semibold mb-2">View</div>
       <div className="flex gap-2">
         {([
@@ -27,7 +27,7 @@ export default function ViewSelectCard({
               onClick={() => onChange({ view: opt.key })}
               className={
                 active
-                  ? "px-3 py-1.5 rounded-md text-sm bg-[#0f0f0f] text-white"
+                  ? "px-3 py-1.5 rounded-md bg-white border border-[#d2d2d2] text-sm"
                   : "px-3 py-1.5 rounded-md text-sm bg-[#ebebeb] text-[#0f0f0f] border border-[#d2d2d2] hover:bg-white"
               }
             >
