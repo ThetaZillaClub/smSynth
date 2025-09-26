@@ -112,14 +112,49 @@ export default function TrainingGame({
   const syncSeed = useMemo(() => rand32(), [seedBump]);
   const lengthBars = Math.max(1, Number((rhythm as any)?.lengthBars ?? exerciseBars ?? 2));
 
+  /* -----------------------------------------------------------
+   * Derive *line* and *content* rest policies from rhythm config
+   * -----------------------------------------------------------
+   * - lineAllowRests / lineRestProb drive the blue rhythm line
+   * - contentAllowRests / contentRestProb drive the MELODY fabric
+   *   (defaults now *inherit* from the line settings)
+   */
+  const lineAllowRests: boolean = useMemo(
+    () => (rhythm as any)?.allowRests !== false,
+    [rhythm]
+  );
+
+  const lineRestProbRaw: number = useMemo(
+    () => (rhythm as any)?.restProb ?? 0.3,
+    [rhythm]
+  );
+  const lineRestProb: number = useMemo(
+    () => (lineAllowRests ? lineRestProbRaw : 0),
+    [lineAllowRests, lineRestProbRaw]
+  );
+
+  // Melody/content defaults inherit from the line unless explicitly set
+  const contentAllowRests: boolean = useMemo(() => {
+    const v = (rhythm as any)?.contentAllowRests;
+    return v == null ? lineAllowRests : v !== false;
+  }, [rhythm, lineAllowRests]);
+
+  const contentRestProbRaw: number = useMemo(() => {
+    const v = (rhythm as any)?.contentRestProb;
+    return v == null ? lineRestProbRaw : v;
+  }, [rhythm, lineRestProbRaw]);
+
+  const contentRestProb: number = useMemo(
+    () => (contentAllowRests ? contentRestProbRaw : 0),
+    [contentAllowRests, contentRestProbRaw]
+  );
+
+  /* ------------------------ BLUE RHYTHM LINE (sync) ------------------------ */
   const syncRhythmFabric: RhythmEvent[] | null = useMemo(() => {
     if (!rhythm) return null;
     const lineEnabled = (rhythm as any).lineEnabled !== false;
     if (!lineEnabled) return null;
     const available = (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
-    const allowRests: boolean = (rhythm as any).allowRests !== false;
-    const restProbRaw = (rhythm as any).restProb ?? 0.3;
-    const restProb = allowRests ? restProbRaw : 0;
     if ((rhythm as any).mode === "sequence") {
       const base = sequenceNoteCountForScale((scale?.name ?? "major") as any);
       const want =
@@ -131,8 +166,8 @@ export default function TrainingGame({
         den: ts.den,
         tsNum: ts.num,
         available,
-        restProb,
-        allowRests,
+        restProb: lineRestProb,
+        allowRests: lineAllowRests,
         seed: syncSeed,
         noteQuota: want,
       });
@@ -142,25 +177,33 @@ export default function TrainingGame({
         den: ts.den,
         tsNum: ts.num,
         available,
-        restProb,
-        allowRests,
+        restProb: lineRestProb,
+        allowRests: lineAllowRests,
         seed: syncSeed,
         bars: lengthBars,
       });
     }
-  }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed, lengthBars]);
+  }, [
+    rhythm,
+    bpm,
+    ts.den,
+    ts.num,
+    scale?.name,
+    syncSeed,
+    lengthBars,
+    lineAllowRests,
+    lineRestProb,
+  ]);
 
+  /* ------------------------ MELODY GENERATION ------------------------ */
   const generated = useMemo((): { phrase: Phrase | null; melodyRhythm: RhythmEvent[] | null } => {
     if (usingOverrides) return { phrase: customPhrase ?? null, melodyRhythm: null };
     if (!haveRange || !scale || !rhythm) return { phrase: null, melodyRhythm: null };
 
     const available = (rhythm as any).available?.length ? (rhythm as any).available : ["quarter"];
-    const contentAllowRests: boolean = (rhythm as any).contentAllowRests !== false;
-    const contentRestProbRaw = (rhythm as any).contentRestProb ?? 0.3;
-    const contentRestProb = contentAllowRests ? contentRestProbRaw : 0;
 
     if ((rhythm as any).mode === "interval") {
-      // ✅ New: scale-aware, window-aware intervals (no octaves/preference params)
+      // Interval training — respect contentAllowRests for gaps between pairs
       const phrase = buildIntervalPhrase({
         lowHz: lowHz as number,
         highHz: highHz as number,
@@ -178,7 +221,8 @@ export default function TrainingGame({
           { type: "note", value: "quarter" },
           { type: "note", value: "quarter" },
         ],
-        gapRhythm: [{ type: "rest", value: "eighth" }],
+        // If rests are disabled for content, don't insert gap rests
+        gapRhythm: contentAllowRests ? [{ type: "rest", value: "eighth" }] : [],
 
         seed: scaleSeed,
         tonicMidis: sessionConfig.tonicMidis ?? null,
@@ -221,6 +265,7 @@ export default function TrainingGame({
       return { phrase, melodyRhythm: fabric };
     }
 
+    // Random/content rhythm — inherits rest policy from line unless explicitly overridden
     const fabric = buildTwoBarRhythm({
       bpm,
       den: ts.den,
@@ -266,6 +311,8 @@ export default function TrainingGame({
     sessionConfig.allowedMidis,
     sessionConfig.randomIncludeUnder,
     sessionConfig.randomIncludeOver,
+    contentAllowRests,
+    contentRestProb,
   ]);
 
   const phrase: Phrase | null = useMemo(() => {
