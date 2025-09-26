@@ -13,6 +13,8 @@ export default function TransportCard({
   exerciseLoops,
   regenerateBetweenTakes,
   metronome,
+  /** NEW */
+  loopingMode,
   onChange,
 }: {
   bpm: number;
@@ -22,6 +24,8 @@ export default function TransportCard({
   exerciseLoops?: number;
   regenerateBetweenTakes?: boolean;
   metronome?: boolean;
+  /** NEW */
+  loopingMode?: boolean;
   onChange: (patch: Partial<SessionConfig>) => void;
 }) {
   const setBpm = (v: number) => onChange({ bpm: Math.max(20, Math.min(240, Math.floor(v))) });
@@ -33,6 +37,8 @@ export default function TransportCard({
     onChange({ exerciseLoops: Math.max(1, Math.min(200, Math.floor(v))) });
   const setRegen = (v: boolean) => onChange({ regenerateBetweenTakes: v });
   const setMetronome = (v: boolean) => onChange({ metronome: v });
+  /** NEW */
+  const setLoopingMode = (v: boolean) => onChange({ loopingMode: v });
 
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
@@ -123,6 +129,19 @@ export default function TransportCard({
             className="px-2 py-1 rounded-md border border-[#d2d2d2] bg-white text-sm"
           >
             {(metronome ?? true) ? "On" : "Off"}
+          </button>
+        </Field>
+
+        {/* NEW: Looping Mode */}
+        <Field label="Looping Mode (auto-continue)">
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={loopingMode ? true : false}
+            onClick={() => setLoopingMode(!(loopingMode ?? true))}
+            className="px-2 py-1 rounded-md border border-[#d2d2d2] bg-white text-sm"
+          >
+            {(loopingMode ?? true) ? "On" : "Off"}
           </button>
         </Field>
       </div>

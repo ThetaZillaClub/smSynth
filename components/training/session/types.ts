@@ -86,6 +86,9 @@ export type SessionConfig = {
   exerciseLoops: number;
   regenerateBetweenTakes: boolean;
 
+  /** NEW: Looping mode (auto-continue after REST). */
+  loopingMode: boolean;
+
   /** Absolute tonic(s) to anchor exercises (each T defines [T, T+12]). */
   tonicMidis?: number[] | null;
 
@@ -149,6 +152,9 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   callResponseSequence: [],
   exerciseLoops: 24,
   regenerateBetweenTakes: false,
+
+  /** NEW default: auto-continue like today unless user turns it off in curriculum */
+  loopingMode: true,
 
   tonicMidis: null,
   randomIncludeUnder: false,

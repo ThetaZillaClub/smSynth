@@ -36,6 +36,12 @@ type Opts = {
   // Callbacks
   onAdvancePhrase: () => void;
   onEnterPlay?: () => void; // e.g., resetPhraseLyrics
+
+  /** NEW: if false, do not auto-continue after REST; user will review. */
+  autoContinue?: boolean;
+
+  /** NEW: called after REST window completes (both modes). */
+  onRestComplete?: () => void;
 };
 
 type ReturnShape = {
@@ -69,6 +75,8 @@ export default function usePracticeLoop({
   onStartCall,
   onAdvancePhrase,
   onEnterPlay,
+  autoContinue = true,
+  onRestComplete,
 }: Opts): ReturnShape {
   const [running, setRunning] = useState(false);
   const [looping, setLooping] = useState(false);
@@ -184,7 +192,6 @@ export default function usePracticeLoop({
 
   // exact end of RESPONSE record window
   useEffect(() => {
-    // Clear existing end timer if not in response phase
     if (loopPhase !== "record") {
       if (recordTimerRef.current != null) {
         clearTimeout(recordTimerRef.current);
@@ -207,17 +214,20 @@ export default function usePracticeLoop({
       const delayMs = Math.max(0, totalMs - elapsedMs + FRAME_MS);
 
       recordTimerRef.current = window.setTimeout(() => {
-        // Keep stage running during rest; only stop when the loop stops.
+        recordTimerRef.current = null;
         setLoopPhase("rest");
-        onAdvancePhrase();
+
+        // NEW: advance phrase only if autoContinue
+        if (autoContinue) onAdvancePhrase();
+
         setTakeCount((n) => n + 1);
       }, delayMs);
     }
-  }, [loopPhase, callResponse, windowOnSec, preRollSec, anchorMs, onAdvancePhrase]);
+  }, [loopPhase, callResponse, windowOnSec, preRollSec, anchorMs, onAdvancePhrase, autoContinue]);
 
-  // rest -> next take (if looping)
+  // rest -> next take (if looping) or review (if !autoContinue)
   useEffect(() => {
-    if (loopPhase !== "rest" || !looping) {
+    if (loopPhase !== "rest") {
       if (restTimerRef.current != null) {
         clearTimeout(restTimerRef.current);
         restTimerRef.current = null;
@@ -228,26 +238,37 @@ export default function usePracticeLoop({
       if (countsRef.current.takeCount >= maxTakes) return;
       restTimerRef.current = window.setTimeout(function tick() {
         restTimerRef.current = null;
+
+        // signal rest complete
+        onRestComplete?.();
+
         if (countsRef.current.takeCount >= maxTakes) {
           setLooping(false);
           setRunning(false);
           setLoopPhase("idle");
           clearTimers();
-        } else {
+        } else if (looping && autoContinue) {
           if (callResponse) startCallPhase();
           else startRecordPhaseLegacy();
+        } else {
+          // Stop; upstream can present review UI
+          setRunning(false);
+          setLoopPhase("idle");
+          setAnchorMs(null);
         }
       }, windowOffSec * 1000);
     }
   }, [
     loopPhase,
     looping,
+    autoContinue,
     callResponse,
     startCallPhase,
     startRecordPhaseLegacy,
     windowOffSec,
     maxTakes,
     clearTimers,
+    onRestComplete,
   ]);
 
   // cap guard
@@ -297,7 +318,6 @@ export default function usePracticeLoop({
 
   // derived
   const shouldRecord = useMemo(() => {
-    // Only record during RESPONSE in call/response mode; otherwise during record phase (legacy)
     return loopPhase === "record";
   }, [loopPhase]);
 

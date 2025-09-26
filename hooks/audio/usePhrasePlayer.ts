@@ -54,16 +54,15 @@ export default function usePhrasePlayer() {
       ctxAtPerfStartRef.current == null
     )
       return null;
-    return (
-      ctxAtPerfStartRef.current +
-      (perfMs - perfAtCtxStartRef.current) / 1000
-    );
+    return ctxAtPerfStartRef.current + (perfMs - perfAtCtxStartRef.current) / 1000;
   };
 
   const stopAllScheduled = useCallback(() => {
     try {
       scheduledStopFns.current.forEach((fn) => {
-        try { fn(); } catch {}
+        try {
+          fn();
+        } catch {}
       });
     } finally {
       scheduledStopFns.current = [];
@@ -94,16 +93,14 @@ export default function usePhrasePlayer() {
     osc.start(time);
     osc.stop(time + dur + 0.005);
     osc.onended = () => {
-      try { osc.disconnect(); g.disconnect(); } catch {}
+      try {
+        osc.disconnect();
+        g.disconnect();
+      } catch {}
     };
   }, []);
 
-  const applyEnvelope = (
-    g: GainNode,
-    start: number,
-    dur: number,
-    floor = 0.0001
-  ) => {
+  const applyEnvelope = (g: GainNode, start: number, dur: number, floor = 0.0001) => {
     const ATT_MAX = 0.01;
     const REL_MAX = 0.06;
     const att = Math.min(ATT_MAX, Math.max(0.002, dur * 0.2));
@@ -122,37 +119,40 @@ export default function usePhrasePlayer() {
     return { safeStart, stopAt: relStart + rel + 0.01 };
   };
 
-  const scheduleNote = useCallback(
-    (midi: number, start: number, dur: number, a4Hz: number) => {
-      if (!ctxRef.current || !noteMasterGainRef.current) return;
+  const scheduleNote = useCallback((midi: number, start: number, dur: number, a4Hz: number) => {
+    if (!ctxRef.current || !noteMasterGainRef.current) return;
 
-      const ctx = ctxRef.current;
-      const hz = midiToHz(midi, a4Hz);
+    const ctx = ctxRef.current;
+    const hz = midiToHz(midi, a4Hz);
 
-      const osc = ctx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.value = hz;
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = hz;
 
-      const g = ctx.createGain();
-      osc.connect(g);
-      g.connect(noteMasterGainRef.current);
+    const g = ctx.createGain();
+    osc.connect(g);
+    g.connect(noteMasterGainRef.current);
 
-      const { safeStart, stopAt } = applyEnvelope(g, start, dur);
+    const { safeStart, stopAt } = applyEnvelope(g, start, dur);
 
-      osc.start(safeStart);
-      osc.stop(stopAt);
+    osc.start(safeStart);
+    osc.stop(stopAt);
 
-      const cleanup = () => {
-        try { osc.disconnect(); g.disconnect(); } catch {}
-      };
-      osc.onended = cleanup;
+    const cleanup = () => {
+      try {
+        osc.disconnect();
+        g.disconnect();
+      } catch {}
+    };
+    osc.onended = cleanup;
 
-      scheduledStopFns.current.push(() => {
-        try { osc.stop(ctx.currentTime + 0.001); cleanup(); } catch {}
-      });
-    },
-    []
-  );
+    scheduledStopFns.current.push(() => {
+      try {
+        osc.stop(ctx.currentTime + 0.001);
+        cleanup();
+      } catch {}
+    });
+  }, []);
 
   const playPhrase = useCallback(
     async (phrase: Phrase, opts: PlayOptions) => {
@@ -172,12 +172,7 @@ export default function usePhrasePlayer() {
       }
 
       for (const n of phrase.notes) {
-        scheduleNote(
-          n.midi,
-          startTime + leadBeats * secPerBeat + n.startSec,
-          n.durSec,
-          a4Hz
-        );
+        scheduleNote(n.midi, startTime + leadBeats * secPerBeat + n.startSec, n.durSec, a4Hz);
       }
     },
     [initCtx, playTick, scheduleNote, stopAllScheduled]
@@ -186,7 +181,9 @@ export default function usePhrasePlayer() {
   const stop = useCallback(() => {
     stopAllScheduled();
     if (ctxRef.current) {
-      try { ctxRef.current.close(); } catch {}
+      try {
+        ctxRef.current.close();
+      } catch {}
       ctxRef.current = null;
       perfAtCtxStartRef.current = null;
       ctxAtPerfStartRef.current = null;
@@ -218,7 +215,10 @@ export default function usePhrasePlayer() {
       osc.start(safeStart);
       osc.stop(stopAt);
       osc.onended = () => {
-        try { osc.disconnect(); g.disconnect(); } catch {}
+        try {
+          osc.disconnect();
+          g.disconnect();
+        } catch {}
       };
     },
     [initCtx, stopAllScheduled]
@@ -251,13 +251,11 @@ export default function usePhrasePlayer() {
       await initCtx();
       if (!ctxRef.current) return;
 
-      // ✨ Critical change: clear any previously scheduled clicks
-      // to avoid doubled count-ins across quick re-renders/toggles.
+      // clear any previously scheduled clicks (avoid doubled count-ins)
       stopAllScheduled();
 
       const mapped = perfMsToCtxTime(startAtPerfMs ?? null);
-      const startTime =
-        mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
+      const startTime = mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
 
       for (let b = 0; b < countBeats; b++) {
         playTick(startTime + b * secPerBeat);
@@ -274,8 +272,7 @@ export default function usePhrasePlayer() {
 
       const { bpm, tsDen, startAtPerfMs } = opts;
       const mapped = perfMsToCtxTime(startAtPerfMs ?? null);
-      const startTime =
-        mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
+      const startTime = mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
 
       let t = 0;
       for (const ev of rhythm) {
@@ -288,12 +285,47 @@ export default function usePhrasePlayer() {
     [initCtx, playTick, stopAllScheduled]
   );
 
+  /** NEW: schedule melody + rhythm together (no double-clear). */
+  const playMelodyAndRhythm = useCallback(
+    async (
+      phrase: Phrase,
+      rhythm: RhythmEvent[],
+      opts: PlayOptions & { startAtPerfMs?: number | null }
+    ) => {
+      await initCtx();
+      if (!ctxRef.current) return;
+
+      // clear once, then schedule both
+      stopAllScheduled();
+
+      const { bpm, tsDen, startAtPerfMs, a4Hz = 440, metronome = true } = opts;
+      const mapped = perfMsToCtxTime(startAtPerfMs ?? null);
+      const startTime = mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
+
+      // rhythm ticks
+      if (metronome && Array.isArray(rhythm) && rhythm.length) {
+        let t = 0;
+        for (const ev of rhythm) {
+          if (ev.type === "note") playTick(startTime + t);
+          t += noteValueToSeconds(ev.value, bpm, tsDen);
+        }
+      }
+
+      // melody notes
+      for (const n of phrase.notes) {
+        scheduleNote(n.midi, startTime + n.startSec, n.durSec, a4Hz);
+      }
+    },
+    [initCtx, perfMsToCtxTime, playTick, scheduleNote, stopAllScheduled]
+  );
+
   return {
     playPhrase,
     playA440,
     playMidiList,
     playRhythm,
     playLeadInTicks,
+    playMelodyAndRhythm, // ← exposed
     stop,
   };
 }

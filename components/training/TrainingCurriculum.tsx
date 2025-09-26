@@ -146,7 +146,14 @@ export default function TrainingCurriculum({
       }
       let nextTonicMidis: number[] | null = null;
       if (windows.length) {
-        const idx = Math.min(Math.max(0, (cfg.preferredOctaveIndex ?? 1)), windows.length - 1);
+        // NEW: use the first element of preferredOctaveIndices (array),
+        // with a legacy fallback to preferredOctaveIndex if present.
+        const legacyIdx = (cfg as any).preferredOctaveIndex;
+        const rawIdx =
+          Array.isArray(cfg.preferredOctaveIndices) && cfg.preferredOctaveIndices.length
+            ? cfg.preferredOctaveIndices[0]!
+            : (typeof legacyIdx === "number" ? legacyIdx : 1);
+        const idx = Math.min(Math.max(0, rawIdx), windows.length - 1);
         nextTonicMidis = [windows[idx]];
       }
       onStart({
@@ -194,6 +201,8 @@ export default function TrainingCurriculum({
               exerciseLoops={cfg.exerciseLoops}
               regenerateBetweenTakes={cfg.regenerateBetweenTakes}
               metronome={cfg.metronome}
+              /** NEW */
+              loopingMode={cfg.loopingMode}
               onChange={pushChange}
             />
 

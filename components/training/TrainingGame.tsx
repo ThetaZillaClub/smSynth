@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import GameLayout from "./layout/GameLayout";
 import { SessionPanel, PretestPanel } from "./session";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -16,6 +16,7 @@ import usePretest from "@/hooks/gameplay/usePretest";
 import { useExerciseFabric } from "@/hooks/gameplay/useExerciseFabric";
 import { useMelodyClef } from "@/hooks/gameplay/useMelodyClef";
 import { useLeadInMetronome } from "@/hooks/gameplay/useLeadInMetronome";
+import TakeReview from "@/components/training/take-review-layout/TakeReview";
 
 type Props = {
   title?: string;
@@ -29,7 +30,6 @@ type Props = {
 };
 
 const CONF_THRESHOLD = 0.5;
-const rand32 = () => (Math.floor(Math.random() * 0xffffffff) >>> 0);
 
 export default function TrainingGame({
   title = "Training",
@@ -50,6 +50,7 @@ export default function TrainingGame({
     noteValue, noteDurSec, lyricStrategy,
     view, callResponseSequence,
     exerciseLoops, regenerateBetweenTakes, metronome,
+    loopingMode,
   } = sessionConfig;
 
   const secPerBeat = secondsPerBeat(bpm, ts.den);
@@ -99,8 +100,8 @@ export default function TrainingGame({
     fabric.fallbackPhraseSec ?? genNoteDurSec * 8;
 
   const phraseSec =
-    phrase?.durationSec && Number.isFinite(phrase.durationSec)
-      ? phrase.durationSec
+    phrase?.notes?.length
+      ? (phrase.durationSec ?? fallbackPhraseSec)
       : fallbackPhraseSec;
 
   const lastEndSec = phrase?.notes?.length
@@ -111,7 +112,10 @@ export default function TrainingGame({
     Math.ceil(lastEndSec / Math.max(1e-9, secPerBar)) * secPerBar;
 
   // —— Audio player + pretest
-  const { playA440, playMidiList, playLeadInTicks } = usePhrasePlayer();
+  const {
+    playA440, playMidiList, playLeadInTicks,
+    playPhrase, playRhythm, playMelodyAndRhythm, stop: stopPlayback
+  } = usePhrasePlayer();
 
   const pretest = usePretest({
     sequence: callResponseSequence ?? [],
@@ -136,6 +140,8 @@ export default function TrainingGame({
     isRecording, start: startRec, stop: stopRec, startedAtMs,
   } = useWavRecorder({ sampleRateOut: 16000 });
 
+  const [reviewVisible, setReviewVisible] = useState(false);
+
   const loop = usePracticeLoop({
     step,
     lowHz: lowHz ?? null,
@@ -152,8 +158,21 @@ export default function TrainingGame({
     callResponse: false,
     callWindowSec: 0,
     onStartCall: undefined,
-    onAdvancePhrase: () => { if (regenerateBetweenTakes) setSeedBump((n) => n + 1); },
+
+    // Regenerate policy
+    onAdvancePhrase: () => {
+      if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1);
+    },
+
     onEnterPlay: () => {},
+
+    // auto-continue & review callback
+    autoContinue: !!loopingMode,
+    onRestComplete: () => {
+      if (!loopingMode) {
+        setReviewVisible(true);
+      }
+    },
   });
 
   // —— Recorder auto start/stop
@@ -191,6 +210,36 @@ export default function TrainingGame({
   const startAtMs = pretestActive ? pretest.anchorMs  : loop.anchorMs;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
+  // —— Review playback handlers (⚠ normalize to concrete array + boolean)
+  const rhythmToUse = (fabric.melodyRhythm?.length
+    ? fabric.melodyRhythm
+    : (fabric.syncRhythmFabric ?? [])) as any[];
+  const haveRhythm: boolean = (rhythmToUse?.length ?? 0) > 0;
+
+  const onPlayMelody = async () => {
+    if (!phrase) return;
+    await playPhrase(phrase, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0, metronome: false });
+  };
+  const onPlayRhythm = async () => {
+    if (!haveRhythm) return;
+    await playRhythm(rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den });
+  };
+  const onPlayBoth = async () => {
+    if (!phrase) return;
+    await playMelodyAndRhythm(phrase, rhythmToUse as any, {
+      bpm,
+      tsNum: ts.num,
+      tsDen: ts.den,
+      metronome: true,
+    });
+  };
+  const onStopPlayback = () => stopPlayback();
+
+  const onNextPhrase = () => {
+    setSeedBump((n) => n + 1);
+    setReviewVisible(false);
+  };
+
   return (
     <GameLayout
       title={title}
@@ -226,6 +275,15 @@ export default function TrainingGame({
           onStart={pretest.start}
           onContinue={pretest.continueResponse}
           onReset={pretest.reset}
+        />
+      ) : reviewVisible ? (
+        <TakeReview
+          haveRhythm={haveRhythm}
+          onPlayMelody={onPlayMelody}
+          onPlayRhythm={onPlayRhythm}
+          onPlayBoth={onPlayBoth}
+          onStop={onStopPlayback}
+          onNext={onNextPhrase}
         />
       ) : (
         phrase && (

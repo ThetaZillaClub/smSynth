@@ -73,12 +73,18 @@ export default function ScaleCard({
   );
 
   const scaleCfg =
-    cfg.scale ?? ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2, randomTonic: false } as const);
+    cfg.scale ??
+    ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2, randomTonic: false } as const);
 
   const PC_LABELS_FLAT = useMemo(
-    () => ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"],
+    () => ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],
     []
   );
+
+  // —— Rhythm content (melody) rest controls — read from cfg.rhythm
+  const rhythmCfg = useMemo(() => (cfg.rhythm ?? {}) as any, [cfg.rhythm]);
+  const contentAllowRests: boolean = rhythmCfg.contentAllowRests !== false;
+  const contentRestProb: number = rhythmCfg.contentRestProb ?? 0.3;
 
   // ——— Random-key preferred octaves (MULTI-SELECT) ———
   const selectedOctIdx = useMemo(() => {
@@ -98,9 +104,13 @@ export default function ScaleCard({
         <div className="mb-2 text-xs text-[#2d2d2d]">
           Vocal range: <span className="font-semibold">{rangeHint.lo}–{rangeHint.hi}</span>.{" "}
           {rangeHint.none ? (
-            <span className="text-red-600">Your saved range is narrower than an octave; no keys fully fit.</span>
+            <span className="text-red-600">
+              Your saved range is narrower than an octave; no keys fully fit.
+            </span>
           ) : (
-            <>Available keys: <span className="font-semibold">{rangeHint.list}</span>.</>
+            <>
+              Available keys: <span className="font-semibold">{rangeHint.list}</span>.
+            </>
           )}
         </div>
       ) : (
@@ -113,9 +123,7 @@ export default function ScaleCard({
         <Field label="Random key (in range)">
           <FancyCheckbox
             checked={!!scaleCfg.randomTonic}
-            onChange={(next) =>
-              onChange({ scale: { ...scaleCfg, randomTonic: next } as any })
-            }
+            onChange={(next) => onChange({ scale: { ...scaleCfg, randomTonic: next } as any })}
             label={<span>{scaleCfg.randomTonic ? "On" : "Off"}</span>}
           />
         </Field>
@@ -149,9 +157,7 @@ export default function ScaleCard({
           <select
             className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
             value={scaleCfg.name}
-            onChange={(e) =>
-              onChange({ scale: { ...scaleCfg, name: e.target.value as ScaleName } })
-            }
+            onChange={(e) => onChange({ scale: { ...scaleCfg, name: e.target.value as ScaleName } })}
           >
             {SCALE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -180,7 +186,37 @@ export default function ScaleCard({
           />
         </Field>
 
-        {/* NEW: Preferred octaves (multi-select) */}
+        {/* Melody/content rest controls (added back) */}
+        <Field label="Melody: allow rests">
+          <FancyCheckbox
+            checked={contentAllowRests}
+            onChange={(next) => onChange({ rhythm: { ...rhythmCfg, contentAllowRests: next } as any })}
+            label={<span>{contentAllowRests ? "Enabled" : "Disabled"}</span>}
+          />
+        </Field>
+
+        <Field label="Melody: rest probability">
+          <input
+            type="number"
+            inputMode="decimal"
+            className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
+            min={0}
+            max={0.95}
+            step={0.05}
+            value={contentAllowRests ? contentRestProb : 0}
+            disabled={!contentAllowRests}
+            onChange={(e) =>
+              onChange({
+                rhythm: {
+                  ...rhythmCfg,
+                  contentRestProb: Math.max(0, Math.min(0.95, Number(e.target.value) || 0)),
+                } as any,
+              })
+            }
+          />
+        </Field>
+
+        {/* Preferred octaves (multi-select) */}
         <Field label="Preferred octaves (random key)">
           <div className="flex flex-wrap items-center gap-2">
             {availableRandomOctaveCount > 0 ? (
