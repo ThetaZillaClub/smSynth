@@ -2,7 +2,7 @@
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { Phrase } from "@/utils/stage";
 import { degreeIndex, isInScale, scaleSemitones, type ScaleName } from "./scales";
-import { noteValueToSeconds } from "@/utils/time/tempo";
+import { noteValueToSeconds, noteValueToBeats, beatsToSeconds } from "@/utils/time/tempo";
 import { choose, makeRng } from "./random";
 import type { RhythmEvent } from "./phraseTypes";
 
@@ -22,36 +22,32 @@ export type BuildPhraseWithRhythmParams = {
   tonicPc: number;
   scale: ScaleName;
   rhythm: RhythmEvent[];
-  maxPerDegree?: number; // default 2
+  maxPerDegree?: number;
   seed?: number;
 
-  /** Optional absolute tonic windows: each T defines [T, T+12]. */
   tonicMidis?: number[] | null;
-  /** Random mode only — also allow notes below the lowest selected window. */
   includeUnder?: boolean;
-  /** Random mode only — also allow notes above the highest selected window. */
   includeOver?: boolean;
 
-  /** Optional hard whitelist of absolute MIDI notes to allow. */
+  /** NEW: filter by scale-degree indices (0-based within scale) */
+  allowedDegreeIndices?: number[] | null;
+
+  /** Legacy absolute whitelist (still supported if present). */
   allowedMidis?: number[] | null;
 };
 
 /** Generate a phrase inside [lowHz, highHz] using a scale + rhythm. */
 export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmParams): Phrase {
   const {
-    lowHz,
-    highHz,
-    bpm,
-    den,
-    tonicPc,
-    scale,
-    rhythm,
+    lowHz, highHz, bpm, den,
+    tonicPc, scale, rhythm,
     a4Hz = 440,
     maxPerDegree = 2,
     seed = 0x9e3779b9,
     tonicMidis = null,
     includeUnder = false,
     includeOver = false,
+    allowedDegreeIndices = null,
     allowedMidis = null,
   } = params;
 
@@ -66,7 +62,16 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     if (isInScale(pc, tonicPc, scale)) allowed.push(m);
   }
 
-  // Apply absolute-tonic windows (if provided)
+  // Degree filter (relative to tonic, across octaves/keys)
+  if (allowedDegreeIndices && allowedDegreeIndices.length) {
+    const set = new Set(allowedDegreeIndices);
+    allowed = allowed.filter((m) => {
+      const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
+      return di >= 0 && set.has(di);
+    });
+  }
+
+  // Tonic windows (with optional under/over)
   if (tonicMidis && tonicMidis.length) {
     const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
     const windows = sorted.map((T) => [T, T + 12] as const);
@@ -79,7 +84,7 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     if (filtered.length) allowed = filtered;
   }
 
-  // Apply per-note whitelist (if provided)
+  // Optional absolute whitelist (legacy)
   if (allowedMidis && allowedMidis.length) {
     const allow = new Set(allowedMidis.map((m) => Math.round(m)));
     const filtered = allowed.filter((m) => allow.has(m));
@@ -110,10 +115,8 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
 
   for (const ev of rhythm) {
     const durSec = noteValueToSeconds(ev.value, bpm, den);
-    if (ev.type === "rest") {
-      t += durSec;
-      continue;
-    }
+    if (ev.type === "rest") { t += durSec; continue; }
+
     const near: number[] = [];
     const leap: number[] = [];
     for (const m of allowed) {
@@ -152,40 +155,41 @@ export type BuildSequenceParams = {
   pattern: "asc" | "desc" | "asc-desc" | "desc-asc";
   noteQuota: number;
   seed?: number;
-
-  /** Restrict permissible starting tonics (absolute MIDI). */
   tonicMidis?: number[] | null;
-
-  /** Optional hard whitelist of absolute MIDI notes to allow. */
+  /** NEW */
+  allowedDegreeIndices?: number[] | null;
   allowedMidis?: number[] | null;
 };
 
-/** Build a phrase following a scale sequence pattern; NOTE slots consume targets; REST slots become gaps. */
 export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phrase {
   const {
-    lowHz,
-    highHz,
-    bpm,
-    den,
-    tonicPc,
-    scale,
-    rhythm,
-    pattern,
-    noteQuota,
-    a4Hz = 440,
-    seed = 0xd1a1,
+    lowHz, highHz, bpm, den,
+    tonicPc, scale, rhythm, pattern, noteQuota,
+    a4Hz = 440, seed = 0xd1a1,
     tonicMidis = null,
+    allowedDegreeIndices = null,
     allowedMidis = null,
   } = params;
 
   const loM = Math.round(hzToMidi(Math.min(lowHz, highHz), a4Hz));
   const hiM = Math.round(hzToMidi(Math.max(lowHz, highHz), a4Hz));
 
-  const allowed: number[] = [];
+  // base allowed in-range & in-scale
+  let allowed: number[] = [];
   for (let m = loM; m <= hiM; m++) {
     const pc = ((m % 12) + 12) % 12;
     if (isInScale(pc, tonicPc, scale)) allowed.push(m);
   }
+
+  // degree filter (NEW)
+  if (allowedDegreeIndices && allowedDegreeIndices.length) {
+    const set = new Set(allowedDegreeIndices);
+    allowed = allowed.filter((m) => {
+      const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
+      return di >= 0 && set.has(di);
+    });
+  }
+
   if (!allowed.length) {
     const totalSec = rhythm.reduce((s, r) => s + noteValueToSeconds(r.value, bpm, den), 0);
     return { durationSec: totalSec, notes: [] };
@@ -206,20 +210,21 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   };
   const asc = buildAscendingOffsets(noteQuota);
 
-  // Find absolute tonic candidates in range
+  // tonic candidates inside range
   const tonicCandidates: number[] = [];
   for (let m = loM; m <= hiM; m++) {
     if ((((m % 12) + 12) % 12) === ((tonicPc % 12) + 12) % 12) tonicCandidates.push(m);
   }
 
-  // Restrict to selected absolute tonics if provided
+  // restrict to selected tonic windows if given
   let effectiveCandidates = tonicCandidates;
   if (tonicMidis && tonicMidis.length) {
     const set = new Set(tonicMidis.map((x) => Math.round(x)));
     const filtered = tonicCandidates.filter((m) => set.has(m));
     if (filtered.length) effectiveCandidates = filtered;
   }
-  // Further restrict base to per-note whitelist (if provided)
+
+  // further restrict by per-note whitelist (if present)
   const allowSet = allowedMidis && allowedMidis.length
     ? new Set(allowedMidis.map((m) => Math.round(m)))
     : null;
@@ -247,9 +252,19 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   });
   const chosenBase = fits[0]?.base ?? effectiveCandidates[0];
 
-  // Build targets according to pattern
+  // build targets per pattern and clamp to range + degree whitelist + absolute whitelist
   let ascTargets = asc.map((o) => chosenBase + o).filter((m) => m >= loM && m <= hiM);
-  if (allowSet) ascTargets = ascTargets.filter((m) => allowSet.has(m));
+
+  if (allowedDegreeIndices && allowedDegreeIndices.length) {
+    const set = new Set(allowedDegreeIndices);
+    ascTargets = ascTargets.filter((m) => {
+      const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
+      return di >= 0 && set.has(di);
+    });
+  }
+  if (allowSet) {
+    ascTargets = ascTargets.filter((m) => allowSet.has(m));
+  }
 
   const concatNoDup = (a: number[], b: number[]) => {
     if (!a.length) return b.slice();
@@ -285,7 +300,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
     targets.push(targets[targets.length - 1]);
   }
 
-  // Map targets onto rhythm
+  // map targets onto rhythm
   let t = 0;
   let ti = 0;
   const notes: { midi: number; startSec: number; durSec: number }[] = [];
@@ -307,51 +322,34 @@ export type BuildIntervalPhraseParams = {
   a4Hz?: number;
   bpm: number;
   den: number;
-
-  /** scale constraints */
+  tsNum: number;
   tonicPc: number;
   scale: ScaleName;
-
-  /** intervals in semitones (e.g., 1,2,3,5,7,12) */
   intervals: number[];
-
-  /** how many interval pairs to emit */
   numIntervals: number;
-
-  /** note/rest template for each pair + gap between pairs */
   pairRhythm: RhythmEvent[];
   gapRhythm: RhythmEvent[];
-
   seed?: number;
 
-  /** Optional absolute-tonic windows to constrain *both* notes. */
   tonicMidis?: number[] | null;
+
+  /** NEW: degree filter applied to BOTH notes */
+  allowedDegreeIndices?: number[] | null;
 
   /** Optional whitelist of absolute MIDI notes (both root & top must be allowed). */
   allowedMidis?: number[] | null;
 };
 
-/**
- * Interval training:
- * - Uses Range / Tonic windows (and allowedMidis) to control register.
- * - Only emits interval pairs where BOTH notes are in the selected SCALE.
- * - Each pair can be ascending or descending (randomly chosen by the valid pairs pool).
- */
 export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
   const {
-    lowHz,
-    highHz,
-    a4Hz = 440,
-    bpm,
-    den,
-    tonicPc,
-    scale,
-    intervals,
-    numIntervals,
-    pairRhythm,
-    gapRhythm,
+    lowHz, highHz, a4Hz = 440,
+    bpm, den, tsNum,
+    tonicPc, scale,
+    intervals, numIntervals,
+    pairRhythm, gapRhythm, // gap ignored now
     seed = 0x1234,
     tonicMidis = null,
+    allowedDegreeIndices = null,
     allowedMidis = null,
   } = params;
 
@@ -359,14 +357,25 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
   const hiM = Math.round(hzToMidi(Math.max(lowHz, highHz), a4Hz));
   const rnd = makeRng(seed);
 
-  // 1) Build the absolute note universe: in-range AND in-scale
+  // in-range, in-scale
   let allowedAbs = new Set<number>();
   for (let m = loM; m <= hiM; m++) {
     const pc = ((m % 12) + 12) % 12;
     if (isInScale(pc, tonicPc, scale)) allowedAbs.add(m);
   }
 
-  // 2) Restrict by tonic windows if present (both notes must be inside the union of windows)
+  // degree filter (NEW)
+  if (allowedDegreeIndices && allowedDegreeIndices.length) {
+    const set = new Set(allowedDegreeIndices);
+    allowedAbs = new Set(
+      Array.from(allowedAbs).filter((m) => {
+        const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
+        return di >= 0 && set.has(di);
+      })
+    );
+  }
+
+  // tonic windows (both notes must be inside)
   if (tonicMidis && tonicMidis.length) {
     const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
     const windows = sorted.map((T) => [T, T + 12] as const);
@@ -374,7 +383,7 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
     allowedAbs = new Set(Array.from(allowedAbs).filter(inAny));
   }
 
-  // 3) Restrict by per-note whitelist if present
+  // absolute whitelist (both notes)
   if (allowedMidis && allowedMidis.length) {
     const allow = new Set(allowedMidis.map((m) => Math.round(m)));
     allowedAbs = new Set(Array.from(allowedAbs).filter((m) => allow.has(m)));
@@ -382,8 +391,7 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
 
   const allowedList = Array.from(allowedAbs).sort((a, b) => a - b);
 
-  // 4) Precompute all valid (root, top) pairs for the chosen intervals, both directions,
-  //    requiring BOTH notes to be in the allowedAbs set (which is already scale-aware).
+  // precompute valid pairs
   type Pair = { root: number; top: number };
   const pairs: Pair[] = [];
   if (allowedList.length) {
@@ -398,23 +406,21 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
     }
   }
 
-  // If no valid pairs exist, neutral fallback: sustain center note over the total duration
   const totalPairDurSec = pairRhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0);
-  const gapDurSec = gapRhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0);
+  const barDurSec = beatsToSeconds(tsNum, bpm, den);
   if (!pairs.length) {
     const mid = allowedList.length ? allowedList[Math.floor(allowedList.length / 2)] : Math.round((loM + hiM) / 2);
-    const total = numIntervals * (totalPairDurSec + gapDurSec);
+    const total = numIntervals * barDurSec;
     return { durationSec: total, notes: [{ midi: mid, startSec: 0, durSec: total }] };
   }
 
-  // 5) Emit numIntervals pairs, choosing randomly from the valid pool
+  // emit pairs (each pair occupies one full bar)
   const notes: Phrase["notes"] = [];
   let t = 0;
 
   for (let i = 0; i < numIntervals; i++) {
     const { root, top } = choose(pairs, rnd);
 
-    // pair rhythm (supports any pattern of notes/rests)
     let idx = 0;
     for (const ev of pairRhythm) {
       const dur = noteValueToSeconds(ev.value, bpm, den);
@@ -425,10 +431,12 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
       }
       t += dur;
     }
-    // gap rhythm
-    for (const ev of gapRhythm) {
-      t += noteValueToSeconds(ev.value, bpm, den);
-    }
+
+    // pad bar
+    const usedBeats = pairRhythm.reduce((s, ev) => s + noteValueToBeats(ev.value, den), 0);
+    const padBeats = Math.max(0, tsNum - usedBeats);
+    const remainSec = beatsToSeconds(padBeats, bpm, den);
+    t += remainSec;
   }
 
   return { durationSec: t, notes };

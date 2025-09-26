@@ -10,7 +10,7 @@ import {
   buildTwoBarRhythm,
   sequenceNoteCountForScale,
 } from "@/utils/phrase/generator";
-import { beatsToSeconds, noteValueToBeats } from "@/utils/time/tempo";
+import { beatsToSeconds, noteValueToBeats, type NoteValue } from "@/utils/time/tempo";
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
 import { keyNameFromTonicPc } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import type { SessionConfig } from "@/components/training/session/types";
@@ -23,7 +23,6 @@ export type ExerciseFabric = {
   syncRhythmFabric: RhythmEvent[] | null;
   words: string[] | null;
   keySig: string | null;
-  /** For timing fallbacks when phrase.durationSec is absent */
   fallbackPhraseSec: number;
 };
 
@@ -31,7 +30,7 @@ export function useExerciseFabric(opts: {
   sessionConfig: SessionConfig;
   lowHz: number | null;
   highHz: number | null;
-  seedBump: number;              // increment between takes to regenerate
+  seedBump: number;
 }): ExerciseFabric {
   const { sessionConfig, lowHz, highHz, seedBump } = opts;
 
@@ -42,6 +41,7 @@ export function useExerciseFabric(opts: {
     tonicMidis, allowedMidis,
     randomIncludeUnder, randomIncludeOver,
     customPhrase, customWords,
+    allowedDegrees,
   } = sessionConfig;
 
   const haveRange = lowHz != null && highHz != null;
@@ -52,7 +52,7 @@ export function useExerciseFabric(opts: {
 
   const lengthBars = Math.max(1, Number((rhythm as any)?.lengthBars ?? exerciseBars ?? 2));
 
-  // -------- Rest policy (line + content with inheritance) ----------
+  // ---- rest policy calc (unchanged) ----
   const lineAllowRests: boolean = (rhythm as any)?.allowRests !== false;
   const lineRestProbRaw: number = (rhythm as any)?.restProb ?? 0.3;
   const lineRestProb = lineAllowRests ? lineRestProbRaw : 0;
@@ -67,7 +67,7 @@ export function useExerciseFabric(opts: {
   })();
   const contentRestProb = contentAllowRests ? contentRestProbRaw : 0;
 
-  // ------------------- BLUE RHYTHM (sync line) ---------------------
+  // ---- BLUE RHYTHM (unchanged) ----
   const syncRhythmFabric: RhythmEvent[] | null = useMemo(() => {
     if (!rhythm) return null;
     const lineEnabled = (rhythm as any).lineEnabled !== false;
@@ -103,7 +103,7 @@ export function useExerciseFabric(opts: {
     });
   }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed, lengthBars, lineAllowRests, lineRestProb]);
 
-  // ---------------------- MELODY FABRIC ----------------------------
+  // ---- MELODY FABRIC ----
   const generated = useMemo((): { phrase: StagePhrase | null; melodyRhythm: RhythmEvent[] | null } => {
     if (customPhrase) return { phrase: customPhrase, melodyRhythm: null };
     if (!haveRange || !scale || !rhythm) return { phrase: null, melodyRhythm: null };
@@ -113,25 +113,54 @@ export function useExerciseFabric(opts: {
       : ["quarter"];
 
     if ((rhythm as any).mode === "interval") {
+      // interval mode timing prep (unchanged)
+      const beatNote = ((): NoteValue => {
+        switch (ts.den) {
+          case 1:  return "whole";
+          case 2:  return "half";
+          case 4:  return "quarter";
+          case 8:  return "eighth";
+          case 16: return "sixteenth";
+          case 32: return "thirtysecond";
+          default: return "quarter";
+        }
+      })();
+      const pairRhythm: RhythmEvent[] = [
+        { type: "note", value: beatNote },
+        { type: "note", value: beatNote },
+      ];
+
+      // score rhythm for interval view
+      const perPair: RhythmEvent[] = (() => {
+        const usedBeats = 2;
+        const restBeats = Math.max(0, ts.num - usedBeats);
+        return [
+          ...pairRhythm,
+          ...Array.from({ length: restBeats }, () => ({ type: "rest", value: beatNote } as const)),
+        ];
+      })();
+      const melodyRhythm = Array.from({ length: (rhythm as any).numIntervals || 8 }, () => perPair).flat();
+
       const phrase = buildIntervalPhrase({
         lowHz: lowHz as number,
         highHz: highHz as number,
         a4Hz: 440,
         bpm, den: ts.den,
+        tsNum: ts.num,
         tonicPc: scale.tonicPc,
         scale: scale.name as any,
         intervals: (rhythm as any).intervals || [3, 5],
         numIntervals: (rhythm as any).numIntervals || 8,
-        pairRhythm: [
-          { type: "note", value: "quarter" },
-          { type: "note", value: "quarter" },
-        ],
-        gapRhythm: contentAllowRests ? [{ type: "rest", value: "eighth" }] : [],
+        pairRhythm,
+        gapRhythm: [],
         seed: scaleSeed,
         tonicMidis,
+        /** NEW: degree filter */
+        allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
+        /** Still respect absolute whitelists if present */
         allowedMidis,
       });
-      return { phrase, melodyRhythm: null };
+      return { phrase, melodyRhythm };
     }
 
     if ((rhythm as any).mode === "sequence") {
@@ -162,6 +191,8 @@ export function useExerciseFabric(opts: {
         noteQuota: want,
         seed: scaleSeed,
         tonicMidis,
+        /** NEW */
+        allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
         allowedMidis,
       });
 
@@ -188,8 +219,10 @@ export function useExerciseFabric(opts: {
       maxPerDegree: scale.maxPerDegree ?? 2,
       seed: scaleSeed,
       tonicMidis,
-      includeUnder: !!sessionConfig.randomIncludeUnder,
-      includeOver: !!sessionConfig.randomIncludeOver,
+      includeUnder: !!randomIncludeUnder,
+      includeOver: !!randomIncludeOver,
+      /** NEW */
+      allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
       allowedMidis,
     });
 
@@ -197,13 +230,13 @@ export function useExerciseFabric(opts: {
   }, [
     customPhrase, haveRange, lowHz, highHz, bpm, ts.den, ts.num,
     scale, rhythm, rhythmSeed, scaleSeed, lengthBars,
-    tonicMidis, allowedMidis, sessionConfig.randomIncludeUnder, sessionConfig.randomIncludeOver,
-    contentAllowRests, contentRestProb,
+    tonicMidis, allowedMidis, randomIncludeUnder, randomIncludeOver,
+    contentAllowRests, contentRestProb, sessionConfig.allowedDegrees,
   ]);
 
   const phrase = generated.phrase;
 
-  // -------------- Lyrics + Key (UI helpers co-located) --------------
+  // lyrics (unchanged)
   const words: string[] | null = useMemo(() => {
     if (Array.isArray(customWords) && customWords.length) {
       if (phrase?.notes?.length) {
@@ -228,7 +261,6 @@ export function useExerciseFabric(opts: {
     return keyNameFromTonicPc(scale.tonicPc, scale.name as any, false);
   }, [scale]);
 
-  // -------------- fallback duration for timing --------------
   const genNoteDurSec =
     typeof noteValue === "string"
       ? beatsToSeconds(noteValueToBeats(noteValue, ts.den), bpm, ts.den)

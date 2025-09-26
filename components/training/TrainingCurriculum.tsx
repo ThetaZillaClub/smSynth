@@ -55,7 +55,7 @@ export default function TrainingCurriculum({
     return set;
   }, [haveRange, lowHz, highHz]);
 
-  // Nudge tonic into allowed set if out-of-range
+  // 🔁 Keep tonicPc valid for the saved range
   useEffect(() => {
     if (!haveRange) return;
     const currentPc = (cfg.scale?.tonicPc ?? 0) % 12;
@@ -66,8 +66,8 @@ export default function TrainingCurriculum({
     const hiM = Math.round(hzToMidi(highHz as number));
     const mid = Math.round((loM + (hiM - 12)) / 2);
 
-    let bestPc = 0,
-      bestDist = Infinity;
+    let bestPc = 0;
+    let bestDist = Infinity;
     allowedTonicPcs.forEach((pc) => {
       let bestForPc = Infinity;
       for (let m = loM; m <= hiM - 12; m++) {
@@ -111,9 +111,53 @@ export default function TrainingCurriculum({
     setCfg((c) => ({ ...c, ...patch }));
   }, []);
 
+  // ✅ Show preferred-octave chips up to the **maximum** windows across allowed keys.
+  // (Launch-time selection is still clamped per chosen key, so we fall back automatically.)
+  const availableRandomOctaveCount = useMemo(() => {
+    if (!haveRange || allowedTonicPcs.size === 0) return 0;
+    const loM = Math.round(hzToMidi(lowHz as number));
+    const hiM = Math.round(hzToMidi(highHz as number));
+    let maxCount = 0;
+    allowedTonicPcs.forEach((pc) => {
+      let count = 0;
+      for (let m = loM; m <= hiM - 12; m++) {
+        if ((((m % 12) + 12) % 12) === pc) count++;
+      }
+      if (count > maxCount) maxCount = count;
+    });
+    return maxCount;
+  }, [haveRange, allowedTonicPcs, lowHz, highHz]);
+
   const launch = useCallback(() => {
-    onStart(cfg);
-  }, [cfg, onStart]);
+    // If random key is enabled, choose one allowed tonicPc once at launch
+    if (cfg.scale?.randomTonic) {
+      if (!haveRange || allowedTonicPcs.size === 0) {
+        onStart(cfg); // nothing to randomize
+        return;
+      }
+      const pcs = Array.from(allowedTonicPcs);
+      const chosenPc = pcs[Math.floor(Math.random() * pcs.length)];
+      // Build tonic windows (absolute midis) for the chosen key inside saved range
+      const loM = Math.round(hzToMidi(lowHz as number));
+      const hiM = Math.round(hzToMidi(highHz as number));
+      const windows: number[] = [];
+      for (let m = loM; m <= hiM - 12; m++) {
+        if ((((m % 12) + 12) % 12) === chosenPc) windows.push(m);
+      }
+      let nextTonicMidis: number[] | null = null;
+      if (windows.length) {
+        const idx = Math.min(Math.max(0, (cfg.preferredOctaveIndex ?? 1)), windows.length - 1);
+        nextTonicMidis = [windows[idx]];
+      }
+      onStart({
+        ...cfg,
+        scale: { ...(cfg.scale ?? {}), tonicPc: chosenPc, randomTonic: false },
+        tonicMidis: nextTonicMidis,
+      });
+    } else {
+      onStart(cfg);
+    }
+  }, [cfg, onStart, haveRange, allowedTonicPcs, lowHz, highHz]);
 
   const onMidiFile = useCallback(async (file: File) => {
     const buf = await file.arrayBuffer();
@@ -176,6 +220,7 @@ export default function TrainingCurriculum({
               onChange={pushChange}
               allowedTonicPcs={allowedTonicPcs}
               rangeHint={rangeHint}
+              availableRandomOctaveCount={availableRandomOctaveCount}
             />
             <SequenceModeCard cfg={cfg} onChange={pushChange} />
             <RangeCard

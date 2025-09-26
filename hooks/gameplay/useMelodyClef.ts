@@ -1,7 +1,7 @@
 // hooks/gameplay/useMelodyClef.ts
 import { useMemo } from "react";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
-import { isInScale } from "@/utils/phrase/scales";
+import { isInScale, degreeIndex } from "@/utils/phrase/scales";
 import { pickClef } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import type { Phrase } from "@/utils/stage";
 import type { SessionConfig } from "@/components/training/session/types";
@@ -30,6 +30,7 @@ export function useMelodyClef(params: {
       if (isInScale(pc, scale.tonicPc, scale.name as any)) allowed.push(m);
     }
 
+    // Tonic windows
     const tonicMidis = sessionConfig.tonicMidis ?? null;
     if (tonicMidis && tonicMidis.length) {
       const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
@@ -43,6 +44,17 @@ export function useMelodyClef(params: {
       if (filtered.length) allowed = filtered;
     }
 
+    // Degree filter (NEW)
+    const degs = sessionConfig.allowedDegrees ?? null;
+    if (degs && degs.length) {
+      const set = new Set(degs);
+      allowed = allowed.filter((m) => {
+        const di = degreeIndex(((m % 12) + 12) % 12, scale.tonicPc, scale.name as any);
+        return di >= 0 && set.has(di);
+      });
+    }
+
+    // Legacy whitelist still respected
     const whitelist = sessionConfig.allowedMidis ?? null;
     if (whitelist && whitelist.length) {
       const allowSet = new Set(whitelist.map((m) => Math.round(m)));

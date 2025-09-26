@@ -54,56 +54,18 @@ function FancyCheckbox({
   );
 }
 
-function RestControls({
-  allowRests,
-  restProb,
-  onAllowChange,
-  onProbChange,
-  label = "Phrase rests",
-}: {
-  allowRests: boolean;
-  restProb: number;
-  onAllowChange: (next: boolean) => void;
-  onProbChange: (next: number) => void;
-  label?: string;
-}) {
-  return (
-    <>
-      <Field label={label}>
-        <FancyCheckbox
-          checked={allowRests}
-          onChange={onAllowChange}
-          label={<span>{allowRests ? "Enabled" : "Disabled"}</span>}
-        />
-      </Field>
-      <Field label="Rest probability">
-        <input
-          type="number"
-          step="0.05"
-          min={0}
-          max={0.95}
-          className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm disabled:opacity-50"
-          value={allowRests ? restProb : 0}
-          disabled={!allowRests}
-          onChange={(e) =>
-            onProbChange(Math.max(0, Math.min(0.95, Number(e.target.value) || 0.3)))
-          }
-        />
-      </Field>
-    </>
-  );
-}
-
 export default function ScaleCard({
   cfg,
   onChange,
   allowedTonicPcs,
   rangeHint,
+  availableRandomOctaveCount,
 }: {
   cfg: SessionConfig;
   onChange: (patch: Partial<SessionConfig>) => void;
   allowedTonicPcs: Set<number>;
   rangeHint: RangeHint;
+  availableRandomOctaveCount: number;
 }) {
   const haveRange = useMemo(
     () => allowedTonicPcs.size > 0 || rangeHint != null,
@@ -111,23 +73,27 @@ export default function ScaleCard({
   );
 
   const scaleCfg =
-    cfg.scale ?? ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2 } as const);
+    cfg.scale ?? ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2, randomTonic: false } as const);
 
   const PC_LABELS_FLAT = useMemo(
     () => ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"],
     []
   );
 
-  const rhythmCfg = (cfg.rhythm ?? {
-    contentRestProb: 0.3,
-    contentAllowRests: true,
-  }) as any;
+  // ——— Random-key preferred octaves (MULTI-SELECT) ———
+  const selectedOctIdx = useMemo(() => {
+    const raw = cfg.preferredOctaveIndices ?? [1];
+    const clean = Array.from(new Set(raw.map((i) => Math.max(0, Math.floor(i)))));
+    if (!availableRandomOctaveCount) return [];
+    return clean.filter((i) => i < availableRandomOctaveCount);
+  }, [cfg.preferredOctaveIndices, availableRandomOctaveCount]);
+
+  const canPickRandomOctaves = !!scaleCfg.randomTonic && availableRandomOctaveCount > 0;
 
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">Scale</div>
 
-      {/* Range hint */}
       {rangeHint ? (
         <div className="mb-2 text-xs text-[#2d2d2d]">
           Vocal range: <span className="font-semibold">{rangeHint.lo}–{rangeHint.hi}</span>.{" "}
@@ -144,10 +110,21 @@ export default function ScaleCard({
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <Field label="Random key (in range)">
+          <FancyCheckbox
+            checked={!!scaleCfg.randomTonic}
+            onChange={(next) =>
+              onChange({ scale: { ...scaleCfg, randomTonic: next } as any })
+            }
+            label={<span>{scaleCfg.randomTonic ? "On" : "Off"}</span>}
+          />
+        </Field>
+
         <Field label="Tonic">
           <select
             className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
             value={scaleCfg.tonicPc}
+            disabled={!!scaleCfg.randomTonic}
             onChange={(e) =>
               onChange({
                 scale: {
@@ -160,12 +137,7 @@ export default function ScaleCard({
             {Array.from({ length: 12 }, (_, pc) => pc).map((pc) => {
               const disabled = haveRange && !allowedTonicPcs.has(pc);
               return (
-                <option
-                  key={pc}
-                  value={pc}
-                  disabled={disabled}
-                  title={disabled ? "Out of your range" : ""}
-                >
+                <option key={pc} value={pc} disabled={disabled} title={disabled ? "Out of your range" : ""}>
                   {PC_LABELS_FLAT[pc]}
                 </option>
               );
@@ -207,20 +179,49 @@ export default function ScaleCard({
             }
           />
         </Field>
-      </div>
 
-      {/* Phrase (content) rests */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-        <RestControls
-          allowRests={rhythmCfg.contentAllowRests !== false}
-          restProb={rhythmCfg.contentRestProb ?? 0.3}
-          onAllowChange={(next) =>
-            onChange({ rhythm: { ...rhythmCfg, contentAllowRests: next } as any })
-          }
-          onProbChange={(next) =>
-            onChange({ rhythm: { ...rhythmCfg, contentRestProb: next } as any })
-          }
-        />
+        {/* NEW: Preferred octaves (multi-select) */}
+        <Field label="Preferred octaves (random key)">
+          <div className="flex flex-wrap items-center gap-2">
+            {availableRandomOctaveCount > 0 ? (
+              Array.from({ length: availableRandomOctaveCount }, (_, i) => i).map((i) => {
+                const active = canPickRandomOctaves && selectedOctIdx.includes(i);
+                return (
+                  <button
+                    key={`rand-oct-${i}`}
+                    type="button"
+                    disabled={!canPickRandomOctaves}
+                    title={`Octave ${i + 1}`}
+                    onClick={() => {
+                      const set = new Set(selectedOctIdx);
+                      if (set.has(i)) set.delete(i);
+                      else set.add(i);
+                      onChange({ preferredOctaveIndices: Array.from(set).sort((a, b) => a - b) });
+                    }}
+                    className={[
+                      "inline-flex items-center justify-center w-7 h-7 rounded border text-xs",
+                      canPickRandomOctaves
+                        ? active
+                          ? "bg-white"
+                          : "bg-[#f5f5f5] hover:bg-white transition"
+                        : "bg-[#eeeeee] opacity-70 cursor-not-allowed",
+                    ].join(" ")}
+                  >
+                    {i + 1}
+                  </button>
+                );
+              })
+            ) : (
+              <span className="text-xs text-[#6b6b6b]">No octaves available</span>
+            )}
+          </div>
+          {scaleCfg.randomTonic && availableRandomOctaveCount > 0 ? (
+            <div className="mt-1 text-[11px] text-[#6b6b6b]">
+              We’ll enable the windows for your selected octaves in the chosen random key. If a preferred
+              octave doesn’t exist in that key, we’ll fall back to the nearest lower window.
+            </div>
+          ) : null}
+        </Field>
       </div>
     </div>
   );

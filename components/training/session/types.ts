@@ -19,58 +19,41 @@ export type ScaleConfig = {
   /** Random-mode cap: maximum consecutive hits per scale degree. Default: 2. */
   maxPerDegree?: number;
   seed?: number;
+  /** If true, pick a random tonicPc from keys that fit saved range at session start. */
+  randomTonic?: boolean;
 };
 
 export type RhythmConfig =
   | {
-      /** Step through a scale using a pattern (independent of rhythm line). */
       mode: "sequence";
       pattern: "asc" | "desc" | "asc-desc" | "desc-asc";
-      /** Guide/line rests (blue line) */
       restProb?: number;
       allowRests?: boolean;
-      /** Melody rests (content) */
       contentRestProb?: number;
       contentAllowRests?: boolean;
-      /** Available rhythmic values */
       available?: NoteValue[];
-      /** Bars to generate in random/line fabrics */
       lengthBars?: number;
       seed?: number;
     }
   | {
-      /** Random note selection within scale + range */
       mode: "random";
       available?: NoteValue[];
-      /** Guide/line rests (blue line) */
       restProb?: number;
       allowRests?: boolean;
-      /** Melody rests (content) */
       contentRestProb?: number;
       contentAllowRests?: boolean;
       lengthBars?: number;
       seed?: number;
     }
   | {
-      /** Interval training (now scale-aware + range/tonic-window driven) */
       mode: "interval";
       available?: NoteValue[];
-      /** Guide/line rests (blue line) */
       restProb?: number;
       allowRests?: boolean;
-      /** Melody rests (content) */
       contentRestProb?: number;
       contentAllowRests?: boolean;
-
-      /**
-       * Allowed interval sizes in semitones (e.g., 1, 2, 3, 5, 7, 12).
-       * Pairs may be chosen ascending or descending; BOTH notes must be in the scale.
-       */
       intervals: number[];
-
-      /** How many interval pairs to generate. */
       numIntervals: number;
-
       seed?: number;
     };
 
@@ -83,7 +66,6 @@ export type SessionConfig = {
   restBars: number;
   exerciseBars: number;
 
-  /** Legacy/simple generation controls */
   noteValue?: NoteValue;
   noteDurSec?: number;
 
@@ -91,40 +73,44 @@ export type SessionConfig = {
   scale?: ScaleConfig;
   rhythm?: RhythmConfig;
 
-  /** Optional overrides (skip generation entirely if provided) */
   customPhrase?: Phrase | null;
   customWords?: string[] | null;
 
   view: ViewMode;
   metronome: boolean;
 
-  /** (legacy flag; pre-test is separate now) */
   callResponse: boolean;
   advancedMode: boolean;
 
-  /** Ordered list of Call/Response modes to run once before the exercise */
   callResponseSequence: CRMode[];
-
-  /** Number of exercise loops (takes) */
   exerciseLoops: number;
-
-  /** If true, regenerate a new phrase between takes */
   regenerateBetweenTakes: boolean;
 
   /** Absolute tonic(s) to anchor exercises (each T defines [T, T+12]). */
   tonicMidis?: number[] | null;
 
-  /** Random mode only — also allow notes *below the lowest* selected window. */
+  /** Random mode — also allow notes below/above the selected windows. */
   randomIncludeUnder?: boolean;
-
-  /** Random mode only — also allow notes *above the highest* selected window. */
   randomIncludeOver?: boolean;
 
   /**
-   * Hard whitelist of *exact* MIDI notes allowed inside selected window(s).
-   * If null/empty, we allow all scale notes in the eligible area.
+   * NEW: Allowed scale-degree indices (0-based within the chosen scale).
+   * If null/empty, all degrees in the scale are permitted.
+   * Works across all octaves & keys.
+   */
+  allowedDegrees?: number[] | null;
+
+  /**
+   * LEGACY (no longer surfaced in UI): hard whitelist of *exact* MIDI notes.
+   * If non-empty, still respected after degree/window filters.
    */
   allowedMidis?: number[] | null;
+
+  /**
+   * NEW: In random-key mode, prefer these 0-based octave indices (Octave 1 = index 0).
+   * Multiple selections widen the usable range when the chosen key supports them.
+   */
+  preferredOctaveIndices?: number[] | null;
 };
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
@@ -157,7 +143,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   view: "piano",
   metronome: true,
 
-  callResponse: true, // exercise playback does not use this anymore
+  callResponse: true,
   advancedMode: false,
 
   callResponseSequence: [],
@@ -167,5 +153,9 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   tonicMidis: null,
   randomIncludeUnder: false,
   randomIncludeOver: false,
-  allowedMidis: null,
+
+  allowedDegrees: null,   // ← all degrees allowed
+  allowedMidis: null,     // ← legacy (UI removed)
+
+  preferredOctaveIndices: [1], // default “Octave 2”
 };
