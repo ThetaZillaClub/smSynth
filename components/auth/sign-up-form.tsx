@@ -2,8 +2,8 @@
 "use client";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Input } from "@/components/auth/input";
+import { Label } from "@/components/auth/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";

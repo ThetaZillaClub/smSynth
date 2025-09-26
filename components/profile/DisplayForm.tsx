@@ -2,8 +2,8 @@
 "use client"
 
 import { createClient } from "@/lib/supabase/client"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Input } from "@/components/auth/input"
+import { Label } from "@/components/auth/label"
 import { useEffect, useMemo, useState } from "react"
 
 type Props = {

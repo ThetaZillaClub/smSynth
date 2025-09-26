@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/auth/card";
 import AuthHeader from "@/components/header/AuthHeader";
 
 export default async function Page({
