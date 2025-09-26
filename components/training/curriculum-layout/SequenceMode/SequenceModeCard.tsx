@@ -3,9 +3,9 @@
 import React, { useMemo } from "react";
 import type { SessionConfig } from "../../session/types";
 import type { NoteValue } from "@/utils/time/tempo";
-import type { RootPreference } from "@/utils/phrase/generator";
 import Field from "../Field";
 import { NOTE_VALUE_OPTIONS } from "../Options";
+
 const INTERVAL_OPTIONS = [
   { label: "Minor Second", value: 1 },
   { label: "Major Second", value: 2 },
@@ -20,6 +20,7 @@ const INTERVAL_OPTIONS = [
   { label: "Major Seventh", value: 11 },
   { label: "Octave", value: 12 },
 ];
+
 function FancyCheckbox({
   checked,
   onChange,
@@ -65,6 +66,7 @@ function FancyCheckbox({
     </button>
   );
 }
+
 function NoteLengthPicker({
   selected,
   onToggle,
@@ -97,6 +99,7 @@ function NoteLengthPicker({
     </div>
   );
 }
+
 export default function SequenceModeCard({
   cfg,
   onChange,
@@ -118,11 +121,13 @@ export default function SequenceModeCard({
     [cfg.rhythm, cfg.exerciseBars]
   );
   const selected = new Set<NoteValue>(rhythmCfg.available ?? ["quarter"]);
+
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">
         Exercise Mode
       </div>
+
       {/* Mode */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <Field label="Mode">
@@ -141,18 +146,15 @@ export default function SequenceModeCard({
               };
               if (mode === "sequence") {
                 patch.pattern = rhythmCfg.pattern ?? "asc";
-                patch.lengthBars = rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2); // keep for when switching back
+                patch.lengthBars = rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2);
               } else if (mode === "random") {
                 patch.lengthBars = rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2);
               } else if (mode === "interval") {
+                // ✅ No octaves/preference; Range/Tonic windows control octaves now.
                 patch.intervals = rhythmCfg.intervals ?? [3, 5];
-                patch.octaves = rhythmCfg.octaves ?? 0;
-                patch.preference = rhythmCfg.preference ?? "middle";
                 patch.numIntervals = rhythmCfg.numIntervals ?? 8;
               }
-              onChange({
-                rhythm: patch as any
-              });
+              onChange({ rhythm: patch as any });
             }}
           >
             <option value="random">Random</option>
@@ -160,7 +162,8 @@ export default function SequenceModeCard({
             <option value="interval">Interval Training</option>
           </select>
         </Field>
-        {/* Sequence pattern (sequence only) */}
+
+        {/* Sequence-only pattern */}
         {rhythmCfg.mode === "sequence" ? (
           <Field label="Sequence pattern">
             <select
@@ -180,6 +183,7 @@ export default function SequenceModeCard({
           <div className="hidden sm:block" />
         )}
       </div>
+
       {/* Random-only: length bars */}
       {rhythmCfg.mode === "random" ? (
         <div className="grid grid-cols-1 gap-2 mt-3">
@@ -203,6 +207,8 @@ export default function SequenceModeCard({
           </Field>
         </div>
       ) : null}
+
+      {/* Interval Training */}
       {rhythmCfg.mode === "interval" && (
         <div className="mt-3">
           <Field label="Intervals">
@@ -225,37 +231,8 @@ export default function SequenceModeCard({
               })}
             </div>
           </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-            <Field label="Extra octaves">
-              <input
-                type="number"
-                inputMode="numeric"
-                className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-                min={0}
-                max={3}
-                step={1}
-                value={rhythmCfg.octaves ?? 0}
-                onChange={(e) =>
-                  onChange({
-                    rhythm: { ...rhythmCfg, octaves: Math.max(0, Math.min(3, Math.floor(Number(e.target.value) || 0))) } as any,
-                  })
-                }
-              />
-            </Field>
-            <Field label="Root preference">
-              <select
-                className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-                value={rhythmCfg.preference ?? "middle"}
-                onChange={(e) =>
-                  onChange({ rhythm: { ...rhythmCfg, preference: e.target.value as RootPreference } as any })
-                }
-              >
-                <option value="low">Prefer low root</option>
-                <option value="middle">Prefer middle root</option>
-                <option value="high">Prefer high root</option>
-              </select>
-            </Field>
-          </div>
+
+          {/* Removed: Extra octaves + Root preference */}
           <Field label="Number of intervals">
             <input
               type="number"
@@ -273,6 +250,7 @@ export default function SequenceModeCard({
           </Field>
         </div>
       )}
+
       {/* Available note lengths */}
       <div className="grid grid-cols-1 gap-2 mt-3">
         <Field label="Available note lengths">

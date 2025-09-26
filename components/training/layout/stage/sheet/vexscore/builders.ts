@@ -122,13 +122,15 @@ export function keyNameFromTonicPc(
   return fewestAccidentalsForPc(parentMajPc);
 }
 
-/** Decide note-name preference for rendering: sharps for sharp/neutral keys, flats for flat keys. */
+/** Decide note-name preference for rendering: sharps for sharp keys, flats for flat/neutral keys. */
 export function preferSharpsForKeySig(key: string | null | undefined): boolean {
-  if (!key) return true;
+  if (!key) return false; // default to flats when neutral/unknown
   const k = normalizeMajorKeyName(key);
   const fifths = MAJOR_KEY_FIFTHS[k];
-  if (typeof fifths !== "number") return true;
-  return fifths >= 0; // sharps/neutral → sharps; flats → flats
+  if (typeof fifths !== "number") return false;
+  if (fifths > 0) return true;   // sharp-side keys
+  if (fifths < 0) return false;  // flat-side keys
+  return false;                  // C (neutral) → prefer flats
 }
 
 /**

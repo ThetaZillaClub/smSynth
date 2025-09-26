@@ -160,21 +160,26 @@ export default function TrainingGame({
     const contentRestProb = contentAllowRests ? contentRestProbRaw : 0;
 
     if ((rhythm as any).mode === "interval") {
+      // ✅ New: scale-aware, window-aware intervals (no octaves/preference params)
       const phrase = buildIntervalPhrase({
         lowHz: lowHz as number,
         highHz: highHz as number,
         a4Hz: 440,
         bpm,
         den: ts.den,
+
+        tonicPc: scale.tonicPc,
+        scale: scale.name as any,
+
         intervals: (rhythm as any).intervals || [3, 5],
-        octaves: (rhythm as any).octaves || 0,
-        preference: (rhythm as any).preference || "middle",
         numIntervals: (rhythm as any).numIntervals || 8,
+
         pairRhythm: [
           { type: "note", value: "quarter" },
           { type: "note", value: "quarter" },
         ],
         gapRhythm: [{ type: "rest", value: "eighth" }],
+
         seed: scaleSeed,
         tonicMidis: sessionConfig.tonicMidis ?? null,
         allowedMidis: sessionConfig.allowedMidis ?? null,
@@ -295,7 +300,8 @@ export default function TrainingGame({
 
   const sheetKeySig: string | null = useMemo(() => {
     if (!scale) return null;
-    return keyNameFromTonicPc(scale.tonicPc, scale.name as any, true);
+    // Use "fewest accidentals" normalization; prefer flats on neutral ties.
+    return keyNameFromTonicPc(scale.tonicPc, scale.name as any, false);
   }, [scale]);
 
   // ----- Stable clef selection derived from the user’s *selected notes* (C4 boundary) -----
@@ -494,13 +500,9 @@ export default function TrainingGame({
       isReady={isReady && (!!phrase || pretestActive)}
       step={step}
       loopPhase={pretestActive ? "call" : loop.loopPhase}
-
-      // ✅ Always provide the same first-exercise fabrics, including during pretest.
-      // Previously we hid these during CR, which made VexScore/piano-roll render with
-      // placeholder timing and then reflow (“flash”) once CR finished.
+      /* ✅ Always provide the same first-exercise fabrics */
       rhythm={syncRhythmFabric ?? undefined}
       melodyRhythm={melodyRhythm ?? undefined}
-
       bpm={bpm}
       den={ts.den}
       tsNum={ts.num}

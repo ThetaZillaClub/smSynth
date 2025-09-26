@@ -299,7 +299,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   return { durationSec: t, notes };
 }
 
-export type RootPreference = "low" | "high" | "middle";
+/* ======================  INTERVAL TRAINING (scale-aware)  ====================== */
 
 export type BuildIntervalPhraseParams = {
   lowHz: number;
@@ -307,21 +307,36 @@ export type BuildIntervalPhraseParams = {
   a4Hz?: number;
   bpm: number;
   den: number;
-  intervals: number[]; // e.g. [3,5] for min3 and p4
-  octaves: number; // max k for interval + 12*k, k=0 to octaves
-  preference: RootPreference;
+
+  /** scale constraints */
+  tonicPc: number;
+  scale: ScaleName;
+
+  /** intervals in semitones (e.g., 1,2,3,5,7,12) */
+  intervals: number[];
+
+  /** how many interval pairs to emit */
   numIntervals: number;
-  pairRhythm: RhythmEvent[]; // rhythm for one interval pair
-  gapRhythm: RhythmEvent[]; // between pairs
+
+  /** note/rest template for each pair + gap between pairs */
+  pairRhythm: RhythmEvent[];
+  gapRhythm: RhythmEvent[];
+
   seed?: number;
 
-  /** Optional absolute-tonic windows to bias/limit root placement. */
+  /** Optional absolute-tonic windows to constrain *both* notes. */
   tonicMidis?: number[] | null;
 
-  /** Optional hard whitelist of absolute MIDI notes to allow (both root and top must pass). */
+  /** Optional whitelist of absolute MIDI notes (both root & top must be allowed). */
   allowedMidis?: number[] | null;
 };
 
+/**
+ * Interval training:
+ * - Uses Range / Tonic windows (and allowedMidis) to control register.
+ * - Only emits interval pairs where BOTH notes are in the selected SCALE.
+ * - Each pair can be ascending or descending (randomly chosen by the valid pairs pool).
+ */
 export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
   const {
     lowHz,
@@ -329,9 +344,9 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
     a4Hz = 440,
     bpm,
     den,
+    tonicPc,
+    scale,
     intervals,
-    octaves,
-    preference,
     numIntervals,
     pairRhythm,
     gapRhythm,
@@ -340,69 +355,79 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
     allowedMidis = null,
   } = params;
 
-  const loM = Math.round(hzToMidi(lowHz, a4Hz));
-  const hiM = Math.round(hzToMidi(highHz, a4Hz));
+  const loM = Math.round(hzToMidi(Math.min(lowHz, highHz), a4Hz));
+  const hiM = Math.round(hzToMidi(Math.max(lowHz, highHz), a4Hz));
   const rnd = makeRng(seed);
 
-  const allowSet = allowedMidis && allowedMidis.length
-    ? new Set(allowedMidis.map((m) => Math.round(m)))
-    : null;
+  // 1) Build the absolute note universe: in-range AND in-scale
+  let allowedAbs = new Set<number>();
+  for (let m = loM; m <= hiM; m++) {
+    const pc = ((m % 12) + 12) % 12;
+    if (isInScale(pc, tonicPc, scale)) allowedAbs.add(m);
+  }
 
+  // 2) Restrict by tonic windows if present (both notes must be inside the union of windows)
+  if (tonicMidis && tonicMidis.length) {
+    const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
+    const windows = sorted.map((T) => [T, T + 12] as const);
+    const inAny = (m: number) => windows.some(([s, e]) => m >= s && m <= e);
+    allowedAbs = new Set(Array.from(allowedAbs).filter(inAny));
+  }
+
+  // 3) Restrict by per-note whitelist if present
+  if (allowedMidis && allowedMidis.length) {
+    const allow = new Set(allowedMidis.map((m) => Math.round(m)));
+    allowedAbs = new Set(Array.from(allowedAbs).filter((m) => allow.has(m)));
+  }
+
+  const allowedList = Array.from(allowedAbs).sort((a, b) => a - b);
+
+  // 4) Precompute all valid (root, top) pairs for the chosen intervals, both directions,
+  //    requiring BOTH notes to be in the allowedAbs set (which is already scale-aware).
+  type Pair = { root: number; top: number };
+  const pairs: Pair[] = [];
+  if (allowedList.length) {
+    const allowedSet = new Set(allowedList);
+    for (const r of allowedList) {
+      for (const k of intervals) {
+        const up = r + k;
+        const dn = r - k;
+        if (allowedSet.has(up)) pairs.push({ root: r, top: up });
+        if (allowedSet.has(dn)) pairs.push({ root: r, top: dn });
+      }
+    }
+  }
+
+  // If no valid pairs exist, neutral fallback: sustain center note over the total duration
+  const totalPairDurSec = pairRhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0);
+  const gapDurSec = gapRhythm.reduce((s, ev) => s + noteValueToSeconds(ev.value, bpm, den), 0);
+  if (!pairs.length) {
+    const mid = allowedList.length ? allowedList[Math.floor(allowedList.length / 2)] : Math.round((loM + hiM) / 2);
+    const total = numIntervals * (totalPairDurSec + gapDurSec);
+    return { durationSec: total, notes: [{ midi: mid, startSec: 0, durSec: total }] };
+  }
+
+  // 5) Emit numIntervals pairs, choosing randomly from the valid pool
   const notes: Phrase["notes"] = [];
   let t = 0;
 
   for (let i = 0; i < numIntervals; i++) {
-    const base = choose(intervals, rnd);
-    const k = Math.floor(rnd() * (octaves + 1));
-    const semis = base + 12 * k;
+    const { root, top } = choose(pairs, rnd);
 
-    // Respect selected tonic windows if present
-    let minRoot = loM;
-    let maxRoot = hiM - semis;
-    if (tonicMidis && tonicMidis.length) {
-      const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
-      const winMin = sorted[0];
-      const winMax = sorted[sorted.length - 1] + 12; // end of highest window
-      minRoot = Math.max(minRoot, winMin);
-      maxRoot = Math.min(maxRoot, winMax - semis);
-    }
-
-    if (maxRoot < minRoot) continue;
-
-    // Candidate roots considering per-note whitelist (both notes must be allowed).
-    let candidateRoots: number[] = [];
-    for (let r = minRoot; r <= maxRoot; r++) {
-      const okAllow = !allowSet || (allowSet.has(r) && allowSet.has(r + semis));
-      if (okAllow) candidateRoots.push(r);
-    }
-    if (!candidateRoots.length) continue;
-
-    let root: number;
-    if (preference === "low") {
-      root = candidateRoots[0];
-    } else if (preference === "high") {
-      root = candidateRoots[candidateRoots.length - 1];
-    } else {
-      // middle-ish
-      root = candidateRoots[Math.floor(candidateRoots.length / 2)];
-    }
-    root = Math.max(minRoot, Math.min(maxRoot, root));
-
-    let noteIdx = 0;
+    // pair rhythm (supports any pattern of notes/rests)
+    let idx = 0;
     for (const ev of pairRhythm) {
-      const durSec = noteValueToSeconds(ev.value, bpm, den);
-      if (ev.type === "rest") {
-        t += durSec;
-        continue;
+      const dur = noteValueToSeconds(ev.value, bpm, den);
+      if (ev.type === "note") {
+        const midi = idx === 0 ? root : top;
+        notes.push({ midi, startSec: t, durSec: dur });
+        idx++;
       }
-      const midi = noteIdx === 0 ? root : root + semis;
-      notes.push({ midi, startSec: t, durSec });
-      t += durSec;
-      noteIdx++;
+      t += dur;
     }
+    // gap rhythm
     for (const ev of gapRhythm) {
-      const durSec = noteValueToSeconds(ev.value, bpm, den);
-      t += durSec;
+      t += noteValueToSeconds(ev.value, bpm, den);
     }
   }
 

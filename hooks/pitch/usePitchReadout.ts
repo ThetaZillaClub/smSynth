@@ -5,15 +5,24 @@ import { useMemo, useRef } from "react";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 
 function preferSharpsForKeySig(keySig?: string | null): boolean {
-  if (!keySig) return true;
+  // Bias toward FLATS when neutral or ambiguous (e.g., "C")
+  if (!keySig) return false;
+
   const k = String(keySig).trim();
-  const FLAT_KEYS = new Set(["F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"]);
-  const SHARP_KEYS = new Set(["C", "G", "D", "A", "E", "B", "F#", "C#"]);
-  if (FLAT_KEYS.has(k)) return false;
-  if (SHARP_KEYS.has(k)) return true;
+
+  // Symbol-first for robustness ("Bb", "F#", etc.)
   if (k.includes("b")) return false;
   if (k.includes("#")) return true;
-  return true;
+
+  // Named major keys (normalized; "C" intentionally treated as neutral → flats)
+  const FLAT_KEYS  = new Set(["F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"]);
+  const SHARP_KEYS = new Set(["G", "D", "A", "E", "B", "F#", "C#"]);
+
+  if (FLAT_KEYS.has(k)) return false;
+  if (SHARP_KEYS.has(k)) return true;
+
+  // Neutral/unknown → prefer flats
+  return false;
 }
 
 type Options = {
