@@ -102,7 +102,7 @@ export default function ModelSettingsForm() {
       setImage(null);
 
       const modelId = inserted?.id;
-      router.push(modelId ? `/training?model_id=${modelId}` : '/training');
+      router.push(modelId ? `/training?student_id=${modelId}` : '/training');
     } catch (err: unknown) {
       setError((err as { message?: string })?.message ?? 'Something went wrong.');
     } finally {

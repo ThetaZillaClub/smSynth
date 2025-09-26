@@ -1,8 +1,8 @@
-// components/game-layout/range/useRangeSteps.ts
+// components/range/useRangeSteps.ts
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { hzToNoteName } from "@/utils/pitch/pitchMath";
+import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 
 type Step = "low" | "high" | "play";
 
@@ -29,22 +29,27 @@ export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): Return
 
   const canPlay = useMemo(() => lowHz != null && highHz != null, [lowHz, highHz]);
 
+  const snapToEqualTempered = (hz: number) => {
+    const m = Math.round(hzToMidi(hz, a4Hz));
+    const snappedHz = a4Hz * Math.pow(2, (m - 69) / 12);
+    const { name, octave } = midiToNoteName(m, { useSharps: true, octaveAnchor: "C" });
+    return { label: `${name}${octave}`, snappedHz };
+  };
+
   const confirmLow = useCallback(
     (hz: number) => {
-      setLowHz(hz);
-      const { name, octave } = hzToNoteName(hz, a4Hz, { useSharps: true, octaveAnchor: "A" });
-      const label = `${name}${octave}`;
+      const { label, snappedHz } = snapToEqualTempered(hz);
+      setLowHz(snappedHz);           // keep UI in sync with what we save
       void updateRange("low", label);
       setStep("high");
     },
-    [a4Hz, updateRange]
+    [a4Hz, updateRange] // a4Hz is stable but include for completeness
   );
 
   const confirmHigh = useCallback(
     (hz: number) => {
-      setHighHz(hz);
-      const { name, octave } = hzToNoteName(hz, a4Hz, { useSharps: true, octaveAnchor: "A" });
-      const label = `${name}${octave}`;
+      const { label, snappedHz } = snapToEqualTempered(hz);
+      setHighHz(snappedHz);
       void updateRange("high", label);
       setStep("play");
     },

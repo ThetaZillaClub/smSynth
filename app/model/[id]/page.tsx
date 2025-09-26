@@ -1,3 +1,4 @@
+// app/model/[id]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
@@ -7,6 +8,7 @@ import PrivateHeader from '@/components/header/PrivateHeader';
 import type { ModelRow } from '@/lib/client-cache';
 import { getImageUrlCached, ensureSessionReady } from '@/lib/client-cache';
 import StudentCard from '@/components/student-home/StudentCard';
+import { primeActiveStudent } from '@/lib/session/prime';
 
 export default function ModelDetailPage() {
   const params = useParams();
@@ -26,20 +28,7 @@ export default function ModelDetailPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // Fire-and-forget: prime the active-student cookie
-  const primeActiveStudent = useCallback((modelId: string) => {
-    try {
-      void fetch('/api/session/active-student', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: modelId }),
-        keepalive: true,
-      });
-    } catch {}
-  }, []);
-
-  // Load model row
+  // Load model row (via API; warmed by primeActiveStudent before nav)
   useEffect(() => {
     let cancelled = false;
     if (!id) return;
@@ -50,7 +39,7 @@ export default function ModelDetailPage() {
         setLoading(true);
         setCardReady(false);
 
-        const res = await fetch(`/api/student-session/${encodeURIComponent(id)}`, {
+        const res = await fetch(`/api/students/${encodeURIComponent(id)}`, {
           credentials: 'include',
         });
         const body = await res.json().catch(() => null);
@@ -114,12 +103,12 @@ export default function ModelDetailPage() {
         ) : (
           <div className="grid grid-cols-1 gap-8">
             <StudentCard
-              key={m.id}                // ensures clean fade when switching models
+              key={m.id}
               model={m}
               imgUrl={imgUrl}
               trainingHref={trainingHref}
-              onPrime={() => primeActiveStudent(id)}
-              isReady={cardReady}       // whole-card fade after image ready
+              onPrime={() => primeActiveStudent(id)}   // ← warm cookie + reads before nav
+              isReady={cardReady}
             />
           </div>
         )}

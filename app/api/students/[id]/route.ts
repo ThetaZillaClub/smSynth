@@ -27,33 +27,11 @@ export async function GET(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 404 });
-  return NextResponse.json(data as StudentRow);
-}
 
-export async function PATCH(
-  req: Request,
-  ctx: { params: Promise<{ id: string }> }
-) {
-  const { id } = await ctx.params;
-
-  const supabase = await createClient();
-  const body = await req.json().catch(() => ({}));
-
-  const payload: Partial<Pick<StudentRow, "range_low" | "range_high">> = {};
-  if (typeof body.range_low === "string") payload.range_low = body.range_low;
-  if (typeof body.range_high === "string") payload.range_high = body.range_high;
-
-  if (!Object.keys(payload).length) {
-    return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
-  }
-
-  const { data, error } = await supabase
-    .from("models")
-    .update(payload)
-    .eq("id", id)
-    .select("id,name,creator_display_name,image_path,privacy,gender,range_low,range_high")
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json(data as StudentRow);
+  return NextResponse.json(data as StudentRow, {
+    headers: {
+      "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+      Vary: "Cookie",
+    },
+  });
 }

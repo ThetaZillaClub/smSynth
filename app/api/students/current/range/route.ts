@@ -1,3 +1,4 @@
+// app/api/students/current/range/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
@@ -16,9 +17,10 @@ export async function GET() {
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
   return NextResponse.json(row ?? null, {
     headers: {
-      "Cache-Control": "private, max-age=30",
+      "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
       Vary: "Cookie",
     },
   });

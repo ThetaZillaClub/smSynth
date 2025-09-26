@@ -34,15 +34,20 @@ export default function useStudentRow({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // bump this whenever we hear “student-range-updated”
-  const [refreshTick, setRefreshTick] = useState(0);
-
+  // Update labels immediately on local range saves, without refetching the row
   useEffect(() => {
-    const onRangeUpdated = () => setRefreshTick((t) => t + 1);
+    const onRangeUpdated = (evt: Event) => {
+      const e = evt as CustomEvent<{ which: "low" | "high"; label: string; studentRowId: string | null }>;
+      // If the event targets a specific row and it's not ours, ignore.
+      if (e.detail?.studentRowId && studentRowId && e.detail.studentRowId !== studentRowId) return;
+      if (e.detail?.which === "low") setRangeLowLabel(e.detail.label ?? null);
+      if (e.detail?.which === "high") setRangeHighLabel(e.detail.label ?? null);
+    };
     window.addEventListener("student-range-updated", onRangeUpdated as EventListener);
     return () => window.removeEventListener("student-range-updated", onRangeUpdated as EventListener);
-  }, []);
+  }, [studentRowId]);
 
+  // Initial fetch (and when the target student changes)
   useEffect(() => {
     const ac = new AbortController();
     let alive = true;
@@ -94,7 +99,7 @@ export default function useStudentRow({
       alive = false;
       ac.abort();
     };
-  }, [studentIdFromQuery, refreshTick]); // 👈 refetch when the event bumps tick
+  }, [studentIdFromQuery]);
 
   return {
     studentRowId,

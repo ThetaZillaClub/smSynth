@@ -1,25 +1,18 @@
-// components/training/layout/range/RangeCapture.tsx
+// components/range/RangeCapture.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
-import { hzToNoteName, centsBetweenHz } from "@/utils/pitch/pitchMath";
+import { hzToMidi, midiToNoteName, centsBetweenHz } from "@/utils/pitch/pitchMath";
 
 type Props = {
   mode: "low" | "high";
-  /** capture is active while this is true */
   active: boolean;
-
   pitchHz: number | null | undefined;
-
-  /** OPTIONAL: fixed hold time in seconds (overrides bpm/beatsRequired if provided). */
   holdSec?: number;
-
-  /** Musical alternative (used only if holdSec is not provided) */
-  bpm?: number;             // default 60
-  beatsRequired?: number;   // default 1 (≈1 second at 60 BPM)
-
-  centsWindow?: number;     // tolerance for "stable hold", DEFAULT 75¢
-  a4Hz?: number;            // default 440
+  bpm?: number;
+  beatsRequired?: number;
+  centsWindow?: number;
+  a4Hz?: number;
   onConfirm: (capturedHz: number) => void;
 };
 
@@ -27,30 +20,24 @@ export default function RangeCapture({
   mode,
   active,
   pitchHz,
-
   holdSec,
-
   bpm = 60,
   beatsRequired = 1,
-
   centsWindow = 75,
   a4Hz = 440,
   onConfirm,
 }: Props) {
-  /* ------------------- timing/targets ------------------- */
   const targetSec = useMemo(
     () => (typeof holdSec === "number" && isFinite(holdSec) && holdSec > 0 ? holdSec : (60 / bpm) * beatsRequired),
     [holdSec, bpm, beatsRequired]
   );
 
-  // Captured value + which mode it belongs to
   const [capturedHz, setCapturedHz] = useState<number | null>(null);
   const [completed, setCompleted] = useState(false);
   const [capturedFor, setCapturedFor] = useState<"low" | "high" | null>(null);
   const capturedForRef = useRef<"low" | "high" | null>(null);
   useEffect(() => { capturedForRef.current = capturedFor; }, [capturedFor]);
 
-  /* ---------------- latest input refs ------------------- */
   const latestActive = useRef(active);
   const latestPitch = useRef<number | null>(pitchHz ?? null);
   const latestCentsWindow = useRef<number>(centsWindow);
@@ -61,25 +48,18 @@ export default function RangeCapture({
   useLayoutEffect(() => { latestCentsWindow.current = centsWindow; }, [centsWindow]);
   useLayoutEffect(() => { latestTargetSec.current = targetSec; }, [targetSec]);
 
-  /* ------------------- internal refs -------------------- */
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
 
-  // Anchor that follows the singer
   const baseHzRef = useRef<number | null>(null);
   const anchorAgeSecRef = useRef<number>(0);
 
-  // Buffer for robust median on lock-in
   const bufRef = useRef<number[]>([]);
-
-  // Logical progress (for capture logic)
   const holdSecRef = useRef<number>(0);
 
-  // Visual progress (bar + counter) — lerps toward the logical value
   const [visualSec, setVisualSec] = useState(0);
   const visualSecRef = useRef(0);
 
-  // Inside/outside state + grace timers
   const insideRef = useRef<boolean>(false);
   const unvoicedGapSecRef = useRef<number>(0);
   const outsideGapSecRef = useRef<number>(0);
@@ -87,9 +67,8 @@ export default function RangeCapture({
   const completedRef = useRef(false);
   useEffect(() => { completedRef.current = completed; }, [completed]);
 
-  /* ----------------------- tunables --------------------- */
-  const HYSTERESIS_GAP = 0.5;           // inner = window*(1 - gap)
-  const WARMUP_SEC = 0.15;              // brief "assume inside" after anchor
+  const HYSTERESIS_GAP = 0.5;
+  const WARMUP_SEC = 0.15;
   const UNVOICED_GRACE_SEC = 0.15;
   const OUTSIDE_GRACE_SEC = 0.18;
   const REANCHOR_SILENT_SEC = 0.25;
@@ -98,10 +77,9 @@ export default function RangeCapture({
   const CHASE_HZ_OUTSIDE = 4.0;
   const FOLLOW_HZ_WARMUP = 6.0;
 
-  const DECAY_RATE = 0.8;               // s of progress lost per real second
-  const VISUAL_FOLLOW_RATE = 14;        // per second (bar/timer smoothing)
+  const DECAY_RATE = 0.8;
+  const VISUAL_FOLLOW_RATE = 14;
 
-  /* --------------------- helpers ------------------------ */
   const hardReset = () => {
     baseHzRef.current = null;
     anchorAgeSecRef.current = 0;
@@ -126,52 +104,34 @@ export default function RangeCapture({
   };
 
   const updateVisual = (dt: number) => {
-    const sameModeComplete =
-      completedRef.current && capturedForRef.current === mode;
-
-    // During an active attempt for THIS mode, lerp toward holdSec.
-    // If THIS mode is completed, pin to full target.
+    const sameModeComplete = completedRef.current && capturedForRef.current === mode;
     const logicalTarget = sameModeComplete ? latestTargetSec.current : holdSecRef.current;
-
     const lerp = Math.min(1, VISUAL_FOLLOW_RATE * dt);
     let next = visualSecRef.current + (logicalTarget - visualSecRef.current) * lerp;
-
-    // Enforce monotonic increase only while attempting THIS mode
-    const enforceMonotonic = !sameModeComplete &&
-      (capturedForRef.current === mode || capturedForRef.current == null);
+    const enforceMonotonic =
+      !sameModeComplete && (capturedForRef.current === mode || capturedForRef.current == null);
     if (enforceMonotonic) next = Math.max(visualSecRef.current, next);
-
     if (sameModeComplete) next = latestTargetSec.current;
-
     visualSecRef.current = next;
     setVisualSec(next);
   };
 
-  /* ----------- hard reset on mode change (fresh take) --- */
   useEffect(() => {
-    // Fully clear prior completion + progress so the next note starts at 0%.
     hardReset();
-    // Note: captured value is not carried over between steps by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  /* ----------------------- RAF tick --------------------- */
   const tick = (ts: number) => {
     const last = lastTsRef.current ?? ts;
     const dt = Math.max(0, (ts - last) / 1000);
     lastTsRef.current = ts;
 
-    // Always keep visual synced first
     updateVisual(dt);
-
     if (!latestActive.current) return;
 
-    const sameModeComplete =
-      completedRef.current && capturedForRef.current === mode;
-
+    const sameModeComplete = completedRef.current && capturedForRef.current === mode;
     const voiced = latestPitch.current != null;
 
-    // --- Unvoiced (no reliable pitch)
     if (!voiced) {
       unvoicedGapSecRef.current += dt;
       outsideGapSecRef.current = 0;
@@ -190,7 +150,6 @@ export default function RangeCapture({
       return;
     }
 
-    // --- Voiced (we have a pitch)
     unvoicedGapSecRef.current = 0;
     const hz = latestPitch.current as number;
 
@@ -217,12 +176,10 @@ export default function RangeCapture({
     insideRef.current = inWarmup ? true : isInside;
 
     const rate =
-      inWarmup ? FOLLOW_HZ_WARMUP :
-      (insideRef.current ? FOLLOW_HZ_INSIDE : CHASE_HZ_OUTSIDE);
+      inWarmup ? FOLLOW_HZ_WARMUP : (insideRef.current ? FOLLOW_HZ_INSIDE : CHASE_HZ_OUTSIDE);
     baseHzRef.current = moveTowards(baseHzRef.current as number, hz, rate * dt);
 
     if (!sameModeComplete) {
-      // Optional: quick re-anchor on big leaps before progress builds up
       if (holdSecRef.current < 0.1) {
         const centsJump = Math.abs(centsBetweenHz(hz, baseHzRef.current as number));
         if (centsJump > Math.max(300, latestCentsWindow.current * 3)) {
@@ -243,7 +200,6 @@ export default function RangeCapture({
         outsideGapSecRef.current += dt;
 
         if (holdSecRef.current <= 0.05 && outsideGapSecRef.current >= 0.15) {
-          // quick re-anchor at the start of a hold if they drifted before progress built up
           baseHzRef.current = hz;
           insideRef.current = true;
           anchorAgeSecRef.current = 0;
@@ -256,7 +212,6 @@ export default function RangeCapture({
       }
     }
 
-    // Reached target? Capture for THIS mode
     if (!sameModeComplete && holdSecRef.current >= latestTargetSec.current) {
       const sorted = [...bufRef.current].sort((a, b) => a - b);
       const med = sorted[Math.floor(sorted.length / 2)] ?? hz;
@@ -267,14 +222,12 @@ export default function RangeCapture({
       completedRef.current = true;
       capturedForRef.current = mode;
 
-      // Pin logical & visual at full to avoid any backslide.
       holdSecRef.current = latestTargetSec.current;
       visualSecRef.current = latestTargetSec.current;
       setVisualSec(latestTargetSec.current);
     }
   };
 
-  /* ------------------ start/stop RAF loop ---------------- */
   useEffect(() => {
     lastTsRef.current = null;
 
@@ -296,7 +249,6 @@ export default function RangeCapture({
     };
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ------------------------ UI -------------------------- */
   const title =
     mode === "low"
       ? "Step 1 — Sing your lowest comfortable note"
@@ -307,18 +259,18 @@ export default function RangeCapture({
       ? `Hold it steadily for ${holdSec.toFixed(0)} second${holdSec === 1 ? "" : "s"}.`
       : `Hold it steadily for ${beatsRequired} beat${beatsRequired === 1 ? "" : "s"} (≈${targetSec.toFixed(1)} second${targetSec === 1 ? "" : "s"}).`;
 
-  // Use visualSec for both bar and counter
   const progressPct = Math.max(0, Math.min(100, (visualSec / targetSec) * 100));
 
-  // Only show a capture if it belongs to THIS mode
   const effectiveCapturedHz = capturedFor === mode ? capturedHz : null;
 
+  // Show the snapped (equal-tempered) Hz that matches what we save to DB
   const display =
     effectiveCapturedHz != null
       ? (() => {
-          const n = hzToNoteName(effectiveCapturedHz, a4Hz, { useSharps: true, octaveAnchor: "C" });
-          const dispOct = n.octave;
-          return `${n.name}${dispOct} • ${effectiveCapturedHz.toFixed(1)} Hz`;
+          const m = Math.round(hzToMidi(effectiveCapturedHz, a4Hz));
+          const canonicalHz = a4Hz * Math.pow(2, (m - 69) / 12);
+          const n = midiToNoteName(m, { useSharps: true, octaveAnchor: "C" });
+          return `${n.name}${n.octave} • ${canonicalHz.toFixed(1)} Hz`;
         })()
       : "—";
 
@@ -334,7 +286,6 @@ export default function RangeCapture({
         </div>
       </div>
 
-      {/* Progress bar (we animate per frame) */}
       <div className="mt-4">
         <div className="h-2 w-full bg-[#dcdcdc] rounded overflow-hidden">
           <div className="h-full bg-[#0f0f0f]" style={{ width: `${progressPct}%` }} />
@@ -345,7 +296,6 @@ export default function RangeCapture({
         </div>
       </div>
 
-      {/* Readout + actions */}
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="rounded-md p-4 bg-white/60 border border-[#d2d2d2]">
           <div className="text-[#2d2d2d]">Detected (stable)</div>

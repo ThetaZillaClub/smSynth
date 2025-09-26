@@ -14,5 +14,4 @@ export {
   sequenceNoteCountForScale,
   buildIntervalPhrase,
   type BuildIntervalPhraseParams,
-  // ⛔️ type RootPreference – removed
 } from "./phraseBuilders";
