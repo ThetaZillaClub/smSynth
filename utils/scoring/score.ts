@@ -19,9 +19,9 @@ export type TakeScore = {
     }>;
   };
   rhythm: {
-    melodyPercent: number;       // 0..100
-    melodyHitRate: number;       // 0..1
-    melodyMeanAbsMs: number;
+    melodyPercent: number;       // 0..100 (coverage-based)
+    melodyHitRate: number;       // 0..1 (any voicing in window)
+    melodyMeanAbsMs: number;     // first voiced vs. notated onset
     lineEvaluated: boolean;
     linePercent: number;
     lineHitRate: number;
@@ -46,10 +46,12 @@ type Options = {
    */
   confMin?: number;
   centsOk?: number;
-  onsetGraceMs?: number;
+  onsetGraceMs?: number; // ignored time at the head of each note for eval/coverage
   maxAlignMs?: number;
-  goodAlignMs?: number;
+  goodAlignMs?: number;  // reserved for future shaping
 };
+
+/* ---------------- main ---------------- */
 
 export function computeTakeScore({
   phrase,
@@ -70,7 +72,6 @@ export function computeTakeScore({
   options?: Options;
 }): TakeScore {
   const {
-    // 👇 default to 0: treat confidence purely as voicing upstream (hz=null below model threshold)
     confMin = 0,
     centsOk = 50,
     onsetGraceMs = 120,
@@ -78,9 +79,8 @@ export function computeTakeScore({
     goodAlignMs = 120,
   } = options;
 
-  // ----- Pitch -----
-  // If confMin > 0, allow an extra safety gate; otherwise accept all voiced (hz>0) samples.
-  const voiced =
+  /* ----- Pitch (unchanged) ----- */
+  const voiced: PitchSample[] =
     confMin > 0
       ? samples.filter((s) => (s.hz ?? 0) > 0 && s.conf >= confMin)
       : samples.filter((s) => (s.hz ?? 0) > 0);
@@ -108,7 +108,7 @@ export function computeTakeScore({
     const ratio = evalDur > 0 ? Math.min(1, goodSec / evalDur) : 0;
     sumOn += goodSec;
     sumDur += evalDur;
-    const mae = centsAbs.length ? centsAbs.reduce((a,b)=>a+b,0) / centsAbs.length : 120;
+    const mae = centsAbs.length ? mean(centsAbs) : 120;
 
     perNote.push({ idx: i, timeOnPitch: goodSec, dur: evalDur, ratio, centsMae: mae });
     allCentsAbs.push(...centsAbs);
@@ -116,43 +116,33 @@ export function computeTakeScore({
 
   const timeOnPitchRatio = sumDur > 0 ? Math.min(1, sumOn / sumDur) : 0;
   let pitchPercent = 100 * timeOnPitchRatio;
-  const centsMaeAll = allCentsAbs.length ? (allCentsAbs.reduce((a,b)=>a+b,0)/allCentsAbs.length) : 120;
+  const centsMaeAll = allCentsAbs.length ? mean(allCentsAbs) : 120;
   if (pitchPercent > 98.5 && centsMaeAll < 12) pitchPercent = 100;
 
-  // ----- Rhythm -----
-  const evalRhythm = (onsets?: number[]) => {
-    if (!onsets?.length) return { pct: 0, hitRate: 0, meanAbs: 0, evaluated: false };
-    const ev = gestureEventsSec.slice().sort((a,b)=>a-b);
-    let hits = 0;
-    const absErr: number[] = [];
-    const scores: number[] = [];
+  /* ----- Rhythm ----- */
 
-    for (const tExp of onsets) {
-      const tNear = nearest(ev, tExp);
-      const err = tNear == null ? Infinity : Math.abs((tNear - tExp) * 1000);
-      if (err <= maxAlignMs) {
-        hits++;
-        absErr.push(err);
-        const x = Math.min(1, err / maxAlignMs);
-        const shaped = 1 - Math.pow(x, 1.5);
-        scores.push(shaped);
-      } else {
-        scores.push(0);
-      }
-    }
-    const pct = (scores.reduce((a,b)=>a+b,0) / (scores.length || 1)) * 100;
-    const meanAbs = absErr.length ? absErr.reduce((a,b)=>a+b,0) / absErr.length : maxAlignMs;
-    return { pct, hitRate: hits / (onsets.length || 1), meanAbs, evaluated: true };
-  };
+  // (A) Melody rhythm = voiced coverage inside each notated note window
+  const mel = evalMelodyCoverageRhythm({
+    notes: phrase.notes.map((n) => ({ startSec: n.startSec, durSec: n.durSec })),
+    samples,
+    confMin,
+    onsetGraceMs,
+    maxAlignMs,
+  });
 
-  const mel = evalRhythm(melodyOnsetsSec);
-  const line = evalRhythm(rhythmLineOnsetsSec);
-  const tracks = [mel, line].filter(t => t.evaluated);
+  // (B) Blue-line rhythm (gesture events vs. onsets) — unchanged logic
+  const line = evalHandLineRhythm({
+    onsets: rhythmLineOnsetsSec,
+    events: gestureEventsSec,
+    maxAlignMs,
+  });
+
+  const tracks = [mel, line].filter((t) => t.evaluated);
   const rhythmCombined = tracks.length
     ? tracks.reduce((a, t) => a + t.pct, 0) / tracks.length
     : 0;
 
-  // ----- Intervals -----
+  /* ----- Intervals (unchanged) ----- */
   const intervalEval = (() => {
     if (phrase.notes.length < 2) return { total: 0, correct: 0, correctRatio: 1 };
     const mids: number[] = phrase.notes.map((n) =>
@@ -170,7 +160,7 @@ export function computeTakeScore({
     return { total, correct, correctRatio: total ? correct / total : 1 };
   })();
 
-  // ----- Final (harmonic mean encourages balance) -----
+  /* ----- Final (harmonic mean) ----- */
   const rhythmPct = rhythmCombined;
   let finalPct =
     (pitchPercent > 0 && rhythmPct > 0)
@@ -206,10 +196,10 @@ export function computeTakeScore({
 
 /* ---------------- helpers ---------------- */
 
-function estimateAvgDt(samples: PitchSample[]): number {
-  if (samples.length < 2) return 1/50;
+function estimateAvgDt(samples: { tSec: number }[]): number {
+  if (samples.length < 2) return 1 / 50;
   const total = samples[samples.length - 1].tSec - samples[0].tSec;
-  return total > 0 ? total / (samples.length - 1) : 1/50;
+  return total > 0 ? total / (samples.length - 1) : 1 / 50;
 }
 
 function nearest(arr: number[], x: number): number | null {
@@ -231,4 +221,115 @@ function medianMidiInRange(samples: PitchSample[], t0: number, t1: number): numb
   if (!S.length) return NaN;
   const mids = S.map((s) => hzToMidi(s.hz!)).filter(Number.isFinite).sort((a,b)=>a-b);
   return mids[Math.floor(mids.length / 2)];
+}
+
+/* -------- Rhythm subroutines -------- */
+
+type RhythmEval = { pct: number; hitRate: number; meanAbs: number; evaluated: boolean };
+
+/** Melody rhythm: voiced coverage in note windows (any voicing counts; pitch-agnostic). */
+function evalMelodyCoverageRhythm({
+  notes,
+  samples,
+  confMin,
+  onsetGraceMs,
+  maxAlignMs,
+}: {
+  notes: Array<{ startSec: number; durSec: number }>;
+  samples: PitchSample[];
+  confMin: number;
+  onsetGraceMs: number;
+  maxAlignMs: number;
+}): RhythmEval {
+  if (!notes.length) return { pct: 0, hitRate: 0, meanAbs: 0, evaluated: false };
+
+  // Treat "voiced" as: upstream sets hz=null when unvoiced. If confMin>0, add a guard.
+  const isVoiced = (s: PitchSample) =>
+    (s.hz ?? 0) > 0 && (confMin > 0 ? s.conf >= confMin : true);
+
+  const all = samples.slice().sort((a, b) => a.tSec - b.tSec);
+  const voiced = all.filter(isVoiced);
+
+  const globalDt = estimateAvgDt(voiced);
+  const graceSec = Math.max(0, onsetGraceMs / 1000);
+
+  let totalDur = 0;
+  let totalVoiced = 0;
+  let hits = 0;
+  const absErrMs: number[] = [];
+
+  for (const n of notes) {
+    const t0 = n.startSec + graceSec;
+    const t1 = n.startSec + n.durSec;
+    const evalDur = Math.max(0, t1 - t0);
+    if (evalDur <= 0) continue;
+
+    totalDur += evalDur;
+
+    const win = voiced.filter((s) => s.tSec >= t0 && s.tSec <= t1);
+
+    if (win.length) {
+      hits++;
+      // timing error: first voiced sample vs notated onset (not the grace point)
+      const first = win[0]!.tSec;
+      absErrMs.push(Math.abs(first - n.startSec) * 1000);
+    }
+
+    const localDt = win.length ? estimateAvgDt(win) : globalDt;
+    totalVoiced += Math.min(evalDur, (win.length || 0) * (localDt || 0));
+  }
+
+  const coverage = totalDur > 0 ? totalVoiced / totalDur : 0;
+  const pct = clamp01(coverage) * 100;
+  const hitRate = notes.length ? hits / notes.length : 0;
+  const meanAbs = absErrMs.length ? mean(absErrMs) : maxAlignMs;
+
+  return { pct, hitRate, meanAbs, evaluated: true };
+}
+
+/** Hand/blue-line rhythm: nearest-event alignment to expected onsets (unchanged). */
+function evalHandLineRhythm({
+  onsets,
+  events,
+  maxAlignMs,
+}: {
+  onsets?: number[];
+  events: number[];
+  maxAlignMs: number;
+}): RhythmEval {
+  if (!onsets?.length) return { pct: 0, hitRate: 0, meanAbs: 0, evaluated: false };
+
+  const ev = events.slice().sort((a, b) => a - b);
+  let hits = 0;
+  const absErr: number[] = [];
+  const scores: number[] = [];
+
+  for (const tExp of onsets) {
+    const tNear = nearest(ev, tExp);
+    const err = tNear == null ? Infinity : Math.abs((tNear - tExp) * 1000);
+    if (err <= maxAlignMs) {
+      hits++;
+      absErr.push(err);
+      const x = Math.min(1, err / maxAlignMs);
+      const shaped = 1 - Math.pow(x, 1.5);
+      scores.push(shaped);
+    } else {
+      scores.push(0);
+    }
+  }
+
+  const pct = (scores.reduce((a, b) => a + b, 0) / (scores.length || 1)) * 100;
+  const hitRate = onsets.length ? hits / onsets.length : 0;
+  const meanAbs = absErr.length ? mean(absErr) : maxAlignMs;
+
+  return { pct, hitRate, meanAbs, evaluated: true };
+}
+
+/* ------- small utils ------- */
+
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x));
+}
+function mean(xs: number[]): number {
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
 }
