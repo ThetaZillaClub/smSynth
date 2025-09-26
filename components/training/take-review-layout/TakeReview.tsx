@@ -2,6 +2,7 @@
 import React from "react";
 import ReviewStats from "./stats/ReviewStats";
 import ReviewFooter from "./footer/ReviewFooter";
+import type { TakeScore } from "@/utils/scoring/score";
 
 type Props = {
   haveRhythm: boolean;
@@ -10,6 +11,10 @@ type Props = {
   onPlayBoth: () => void | Promise<void>;
   onStop: () => void;
   onNext: () => void;
+  /** NEW: high-detail scoring for this take */
+  score?: TakeScore | undefined;
+  /** NEW: running totals across takes (foundation for exercise stats) */
+  sessionScores?: TakeScore[];
 };
 
 export default function TakeReview({
@@ -19,11 +24,12 @@ export default function TakeReview({
   onPlayBoth,
   onStop,
   onNext,
+  score,
+  sessionScores = [],
 }: Props) {
   return (
     <div className="mt-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-      <ReviewStats />
-
+      <ReviewStats score={score} sessionScores={sessionScores} />
       <ReviewFooter
         haveRhythm={haveRhythm}
         onPlayMelody={onPlayMelody}

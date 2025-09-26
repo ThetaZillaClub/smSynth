@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useMemo, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import GameLayout from "./layout/GameLayout";
 import { SessionPanel, PretestPanel } from "./session";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -9,7 +9,13 @@ import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
 import usePracticeLoop from "@/hooks/gameplay/usePracticeLoop";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import usePhrasePlayer from "@/hooks/audio/usePhrasePlayer";
-import { secondsPerBeat, beatsToSeconds, barsToBeats, noteValueToBeats } from "@/utils/time/tempo";
+import {
+  secondsPerBeat,
+  beatsToSeconds,
+  barsToBeats,
+  noteValueToBeats,
+  noteValueToSeconds,
+} from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/stage";
 import { type SessionConfig, DEFAULT_SESSION_CONFIG } from "./session";
 import usePretest from "@/hooks/gameplay/usePretest";
@@ -17,6 +23,15 @@ import { useExerciseFabric } from "@/hooks/gameplay/useExerciseFabric";
 import { useMelodyClef } from "@/hooks/gameplay/useMelodyClef";
 import { useLeadInMetronome } from "@/hooks/gameplay/useLeadInMetronome";
 import TakeReview from "@/components/training/take-review-layout/TakeReview";
+import useHandBeat from "@/hooks/vision/useHandBeat";
+import { computeTakeScore, type PitchSample, type TakeScore } from "@/utils/scoring/score";
+import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
+
+// alignment helper
+import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";
+
+// ✅ steady-cadence pitch sampler (rAF)
+import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 
 type Props = {
   title?: string;
@@ -30,6 +45,8 @@ type Props = {
 };
 
 const CONF_THRESHOLD = 0.5;
+// Tuned defaults: SwiftF0 window ≈ 0.20s ⇒ ~0.10–0.12s group delay (+ a touch for smoothing)
+const DEFAULT_PITCH_LATENCY_MS = 120;
 
 export default function TrainingGame({
   title = "Training",
@@ -41,37 +58,52 @@ export default function TrainingGame({
   rangeLowLabel = null,
   rangeHighLabel = null,
 }: Props) {
-  const { lowHz, highHz, loading: rangeLoading, error: rangeError } =
-    useStudentRange(studentRowId, { rangeLowLabel, rangeHighLabel });
+  const { lowHz, highHz, loading: rangeLoading, error: rangeError } = useStudentRange(
+    studentRowId,
+    { rangeLowLabel, rangeHighLabel }
+  );
 
   const step: "play" = "play";
   const {
-    bpm, ts, leadBars, restBars,
-    noteValue, noteDurSec, lyricStrategy,
-    view, callResponseSequence,
-    exerciseLoops, regenerateBetweenTakes, metronome,
+    bpm,
+    ts,
+    leadBars,
+    restBars,
+    noteValue,
+    noteDurSec,
+    view,
+    callResponseSequence,
+    exerciseLoops,
+    regenerateBetweenTakes,
+    metronome,
     loopingMode,
+    gestureLatencyMs = 90,
   } = sessionConfig;
 
   const secPerBeat = secondsPerBeat(bpm, ts.den);
-  const secPerBar  = ts.num * secPerBeat;
-  const leadBeats  = barsToBeats(leadBars, ts.num);
-  const leadInSec  = beatsToSeconds(leadBeats, bpm, ts.den);
-  const restBeats  = barsToBeats(restBars, ts.num);
-  const restSec    = beatsToSeconds(restBeats, bpm, ts.den);
+  const secPerBar = ts.num * secPerBeat;
+  const leadBeats = barsToBeats(leadBars, ts.num);
+  const leadInSec = beatsToSeconds(leadBeats, bpm, ts.den);
+  const restBeats = barsToBeats(restBars, ts.num);
+  const restSec = beatsToSeconds(restBeats, bpm, ts.den);
 
   const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 24));
   const MAX_SESSION_SEC = 15 * 60;
 
+  // ---- Pitch (real-time) ----
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
-    enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
+    enabled: true,
+    fps: 50,
+    minDb: -45,
+    smoothing: 2,
+    centsTolerance: 3,
   });
   const liveHz = typeof pitch === "number" ? pitch : null;
 
   // Regeneration seed between takes
   const [seedBump, setSeedBump] = useState(0);
 
-  // —— Build the exercise (phrase, rhythms, lyrics, key) via a hook
+  // ---- Build the exercise (phrase, rhythms, lyrics, key) ----
   const fabric = useExerciseFabric({
     sessionConfig,
     lowHz: lowHz ?? null,
@@ -81,7 +113,7 @@ export default function TrainingGame({
 
   const phrase: Phrase | null = fabric.phrase;
 
-  // —— Clef selection isolated (stable + respects tonic windows)
+  // Clef (stable)
   const melodyClef = useMelodyClef({
     phrase,
     scale: sessionConfig.scale,
@@ -90,55 +122,52 @@ export default function TrainingGame({
     highHz: highHz ?? null,
   });
 
-  // —— Timing windows derived from phrase duration
+  // Derived time windows
   const genNoteDurSec =
     typeof noteValue === "string"
       ? beatsToSeconds(noteValueToBeats(noteValue, ts.den), bpm, ts.den)
-      : (noteDurSec ?? secPerBeat);
+      : noteDurSec ?? secPerBeat;
 
-  const fallbackPhraseSec =
-    fabric.fallbackPhraseSec ?? genNoteDurSec * 8;
+  const fallbackPhraseSec = fabric.fallbackPhraseSec ?? genNoteDurSec * 8;
 
   const phraseSec =
-    phrase?.notes?.length
-      ? (phrase.durationSec ?? fallbackPhraseSec)
-      : fallbackPhraseSec;
+    phrase?.notes?.length ? phrase.durationSec ?? fallbackPhraseSec : fallbackPhraseSec;
 
   const lastEndSec = phrase?.notes?.length
     ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
     : phraseSec;
 
-  const recordWindowSec =
-    Math.ceil(lastEndSec / Math.max(1e-9, secPerBar)) * secPerBar;
+  const recordWindowSec = Math.ceil(lastEndSec / Math.max(1e-9, secPerBar)) * secPerBar;
 
-  // —— Audio player + pretest
-  const {
-    playA440, playMidiList, playLeadInTicks,
-    playPhrase, playRhythm, playMelodyAndRhythm, stop: stopPlayback
-  } = usePhrasePlayer();
+  // ---- Audio player + pretest ----
+  const { playA440, playMidiList, playLeadInTicks, playPhrase, playRhythm, playMelodyAndRhythm, stop: stopPlayback } =
+    usePhrasePlayer();
 
   const pretest = usePretest({
     sequence: callResponseSequence ?? [],
-    bpm, ts,
+    bpm,
+    ts,
     scale: sessionConfig.scale ?? { tonicPc: 0, name: "major" },
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     player: {
-      playA440: async (durSec) => { await playA440(durSec); },
-      playMidiList: async (midi, noteDurSec) => { await playMidiList(midi, noteDurSec); },
+      playA440: async (durSec) => {
+        await playA440(durSec);
+      },
+      playMidiList: async (midi, noteDurSec) => {
+        await playMidiList(midi, noteDurSec);
+      },
     },
   });
 
   const [pretestDismissed, setPretestDismissed] = useState(false);
   const pretestActive =
-    (callResponseSequence?.length ?? 0) > 0 &&
-    !pretestDismissed &&
-    pretest.status !== "done";
+    (callResponseSequence?.length ?? 0) > 0 && !pretestDismissed && pretest.status !== "done";
 
-  // —— Practice loop
-  const {
-    isRecording, start: startRec, stop: stopRec, startedAtMs,
-  } = useWavRecorder({ sampleRateOut: 16000 });
+  // ---- Practice loop ----
+  const { isRecording, start: startRec, stop: stopRec, startedAtMs } = useWavRecorder({
+    sampleRateOut: 16000,
+  });
 
   const [reviewVisible, setReviewVisible] = useState(false);
 
@@ -159,25 +188,20 @@ export default function TrainingGame({
     callWindowSec: 0,
     onStartCall: undefined,
 
-    // Regenerate policy
     onAdvancePhrase: () => {
       if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1);
     },
 
     onEnterPlay: () => {},
 
-    // auto-continue & review callback
     autoContinue: !!loopingMode,
     onRestComplete: () => {
-      if (!loopingMode) {
-        setReviewVisible(true);
-      }
+      if (!loopingMode) setReviewVisible(true);
     },
   });
 
-  // —— Recorder auto start/stop
-  const shouldRecord =
-    (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
+  // ---- Recorder auto start/stop
+  const shouldRecord = (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
 
   useRecorderAutoSync({
     enabled: step === "play",
@@ -187,18 +211,51 @@ export default function TrainingGame({
     stopRec,
   });
 
-  // —— Metronome lead-in (as its own effect hook)
+  // ---- Metronome lead-in
+  const leadBeatsNum = leadBeats;
   useLeadInMetronome({
     enabled: !pretestActive,
     metronome,
-    leadBeats,
+    leadBeats: leadBeatsNum,
     loopPhase: loop.loopPhase,
     anchorMs: loop.anchorMs,
     playLeadInTicks,
     secPerBeat,
   });
 
-  // —— UI plumbing
+  // ---- Hand-gesture beat detection
+  const hand = useHandBeat({
+    latencyMs: gestureLatencyMs,
+    upVelThresh: 1.2,
+    downVelThresh: -0.8,
+    refractoryMs: 180,
+    primeWindowMs: 240,
+  });
+
+  // ✅ steady-cadence pitch sampler (wired with definite booleans)
+  const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
+  const samplerAnchor: number | null = !pretestActive ? (loop.anchorMs ?? null) : null;
+
+  const sampler = usePitchSampler({
+    active: samplerActive,
+    anchorMs: samplerAnchor,
+    hz: liveHz,
+    confidence,
+    fps: 60,
+  });
+
+  // start/stop gesture capture + reset sampler on phase changes
+  useEffect(() => {
+    if (loop.loopPhase === "record") {
+      hand.start(loop.anchorMs ?? performance.now());
+      sampler.reset();
+    } else {
+      hand.stop();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loop.loopPhase, loop.anchorMs]);
+
+  // ---- UI plumbing
   const showLyrics = step === "play" && !!fabric.words?.length;
   const readinessError = rangeError
     ? `Range load failed: ${rangeError}`
@@ -206,14 +263,12 @@ export default function TrainingGame({
     ? "No saved range found. Please set your vocal range first."
     : null;
 
-  const running   = pretestActive ? pretest.running   : loop.running;
-  const startAtMs = pretestActive ? pretest.anchorMs  : loop.anchorMs;
+  const running = pretestActive ? pretest.running : loop.running;
+  const startAtMs = pretestActive ? pretest.anchorMs : loop.anchorMs;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
-  // —— Review playback handlers (⚠ normalize to concrete array + boolean)
-  const rhythmToUse = (fabric.melodyRhythm?.length
-    ? fabric.melodyRhythm
-    : (fabric.syncRhythmFabric ?? [])) as any[];
+  // ---- Review playback handlers
+  const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
   const haveRhythm: boolean = (rhythmToUse?.length ?? 0) > 0;
 
   const onPlayMelody = async () => {
@@ -222,7 +277,7 @@ export default function TrainingGame({
   };
   const onPlayRhythm = async () => {
     if (!haveRhythm) return;
-    await playRhythm(rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den });
+    await playRhythm(rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0 });
   };
   const onPlayBoth = async () => {
     if (!phrase) return;
@@ -235,11 +290,77 @@ export default function TrainingGame({
   };
   const onStopPlayback = () => stopPlayback();
 
+  // ---- Scoring state
+  const [lastScore, setLastScore] = useState<TakeScore | null>(null);
+  const [sessionScores, setSessionScores] = useState<TakeScore[]>([]);
+
+  // ✅ alignment function (latency compensation)
+  const alignForScoring = useScoringAlignment();
+
+  // When record window ends and we're pausing for review, compute score
+  useEffect(() => {
+    if (reviewVisible && phrase) {
+      const beatsRaw = hand.snapshotEvents(); // seconds, anchored to transport
+
+      // model & gesture latency compensation (shift earlier)
+      const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
+      const gestureLagSec = Math.max(0, (gestureLatencyMs ?? 0) / 1000);
+
+      // read ALL pitch samples at steady cadence
+      const samplesRaw: PitchSample[] = sampler.snapshot();
+
+      // shift to phrase time (note 1 = 0s) with latency compensation
+      const { samples, beats } = alignForScoring(samplesRaw, beatsRaw, leadInSec, {
+        clipBelowSec: 0.5,
+        pitchLagSec,
+        gestureLagSec,
+      });
+
+      const makeOnsetsFromRhythm = (rh: RhythmEvent[] | null | undefined): number[] => {
+        if (!rh?.length) return [];
+        const out: number[] = [];
+        let t = 0;
+        for (const ev of rh) {
+          const dur = noteValueToSeconds(ev.value, bpm, ts.den);
+          if (ev.type === "note") out.push(t);
+          t += dur;
+        }
+        return out;
+      };
+
+      const melodyOnsets = phrase.notes.map((n) => n.startSec); // phrase-relative
+      const rhythmOnsets = makeOnsetsFromRhythm(fabric.syncRhythmFabric ?? null);
+
+      const score = computeTakeScore({
+        phrase,
+        bpm,
+        den: ts.den,
+        samples,
+        gestureEventsSec: beats,
+        melodyOnsetsSec: melodyOnsets,
+        rhythmLineOnsetsSec: rhythmOnsets,
+        options: {
+          // 👇 Do NOT re-gate by confidence in scoring; rely on model hook to set hz=null below threshold
+          confMin: 0,
+          centsOk: 50,
+          onsetGraceMs: 150,
+          maxAlignMs: 300,
+          goodAlignMs: 120,
+        },
+      });
+
+      setLastScore(score);
+      setSessionScores((arr) => [...arr, score]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewVisible, phrase, bpm, ts.den, alignForScoring, fabric.syncRhythmFabric, leadInSec, gestureLatencyMs]);
+
   const onNextPhrase = () => {
     setSeedBump((n) => n + 1);
     setReviewVisible(false);
   };
 
+  // ---- Render
   return (
     <GameLayout
       title={title}
@@ -247,7 +368,7 @@ export default function TrainingGame({
       running={running}
       onToggle={loop.toggle}
       phrase={phrase ?? undefined}
-      lyrics={showLyrics ? (fabric.words ?? undefined) : undefined}
+      lyrics={showLyrics ? fabric.words ?? undefined : undefined}
       livePitchHz={liveHz}
       confidence={confidence}
       confThreshold={CONF_THRESHOLD}
@@ -284,6 +405,8 @@ export default function TrainingGame({
           onPlayBoth={onPlayBoth}
           onStop={onStopPlayback}
           onNext={onNextPhrase}
+          score={lastScore || undefined}
+          sessionScores={sessionScores}
         />
       ) : (
         phrase && (
@@ -304,9 +427,7 @@ export default function TrainingGame({
       )}
 
       {!pretestActive && (callResponseSequence?.length ?? 0) > 0 && pretest.status === "done" && !pretestDismissed ? (
-        <div className="mt-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-          ...
-        </div>
+        <div className="mt-2 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">...</div>
       ) : null}
     </GameLayout>
   );

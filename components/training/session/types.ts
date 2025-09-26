@@ -114,6 +114,12 @@ export type SessionConfig = {
    * Multiple selections widen the usable range when the chosen key supports them.
    */
   preferredOctaveIndices?: number[] | null;
+
+  /**
+   * NEW: User-calibrated compute latency (ms) for hand-gesture → event timing.
+   * We subtract this from MediaPipe timestamps to align with the musical transport.
+   */
+  gestureLatencyMs?: number;
 };
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
@@ -164,4 +170,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   allowedMidis: null,     // ← legacy (UI removed)
 
   preferredOctaveIndices: [1], // default “Octave 2”
+
+  /** NEW: hand-gesture timing compensation */
+  gestureLatencyMs: 90,
 };
