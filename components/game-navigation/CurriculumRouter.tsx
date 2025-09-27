@@ -13,6 +13,9 @@ import {
   type SessionConfig,
 } from "@/components/training/session/types";
 import useStudentRow from "@/hooks/students/useStudentRow";
+import PitchTuneGame from "@/components/games/pitch-tune/PitchTuneGame";          
+import KeySignatureGame from "@/components/games/key-signature/KeySignatureGame";  
+import PitchTimeGame from "@/components/games/pitch-time/PitchTimeGame";           
 
 export default function CurriculumRouter({ studentId = null }: { studentId?: string | null }) {
   const { view, current, startExercise, openMenu } = useAppMode();
@@ -40,6 +43,38 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
 
   const content = useMemo(() => {
     switch (current as ExerciseId) {
+      case "pitch-tune":
+  return (
+    <PitchTuneGame
+      studentId={studentId ?? null}
+      studentRowId={studentRowId}
+      studentName={studentName}
+      rangeLowLabel={rangeLowLabel}
+      rangeHighLabel={rangeHighLabel}
+    />
+  );
+
+case "key-signature":
+  return (
+    <KeySignatureGame
+      studentId={studentId ?? null}
+      studentRowId={studentRowId}
+      studentName={studentName}
+      rangeLowLabel={rangeLowLabel}
+      rangeHighLabel={rangeHighLabel}
+    />
+  );
+
+      case "pitch-time":
+        return (
+          <PitchTimeGame
+            studentId={studentId ?? null}
+            studentRowId={studentRowId}
+            studentName={studentName}
+            rangeLowLabel={rangeLowLabel}
+            rangeHighLabel={rangeHighLabel}
+          />
+        );
       case "training-game":
         return subview === "curriculum" ? (
           <TrainingCurriculum
