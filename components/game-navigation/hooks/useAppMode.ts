@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 
 export type ExerciseId =
   | "range-setup"
+  | "vision-setup"
   | "training-game"
   | "interval-beginner"
   | "interval-scales"

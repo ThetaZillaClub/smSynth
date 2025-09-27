@@ -7,6 +7,7 @@ import CurriculumMenu from "./CurriculumMenu";
 import TrainingGame from "@/components/training/TrainingGame";
 import TrainingCurriculum from "@/components/training/TrainingCurriculum";
 import RangeSetup from "@/components/range/RangeSetup";
+import VisionSetup from "@/components/vision/VisionSetup";
 import {
   DEFAULT_SESSION_CONFIG,
   type SessionConfig,
@@ -67,6 +68,8 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
         // RangeSetup still does an update flow by design
         return <RangeSetup studentId={studentId ?? null} />;
 
+      case "vision-setup":
+        return <VisionSetup />;
       default:
         return null;
     }

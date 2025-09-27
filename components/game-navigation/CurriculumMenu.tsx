@@ -26,6 +26,7 @@ type CurriculumItem = {
 const ITEMS: readonly CurriculumItem[] = [
   { id: 'training-game', title: 'Training', subtitle: 'Warm-ups • phrasing', emoji: '🎯', enabled: true,  gradient: 'from-emerald-400 via-emerald-500 to-emerald-600' },
   { id: 'range-setup',   title: 'Range Setup', subtitle: 'One-time voice range capture', emoji: '📏', enabled: true,  gradient: 'from-sky-400 via-sky-500 to-sky-600' },
+  { id: 'vision-setup',  title: 'Vision Setup', subtitle: 'Camera + hand-beat calibration', emoji: '👁️', enabled: true, gradient: 'from-cyan-400 via-cyan-500 to-cyan-600' },
   { id: 'interval-beginner', title: 'Intervals (Beginner)', subtitle: 'Hearing & singing simple steps', emoji: '🪜', enabled: false, soon: true, gradient: 'from-indigo-400 via-indigo-500 to-indigo-600' },
   { id: 'interval-scales',   title: 'Interval Scales', subtitle: 'Scale patterns with intervals', emoji: '📈', enabled: false, soon: true, gradient: 'from-violet-400 via-violet-500 to-violet-600' },
   { id: 'interval-detection', title: 'Interval Detection', subtitle: 'Listening drills', emoji: '🎧', enabled: false, soon: true, gradient: 'from-fuchsia-400 via-fuchsia-500 to-fuchsia-600' },

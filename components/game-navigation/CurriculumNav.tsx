@@ -12,6 +12,7 @@ type Props = {
 const ITEMS: { id: ExerciseId; label: string; enabled: boolean }[] = [
   { id: "training-game", label: "Training", enabled: true },
   { id: "range-setup", label: "Range Setup", enabled: true }, // enabled now
+  { id: "vision-setup", label: "Vision Setup", enabled: true },
   { id: "interval-beginner", label: "Intervals (Beginner)", enabled: false },
   { id: "interval-scales", label: "Interval Scales", enabled: false },
   { id: "interval-detection", label: "Interval Detection (Listening)", enabled: false },

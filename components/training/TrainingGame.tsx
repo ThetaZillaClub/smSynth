@@ -223,9 +223,26 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // ---- Hand-gesture beat detection
+  // ---- Hand-gesture beat detection (with calibrated latency)
+  // Prefer calibrated latency from Vision Setup (localStorage) if available
+  const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("vision:latency-ms");
+      const n = raw == null ? NaN : Number(raw);
+      if (Number.isFinite(n) && n >= 0) {
+        setGestureLatencyMsEff(Math.round(n));
+      } else {
+        setGestureLatencyMsEff(gestureLatencyMs);
+      }
+    } catch {
+      setGestureLatencyMsEff(gestureLatencyMs);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gestureLatencyMs]);
+
   const hand = useHandBeat({
-    latencyMs: gestureLatencyMs,
+    latencyMs: gestureLatencyMsEff,
     upVelThresh: 1.2,
     downVelThresh: -0.8,
     refractoryMs: 180,
@@ -304,7 +321,7 @@ export default function TrainingGame({
 
       // model & gesture latency compensation (shift earlier)
       const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
-      const gestureLagSec = Math.max(0, (gestureLatencyMs ?? 0) / 1000);
+      const gestureLagSec = Math.max(0, (gestureLatencyMsEff ?? 0) / 1000);
 
       // read ALL pitch samples at steady cadence
       const samplesRaw: PitchSample[] = sampler.snapshot();
@@ -353,7 +370,7 @@ export default function TrainingGame({
       setSessionScores((arr) => [...arr, score]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewVisible, phrase, bpm, ts.den, alignForScoring, fabric.syncRhythmFabric, leadInSec, gestureLatencyMs]);
+  }, [reviewVisible, phrase, bpm, ts.den, alignForScoring, fabric.syncRhythmFabric, leadInSec, gestureLatencyMsEff]);
 
   const onNextPhrase = () => {
     setSeedBump((n) => n + 1);
