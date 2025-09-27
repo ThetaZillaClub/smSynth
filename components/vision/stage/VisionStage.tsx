@@ -10,8 +10,6 @@ import useSkeletonDrawer from "./hooks/useSkeletonDrawer";
 import useDetectionLoop, { type DetectionConfig } from "./hooks/useDetectionLoop";
 import useUiBeatCounter from "./hooks/useUiBeatCounter";
 import { iqrFilter, median } from "./hooks/latency";
-
-// ✅ Reuse the proven audio engine from Training
 import usePhrasePlayer from "@/hooks/audio/usePhrasePlayer";
 
 const KEY = "vision:latency-ms";
@@ -38,7 +36,6 @@ export default function VisionStage() {
   const [resultMs, setResultMs] = useState<number | null>(null);
   const [matched, setMatched] = useState<number>(0);
 
-  // readiness flags
   const [camReady, setCamReady] = useState(false);
 
   // Tempo
@@ -55,7 +52,7 @@ export default function VisionStage() {
 
   useCameraStream({ videoRef, onError: setError, constraints: videoConstraints });
 
-  // Detect when <video> actually has dimensions (so we can draw)
+  // Video ready?
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -73,7 +70,7 @@ export default function VisionStage() {
     };
   }, []);
 
-  // Hand landmarker (+ ready flag)
+  // Hand landmarker
   const { landmarkerRef, ready: lmReady } = useHandLandmarker(setError) as {
     landmarkerRef: React.RefObject<HandLandmarker | null>;
     ready: boolean;
@@ -85,22 +82,21 @@ export default function VisionStage() {
   // Skeleton overlay
   const { draw: drawSkeleton, clear: clearSkeleton, pulse } = useSkeletonDrawer(canvasRef, videoRef, {
     connections: HAND_CONNECTIONS,
-    drawEveryN: 2,
+    drawEveryN: 1,
     tipIndex: 8,
     objectContain: true,
     pulseMs: 140,
   } as any);
 
-  // Detection config
+  // Two-stage + velocity-gated config
   const detectionConfig: DetectionConfig = useMemo(
     () => ({
-      upVelThresh: 0.50,
-      downVelThresh: -0.40,
-      refractoryMs: 140,
-      primeWindowMs: 600,
-      primeRelBelow: 0.012,
-      primeDropRelMin: 0.008,
-      leaveMaxEps: 0.0035,
+      fireUpEps: 0.004,     // EARLY: ~0.4% frame height upward
+      confirmUpEps: 0.012,  // CONFIRM: ~1.2% upward (guarded)
+      downRearmEps: 0.006,  // re-arm after ~0.6% downward travel
+      refractoryMs: 90,
+      noiseEps: 0.0015,
+      minUpVel: 0.35,       // minimal instantaneous upward speed to allow EARLY
     }),
     []
   );
@@ -109,7 +105,6 @@ export default function VisionStage() {
   const detEnabled = camReady && lmReady;
   const drawEnabled = detEnabled && phase === "idle";
   const recording  = phase === "run";
-  const detectEveryN = 2;
 
   const { eventsSecRef, resetEvents } = useDetectionLoop({
     videoRef,
@@ -120,17 +115,17 @@ export default function VisionStage() {
     config: detectionConfig,
     onError: setError,
     recording,
-    detectEveryN,
+    detectEveryN: 1,  // every frame
     maxEvents: 128,
     drawEnabled,
     enabled: detEnabled,
-    onBeat: () => { if (drawEnabled) pulse(); },
+    onBeat: () => { if (drawEnabled) pulse(); }, // pulse on CONFIRM, but score uses EARLY time
   });
 
   // UI beat counter
   const uiBeat = useUiBeatCounter(phase, anchorMs, secPerBeat, leadBeats, runBeats);
 
-  // ✅ Use the Training game's audio path
+  // Audio ticks
   const { playLeadInTicks } = usePhrasePlayer();
 
   // Cleanup
@@ -140,11 +135,6 @@ export default function VisionStage() {
     };
   }, [clearSkeleton]);
 
-  /**
-   * Start calibration:
-   * - Anchor on perf clock ~0.55s in the future.
-   * - Schedule lead-in ticks + run ticks via Training audio engine.
-   */
   const startCalibration = useCallback(async () => {
     if (phase !== "idle") return;
 
@@ -160,9 +150,8 @@ export default function VisionStage() {
       setAnchorMs(startPerfMs);
       setPhase("lead");
 
-      // Schedule lead-in ticks
+      // Schedule ticks
       playLeadInTicks(leadBeats, secPerBeat, startPerfMs);
-      // Schedule run ticks immediately after the lead-in window
       const runStartMs = startPerfMs + leadBeats * secPerBeat * 1000;
       playLeadInTicks(runBeats, secPerBeat, runStartMs);
 

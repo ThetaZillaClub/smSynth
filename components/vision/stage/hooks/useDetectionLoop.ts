@@ -2,14 +2,21 @@
 import { useEffect, useRef, useState } from "react";
 import type { HandLandmarker } from "@mediapipe/tasks-vision";
 
+/**
+ * Two-stage fingertip flick detection with a fast velocity gate:
+ * - EARLY: cumulative upward delta >= fireUpEps AND instantaneous upVel >= minUpVel → capture tFirst
+ * - CONFIRM: cumulative upward delta >= confirmUpEps → commit using tFirst (visual pulse happens here)
+ * - Re-arm on downward cumulative delta >= downRearmEps after cooldown
+ * - No knuckle/velocity thresholds for confirm; we only gate EARLY with minUpVel to kill drift/tremor
+ * - Every frame; tiny deadband; fingertip-only (index tip = 8)
+ */
 export type DetectionConfig = {
-  upVelThresh: number;
-  downVelThresh: number;
-  refractoryMs: number;
-  primeWindowMs: number;
-  primeRelBelow: number;
-  primeDropRelMin: number;
-  leaveMaxEps: number;
+  fireUpEps: number;      // early trigger upward cumulative delta (0..1 norm)
+  confirmUpEps: number;   // confirmation upward cumulative delta (must be > fireUpEps)
+  downRearmEps: number;   // downward cumulative delta to re-arm
+  refractoryMs: number;   // cooldown
+  noiseEps: number;       // per-frame |dy| below this ignored
+  minUpVel: number;       // minimal instantaneous upward velocity (norm units per second) to allow EARLY
 };
 
 type Props = {
@@ -21,11 +28,10 @@ type Props = {
   config: DetectionConfig;
   onError?: (msg: string) => void;
   recording?: boolean;
-  detectEveryN?: number;
+  detectEveryN?: number; // ignored (we process every frame)
   maxEvents?: number;
   drawEnabled?: boolean;
-  onBeat?: (tSec: number) => void;
-  /** NEW: gate the whole loop until camera+model are ready */
+  onBeat?: (tSec: number) => void; // called at CONFIRM with tFirst (early) time
   enabled?: boolean;
 };
 
@@ -38,21 +44,27 @@ export default function useDetectionLoop({
   config,
   onError,
   recording = false,
-  detectEveryN = 2,
+  detectEveryN,
   maxEvents = 128,
   drawEnabled = true,
   onBeat,
   enabled = true,
 }: Props) {
   const eventsSecRef = useRef<number[]>([]);
-  const lastTRef = useRef<number | null>(null);
-  const yRelEmaRef = useRef<number | null>(null);
-  const yRelLocalMaxRef = useRef<number | null>(null);
-  const lastPrimeMsRef = useRef<number | null>(null);
+
+  // fingertip state
+  const lastYRef = useRef<number | null>(null);
+  const lastTsRef = useRef<number | null>(null);
+  const cumUpRef = useRef(0);
+  const cumDownRef = useRef(0);
+  const armedRef = useRef(true);
   const lastFireMsRef = useRef<number | null>(null);
+
+  // two-stage timing
+  const pendingFirstMsRef = useRef<number | null>(null); // EARLY timestamp
+
   const vfcIdRef = useRef<number | null>(null);
   const rafIdRef = useRef<number | null>(null);
-  const frameCountRef = useRef(0);
   const pausedRef = useRef(false);
   const didDrawRef = useRef(false);
 
@@ -67,13 +79,16 @@ export default function useDetectionLoop({
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
+  // Reset when run changes
   useEffect(() => {
     eventsSecRef.current = [];
-    lastTRef.current = null;
-    yRelEmaRef.current = null;
-    yRelLocalMaxRef.current = null;
-    lastPrimeMsRef.current = null;
+    lastYRef.current = null;
+    lastTsRef.current = null;
+    cumUpRef.current = 0;
+    cumDownRef.current = 0;
+    armedRef.current = true;          // start primed
     lastFireMsRef.current = null;
+    pendingFirstMsRef.current = null;
   }, [anchorMs]);
 
   useEffect(() => {
@@ -94,17 +109,16 @@ export default function useDetectionLoop({
 
     let canceled = false;
 
-    const tickOnce = () => {
+    const processFrame = () => {
       if (canceled || pausedRef.current) return;
       if (!video.videoWidth || !video.videoHeight) return;
-      const n = (frameCountRef.current = (frameCountRef.current + 1) % Math.max(1, detectEveryN));
-      if (n !== 0) return;
 
       try {
         const ts = performance.now();
         const res = lm.detectForVideo(video, ts);
         const lms = res?.landmarks?.[0];
 
+        // Draw overlay
         if (drawEnabled && lms && lms.length >= 21) {
           drawSkeleton?.(lms as any);
           didDrawRef.current = true;
@@ -114,52 +128,86 @@ export default function useDetectionLoop({
           didDrawRef.current = false;
         }
 
+        // Fingertip-only detection
         if (lms && lms.length >= 9) {
           const tip = lms[8]!;
-          const mcp = lms[5]!;
-          const yRel = tip.y - mcp.y;
+          const y = tip.y; // 0..1, upward => y decreases
 
-          const tPrev = lastTRef.current;
-          const dt = Math.max(1, tPrev ? ts - tPrev : 16) / 1000;
-          const tau = 0.020;
-          const a = 1 - Math.exp(-dt / tau);
-          const prevYRelE = yRelEmaRef.current ?? yRel;
-          const yRelE = prevYRelE + a * (yRel - prevYRelE);
-          const vy = tPrev ? (prevYRelE - yRelE) / dt : 0; // up = +
+          const prevY = lastYRef.current;
+          const prevTs = lastTsRef.current;
 
-          yRelEmaRef.current = yRelE;
-          lastTRef.current = ts;
-
-          if (vy < 0) {
-            if (yRelLocalMaxRef.current == null || yRelE > yRelLocalMaxRef.current) {
-              yRelLocalMaxRef.current = yRelE;
-            }
+          if (prevY == null || prevTs == null) {
+            lastYRef.current = y;
+            lastTsRef.current = ts;
+            return;
           }
 
-          const downByRel = yRelE > config.primeRelBelow;
-          const strongDown = vy < config.downVelThresh;
-          const smallDownDip = (yRelE - prevYRelE) > config.primeDropRelMin;
-          if (downByRel || strongDown || smallDownDip) lastPrimeMsRef.current = ts;
+          let dy = prevY - y; // >0 up, <0 down
+          if (Math.abs(dy) < config.noiseEps) dy = 0;
 
-          const recentlyPrimed =
-            lastPrimeMsRef.current != null && ts - lastPrimeMsRef.current <= config.primeWindowMs;
-          const cooled =
-            lastFireMsRef.current == null || ts - lastFireMsRef.current >= config.refractoryMs;
-          const leftOfMax =
-            yRelLocalMaxRef.current == null ? true : yRelE <= yRelLocalMaxRef.current - config.leaveMaxEps;
+          // dt in seconds; guard extremes
+          const dtSec = Math.min(0.1, Math.max(1 / 240, (ts - prevTs) / 1000));
+          const upVel = dy > 0 ? (dy / dtSec) : 0; // normalized units per second
 
-          if (recentlyPrimed && cooled && vy > config.upVelThresh && leftOfMax) {
-            lastFireMsRef.current = ts;
-            const base = anchorMs ?? performance.now();
-            const tSec = Math.max(0, (ts - base) / 1000);
-            try { onBeat?.(tSec); } catch {}
-            if (recording) {
-              const arr = eventsSecRef.current;
-              if (arr.length >= maxEvents) arr.splice(0, arr.length - maxEvents + 1);
-              arr.push(tSec);
+          const lastFire = lastFireMsRef.current;
+          const cooling = lastFire != null && (ts - lastFire) < config.refractoryMs;
+
+          if (dy > 0) {
+            // moving UP
+            cumUpRef.current += dy;
+            cumDownRef.current = 0;
+
+            if (armedRef.current && !cooling) {
+              // EARLY gate: need both distance AND minimal instantaneous velocity
+              if (
+                pendingFirstMsRef.current == null &&
+                cumUpRef.current >= config.fireUpEps &&
+                upVel >= config.minUpVel
+              ) {
+                pendingFirstMsRef.current = ts; // capture early time
+              }
+
+              // CONFIRM on extra distance (visual pulse + commit using EARLY time)
+              if (
+                pendingFirstMsRef.current != null &&
+                cumUpRef.current >= config.confirmUpEps
+              ) {
+                const tFirstMs = pendingFirstMsRef.current;
+                pendingFirstMsRef.current = null;
+                lastFireMsRef.current = ts;
+                armedRef.current = false;
+
+                const base = anchorMs ?? performance.now();
+                const tSec = Math.max(0, (tFirstMs - base) / 1000);
+
+                try { onBeat?.(tSec); } catch {}
+
+                if (recording) {
+                  const arr = eventsSecRef.current;
+                  if (arr.length >= maxEvents) arr.splice(0, arr.length - maxEvents + 1);
+                  arr.push(tSec);
+                }
+
+                cumUpRef.current = 0;
+                cumDownRef.current = 0;
+              }
             }
-            yRelLocalMaxRef.current = yRelE;
+          } else if (dy < 0) {
+            // moving DOWN
+            cumDownRef.current += -dy;
+            cumUpRef.current = 0;
+            pendingFirstMsRef.current = null; // cancel early if user bails
+
+            if (!armedRef.current && !cooling && cumDownRef.current >= config.downRearmEps) {
+              armedRef.current = true;
+              cumDownRef.current = 0;
+            }
+          } else {
+            // no significant motion
           }
+
+          lastYRef.current = y;
+          lastTsRef.current = ts;
         } else if (drawEnabled) {
           const g = canvas.getContext("2d");
           g?.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
@@ -171,7 +219,7 @@ export default function useDetectionLoop({
     };
 
     const runLoop = () => {
-      tickOnce();
+      processFrame(); // every frame
       rafIdRef.current = requestAnimationFrame(runLoop);
     };
 
@@ -180,7 +228,7 @@ export default function useDetectionLoop({
 
     if (hasVFC) {
       const tickVFC = () => {
-        tickOnce();
+        processFrame();
         vfcIdRef.current = v.requestVideoFrameCallback(tickVFC);
       };
       vfcIdRef.current = v.requestVideoFrameCallback(tickVFC);
@@ -209,9 +257,8 @@ export default function useDetectionLoop({
     anchorMs,
     config,
     onError,
-    detectEveryN,
-    maxEvents,
     recording,
+    maxEvents,
     drawEnabled,
     onBeat,
   ]);

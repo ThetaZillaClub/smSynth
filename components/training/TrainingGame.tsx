@@ -24,11 +24,11 @@ import { useMelodyClef } from "@/hooks/gameplay/useMelodyClef";
 import { useLeadInMetronome } from "@/hooks/gameplay/useLeadInMetronome";
 import TakeReview from "@/components/training/take-review-layout/TakeReview";
 import useHandBeat from "@/hooks/vision/useHandBeat";
-import { computeTakeScore, type PitchSample, type TakeScore } from "@/utils/scoring/score";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 
-// alignment helper
+// alignment + scoring
 import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";
+import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
 
 // ✅ steady-cadence pitch sampler (rAF)
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
@@ -45,7 +45,7 @@ type Props = {
 };
 
 const CONF_THRESHOLD = 0.5;
-// Tuned defaults: SwiftF0 window ≈ 0.20s ⇒ ~0.10–0.12s group delay (+ a touch for smoothing)
+// SwiftF0 window ≈ 0.20s ⇒ ~0.10–0.12s group delay (+ a touch for smoothing)
 const DEFAULT_PITCH_LATENCY_MS = 120;
 
 export default function TrainingGame({
@@ -223,18 +223,13 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // ---- Hand-gesture beat detection (with calibrated latency)
-  // Prefer calibrated latency from Vision Setup (localStorage) if available
+  // ---- Hand-gesture beat detection (use your new flick API + calibrated latency)
   const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("vision:latency-ms");
       const n = raw == null ? NaN : Number(raw);
-      if (Number.isFinite(n) && n >= 0) {
-        setGestureLatencyMsEff(Math.round(n));
-      } else {
-        setGestureLatencyMsEff(gestureLatencyMs);
-      }
+      setGestureLatencyMsEff(Number.isFinite(n) && n >= 0 ? Math.round(n) : gestureLatencyMs);
     } catch {
       setGestureLatencyMsEff(gestureLatencyMs);
     }
@@ -243,10 +238,12 @@ export default function TrainingGame({
 
   const hand = useHandBeat({
     latencyMs: gestureLatencyMsEff,
-    upVelThresh: 1.2,
-    downVelThresh: -0.8,
-    refractoryMs: 180,
-    primeWindowMs: 240,
+    fireUpEps: 0.004,
+    confirmUpEps: 0.012,
+    downRearmEps: 0.006,
+    refractoryMs: 90,
+    noiseEps: 0.0015,
+    minUpVel: 0.35,
   });
 
   // ✅ steady-cadence pitch sampler (wired with definite booleans)
@@ -272,6 +269,77 @@ export default function TrainingGame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loop.loopPhase, loop.anchorMs]);
 
+  // ---- Review + scoring state
+  const haveRhythm: boolean = ((fabric.melodyRhythm?.length ?? 0) > 0) || ((fabric.syncRhythmFabric?.length ?? 0) > 0);
+
+  const { lastScore, sessionScores, scoreTake } = useTakeScoring();
+  const alignForScoring = useScoringAlignment();
+
+  // helper: turn rhythm fabric into onsets (phrase-relative)
+  const makeOnsetsFromRhythm = (rh: RhythmEvent[] | null | undefined): number[] => {
+    if (!rh?.length) return [];
+    const out: number[] = [];
+    let t = 0;
+    for (const ev of rh) {
+      const dur = noteValueToSeconds(ev.value, bpm, ts.den);
+      if (ev.type === "note") out.push(t);
+      t += dur;
+    }
+    return out;
+    };
+
+  // 🔔 Compute score exactly when a take ends (record → rest), regardless of looping.
+  const prevPhaseRef = useRef(loop.loopPhase);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    const curr = loop.loopPhase;
+    prevPhaseRef.current = curr;
+
+    // only score main gameplay (not pretest), and only when we just left "record"
+    if (!pretestActive && phrase && prev === "record" && curr === "rest") {
+      const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
+      const gestureLagSec = Math.max(0, (gestureLatencyMsEff ?? 0) / 1000);
+
+      void scoreTake({
+        phrase,
+        bpm,
+        den: ts.den,
+        leadInSec,
+        pitchLagSec,
+        gestureLagSec,
+        snapshotSamples: () => sampler.snapshot(),             // PitchSample[]
+        snapshotBeats: () => hand.snapshotEvents(),            // number[]
+        melodyOnsetsSec: phrase.notes.map((n) => n.startSec),  // phrase-relative
+        rhythmOnsetsSec: makeOnsetsFromRhythm(fabric.syncRhythmFabric ?? null),
+        align: alignForScoring,
+      });
+
+      // if we’re in review mode (no looping), show the panel
+      if (!loopingMode) {
+        setReviewVisible(true);
+      }
+    }
+  }, [
+    loop.loopPhase,
+    pretestActive,
+    phrase,
+    bpm,
+    ts.den,
+    leadInSec,
+    gestureLatencyMsEff,
+    loopingMode,
+    alignForScoring,
+    sampler,
+    hand,
+    fabric.syncRhythmFabric,
+    scoreTake,
+  ]);
+
+  const onNextPhrase = () => {
+    setSeedBump((n) => n + 1);
+    setReviewVisible(false);
+  };
+
   // ---- UI plumbing
   const showLyrics = step === "play" && !!fabric.words?.length;
   const readinessError = rangeError
@@ -284,20 +352,18 @@ export default function TrainingGame({
   const startAtMs = pretestActive ? pretest.anchorMs : loop.anchorMs;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
-  // ---- Review playback handlers
-  const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
-  const haveRhythm: boolean = (rhythmToUse?.length ?? 0) > 0;
-
   const onPlayMelody = async () => {
     if (!phrase) return;
     await playPhrase(phrase, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0, metronome: false });
   };
   const onPlayRhythm = async () => {
     if (!haveRhythm) return;
+    const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
     await playRhythm(rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0 });
   };
   const onPlayBoth = async () => {
     if (!phrase) return;
+    const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
     await playMelodyAndRhythm(phrase, rhythmToUse as any, {
       bpm,
       tsNum: ts.num,
@@ -306,76 +372,6 @@ export default function TrainingGame({
     });
   };
   const onStopPlayback = () => stopPlayback();
-
-  // ---- Scoring state
-  const [lastScore, setLastScore] = useState<TakeScore | null>(null);
-  const [sessionScores, setSessionScores] = useState<TakeScore[]>([]);
-
-  // ✅ alignment function (latency compensation)
-  const alignForScoring = useScoringAlignment();
-
-  // When record window ends and we're pausing for review, compute score
-  useEffect(() => {
-    if (reviewVisible && phrase) {
-      const beatsRaw = hand.snapshotEvents(); // seconds, anchored to transport
-
-      // model & gesture latency compensation (shift earlier)
-      const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
-      const gestureLagSec = Math.max(0, (gestureLatencyMsEff ?? 0) / 1000);
-
-      // read ALL pitch samples at steady cadence
-      const samplesRaw: PitchSample[] = sampler.snapshot();
-
-      // shift to phrase time (note 1 = 0s) with latency compensation
-      const { samples, beats } = alignForScoring(samplesRaw, beatsRaw, leadInSec, {
-        clipBelowSec: 0.5,
-        pitchLagSec,
-        gestureLagSec,
-      });
-
-      const makeOnsetsFromRhythm = (rh: RhythmEvent[] | null | undefined): number[] => {
-        if (!rh?.length) return [];
-        const out: number[] = [];
-        let t = 0;
-        for (const ev of rh) {
-          const dur = noteValueToSeconds(ev.value, bpm, ts.den);
-          if (ev.type === "note") out.push(t);
-          t += dur;
-        }
-        return out;
-      };
-
-      const melodyOnsets = phrase.notes.map((n) => n.startSec); // phrase-relative
-      const rhythmOnsets = makeOnsetsFromRhythm(fabric.syncRhythmFabric ?? null);
-
-      const score = computeTakeScore({
-        phrase,
-        bpm,
-        den: ts.den,
-        samples,
-        gestureEventsSec: beats,
-        melodyOnsetsSec: melodyOnsets,
-        rhythmLineOnsetsSec: rhythmOnsets,
-        options: {
-          // 👇 Do NOT re-gate by confidence in scoring; rely on model hook to set hz=null below threshold
-          confMin: 0,
-          centsOk: 50,
-          onsetGraceMs: 150,
-          maxAlignMs: 300,
-          goodAlignMs: 120,
-        },
-      });
-
-      setLastScore(score);
-      setSessionScores((arr) => [...arr, score]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewVisible, phrase, bpm, ts.den, alignForScoring, fabric.syncRhythmFabric, leadInSec, gestureLatencyMsEff]);
-
-  const onNextPhrase = () => {
-    setSeedBump((n) => n + 1);
-    setReviewVisible(false);
-  };
 
   // ---- Render
   return (

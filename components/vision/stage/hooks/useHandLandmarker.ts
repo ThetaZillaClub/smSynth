@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
 /**
- * Initializes MediaPipe HandLandmarker (VIDEO mode).
- * Exposes `ready` so downstream effects can re-run when the model is loaded.
+ * MediaPipe HandLandmarker (VIDEO), forgiving to avoid dropouts.
  */
 export default function useHandLandmarker(onError?: (msg: string) => void) {
   const landmarkerRef = useRef<HandLandmarker | null>(null);
@@ -37,8 +36,8 @@ export default function useHandLandmarker(onError?: (msg: string) => void) {
           },
           runningMode: "VIDEO",
           numHands: 1,
-          minTrackingConfidence: 0.3,
-          minHandPresenceConfidence: 0.3,
+          minTrackingConfidence: 0.25,
+          minHandPresenceConfidence: 0.25,
         });
         if (closed) {
           try { lm.close(); } catch {}

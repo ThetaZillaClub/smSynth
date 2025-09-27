@@ -2,51 +2,57 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+
 /**
- * Conductor-style beat detector (robust "down → up"):
- * - Tracks fingertip (8) relative to knuckle (5)
- * - Prime on modest down OR tip slightly below knuckle
- * - Fire when velocity turns upward AND we've left the local max (the bottom)
- * - Refractory prevents double-fires
- * - Subtracts calibrated latency from timestamps (for gameplay)
+ * Gameplay detector (two-stage + velocity gate):
+ * - EARLY when cumulative upward >= fireUpEps AND instantaneous upVel >= minUpVel → capture tFirst (latency-compensated)
+ * - CONFIRM when cumulative upward >= confirmUpEps → commit using tFirst
+ * - Cooldown then re-arm on downRearmEps
+ * - Fingertip-only; every frame; tiny deadband
  */
 type Opts = {
   latencyMs?: number;
-  upVelThresh?: number;
-  downVelThresh?: number;
-  refractoryMs?: number;
-  primeWindowMs?: number;
-  primeRelBelow?: number;
-  primeDropRelMin?: number;
-  leaveMaxEps?: number;
+  fireUpEps?: number;     // default 0.004
+  confirmUpEps?: number;  // default 0.012 (> fireUpEps)
+  downRearmEps?: number;  // default 0.006
+  refractoryMs?: number;  // default 90
+  noiseEps?: number;      // default 0.0015
+  minUpVel?: number;      // default 0.35 (norm units / sec)
 };
+
 export default function useHandBeat(opts: Opts = {}) {
   const {
     latencyMs = 90,
-    upVelThresh = 0.50,
-    downVelThresh = -0.40,
-    refractoryMs = 140,
-    primeWindowMs = 600,
-    primeRelBelow = 0.012,
-    primeDropRelMin = 0.008,
-    leaveMaxEps = 0.0035,
+    fireUpEps = 0.004,
+    confirmUpEps = 0.012,
+    downRearmEps = 0.006,
+    refractoryMs = 90,
+    noiseEps = 0.0015,
+    minUpVel = 0.35,
   } = opts;
+
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasCamera, setHasCamera] = useState(false);
+
   const lmRef = useRef<HandLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const vfcIdRef = useRef<number | null>(null);
   const rafIdRef = useRef<number | null>(null);
+
   const anchorMsRef = useRef<number | null>(null);
   const eventsSecRef = useRef<number[]>([]);
-  // Smoothed state (relative y)
-  const lastTRef = useRef<number | null>(null);
-  const yRelEmaRef = useRef<number | null>(null);
-  const yRelLocalMaxRef = useRef<number | null>(null);
-  const lastPrimeMsRef = useRef<number | null>(null);
+
+  // fingertip state
+  const lastYRef = useRef<number | null>(null);
+  const lastTsRef = useRef<number | null>(null);
+  const cumUpRef = useRef(0);
+  const cumDownRef = useRef(0);
+  const armedRef = useRef(true);
   const lastFireMsRef = useRef<number | null>(null);
+  const pendingFirstMsRef = useRef<number | null>(null); // EARLY timestamp
+
   const cancelFrameCallbacks = () => {
     try {
       const v = videoRef.current as any;
@@ -58,6 +64,7 @@ export default function useHandBeat(opts: Opts = {}) {
     vfcIdRef.current = null;
     rafIdRef.current = null;
   };
+
   const stopCamera = useCallback(() => {
     cancelFrameCallbacks();
     if (videoRef.current) {
@@ -70,6 +77,7 @@ export default function useHandBeat(opts: Opts = {}) {
     setHasCamera(false);
     setReady(false);
   }, []);
+
   const muffleTfLiteInfoOnce = () => {
     const original = console.error;
     let restored = false;
@@ -84,6 +92,7 @@ export default function useHandBeat(opts: Opts = {}) {
     setTimeout(restore, 3500);
     return restore;
   };
+
   const ensureLandmarker = useCallback(async () => {
     if (lmRef.current) return;
     let restoreConsole: (() => void) | null = null;
@@ -99,8 +108,8 @@ export default function useHandBeat(opts: Opts = {}) {
         },
         runningMode: "VIDEO",
         numHands: 1,
-        minTrackingConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.25,
+        minHandPresenceConfidence: 0.25,
       });
     } catch (e) {
       setError((e as any)?.message || String(e));
@@ -108,6 +117,7 @@ export default function useHandBeat(opts: Opts = {}) {
       try { restoreConsole?.(); } catch {}
     }
   }, []);
+
   const waitForVideoReady = async (video: HTMLVideoElement) => {
     if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
       await new Promise<void>((res) =>
@@ -122,18 +132,24 @@ export default function useHandBeat(opts: Opts = {}) {
       throw new Error("Camera stream has zero dimensions.");
     }
   };
+
   const start = useCallback(
     async (anchorMs: number) => {
       setError(null);
       await ensureLandmarker();
       if (!lmRef.current) return;
+
+      // reset
       anchorMsRef.current = anchorMs;
       eventsSecRef.current = [];
-      lastTRef.current = null;
-      yRelEmaRef.current = null;
-      yRelLocalMaxRef.current = null;
-      lastPrimeMsRef.current = null;
+      lastYRef.current = null;
+      lastTsRef.current = null;
+      cumUpRef.current = 0;
+      cumDownRef.current = 0;
+      armedRef.current = true;
       lastFireMsRef.current = null;
+      pendingFirstMsRef.current = null;
+
       if (!videoRef.current) {
         const v = document.createElement("video");
         v.playsInline = true;
@@ -148,6 +164,7 @@ export default function useHandBeat(opts: Opts = {}) {
         document.body.appendChild(v);
         videoRef.current = v;
       }
+
       try {
         streamRef.current = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
@@ -169,144 +186,114 @@ export default function useHandBeat(opts: Opts = {}) {
         setHasCamera(false);
         return;
       }
+
       const v = videoRef.current!;
       const lm = lmRef.current!;
       cancelFrameCallbacks();
+
       let canceled = false;
-      const tickVFC = (_now: number, _meta: any) => {
+
+      const runOnce = () => {
         if (canceled) return;
         const w = v.videoWidth | 0;
         const h = v.videoHeight | 0;
-        if (!w || !h) {
-          (v as any).requestVideoFrameCallback &&
-            (vfcIdRef.current = (v as any).requestVideoFrameCallback(tickVFC));
-          return;
-        }
+        if (!w || !h) return;
+
         try {
           const ts = performance.now();
           const res = lm.detectForVideo(v, ts);
           const landmarks = res?.landmarks?.[0];
+
           if (landmarks && landmarks.length >= 9) {
             const tip = landmarks[8]!;
-            const mcp = landmarks[5]!;
-            const yRel = tip.y - mcp.y;
-            const tPrev = lastTRef.current;
-            const dt = Math.max(1, tPrev ? ts - tPrev : 16) / 1000;
-            const tau = 0.040;
-            const a = 1 - Math.exp(-dt / tau);
-            const prevYRelE = yRelEmaRef.current ?? yRel;
-            const yRelE = prevYRelE + a * (yRel - prevYRelE);
-            const vy = tPrev ? (prevYRelE - yRelE) / dt : 0; // up = +
-            yRelEmaRef.current = yRelE;
-            lastTRef.current = ts;
-            // update local MAX when moving down
-            if (vy < 0) {
-              if (yRelLocalMaxRef.current == null || yRelE > yRelLocalMaxRef.current) {
-                yRelLocalMaxRef.current = yRelE;
+            const y = tip.y;
+            const prevY = lastYRef.current;
+            const prevTs = lastTsRef.current;
+
+            if (prevY == null || prevTs == null) {
+              lastYRef.current = y;
+              lastTsRef.current = ts;
+            } else {
+              let dy = prevY - y; // >0 up, <0 down
+              if (Math.abs(dy) < noiseEps) dy = 0;
+
+              const dtSec = Math.min(0.1, Math.max(1 / 240, (ts - prevTs) / 1000));
+              const upVel = dy > 0 ? (dy / dtSec) : 0;
+
+              const lastFire = lastFireMsRef.current;
+              const cooling = lastFire != null && (ts - lastFire) < refractoryMs;
+
+              if (dy > 0) {
+                cumUpRef.current += dy;
+                cumDownRef.current = 0;
+
+                if (armedRef.current && !cooling) {
+                  // EARLY must be both distance and velocity
+                  if (pendingFirstMsRef.current == null && cumUpRef.current >= fireUpEps && upVel >= minUpVel) {
+                    pendingFirstMsRef.current = ts; // early timestamp
+                  }
+                  // CONFIRM on distance
+                  if (pendingFirstMsRef.current != null && cumUpRef.current >= confirmUpEps) {
+                    const tFirstMs = pendingFirstMsRef.current;
+                    pendingFirstMsRef.current = null;
+                    lastFireMsRef.current = ts;
+                    armedRef.current = false;
+
+                    const base = anchorMsRef.current ?? performance.now();
+                    const tSec = Math.max(0, (tFirstMs - base - latencyMs) / 1000);
+                    eventsSecRef.current.push(tSec);
+
+                    cumUpRef.current = 0;
+                    cumDownRef.current = 0;
+                  }
+                }
+              } else if (dy < 0) {
+                cumDownRef.current += -dy;
+                cumUpRef.current = 0;
+                pendingFirstMsRef.current = null;
+
+                if (!armedRef.current && !cooling && cumDownRef.current >= downRearmEps) {
+                  armedRef.current = true;
+                  cumDownRef.current = 0;
+                }
               }
-            }
-            const downByRel = yRelE > primeRelBelow;
-            const strongDown = vy < downVelThresh;
-            const smallDownDip = (yRelE - prevYRelE) > primeDropRelMin;
-            if (downByRel || strongDown || smallDownDip) {
-              lastPrimeMsRef.current = ts;
-            }
-            const recentlyPrimed =
-              lastPrimeMsRef.current != null && ts - lastPrimeMsRef.current <= primeWindowMs;
-            const cooled =
-              lastFireMsRef.current == null || ts - lastFireMsRef.current >= refractoryMs;
-            const leftOfMax =
-              yRelLocalMaxRef.current == null ? true : (yRelE <= yRelLocalMaxRef.current - leaveMaxEps);
-            if (recentlyPrimed && cooled && vy > upVelThresh && leftOfMax) {
-              lastFireMsRef.current = ts;
-              const base = anchorMsRef.current ?? performance.now();
-              const tSec = Math.max(0, (ts - base - latencyMs) / 1000);
-              eventsSecRef.current.push(tSec);
-              yRelLocalMaxRef.current = yRelE;
+
+              lastYRef.current = y;
+              lastTsRef.current = ts;
             }
           }
         } catch {}
-        (v as any).requestVideoFrameCallback &&
-          (vfcIdRef.current = (v as any).requestVideoFrameCallback(tickVFC));
       };
-      const tickRAF = () => {
-        if (canceled) return;
-        const w = v.videoWidth | 0;
-        const h = v.videoHeight | 0;
-        if (w && h) {
-          try {
-            const ts = performance.now();
-            const res = lm.detectForVideo(v, ts);
-            const landmarks = res?.landmarks?.[0];
-            if (landmarks && landmarks.length >= 9) {
-              const tip = landmarks[8]!;
-              const mcp = landmarks[5]!;
-              const yRel = tip.y - mcp.y;
-              const tPrev = lastTRef.current;
-              const dt = Math.max(1, tPrev ? ts - tPrev : 16) / 1000;
-              const tau = 0.040;
-              const a = 1 - Math.exp(-dt / tau);
-              const prevYRelE = yRelEmaRef.current ?? yRel;
-              const yRelE = prevYRelE + a * (yRel - prevYRelE);
-              const vy = tPrev ? (prevYRelE - yRelE) / dt : 0;
-              yRelEmaRef.current = yRelE;
-              lastTRef.current = ts;
-              if (vy < 0) {
-                if (yRelLocalMaxRef.current == null || yRelE > yRelLocalMaxRef.current) {
-                  yRelLocalMaxRef.current = yRelE;
-                }
-              }
-              const downByRel = yRelE > primeRelBelow;
-              const strongDown = vy < downVelThresh;
-              const smallDownDip = (yRelE - prevYRelE) > primeDropRelMin;
-              if (downByRel || strongDown || smallDownDip) {
-                lastPrimeMsRef.current = ts;
-              }
-              const recentlyPrimed =
-                lastPrimeMsRef.current != null && ts - lastPrimeMsRef.current <= primeWindowMs;
-              const cooled =
-                lastFireMsRef.current == null || ts - lastFireMsRef.current >= refractoryMs;
-              const leftOfMax =
-                yRelLocalMaxRef.current == null ? true : (yRelE <= yRelLocalMaxRef.current - leaveMaxEps);
-              if (recentlyPrimed && cooled && vy > upVelThresh && leftOfMax) {
-                lastFireMsRef.current = ts;
-                const base = anchorMsRef.current ?? performance.now();
-                const tSec = Math.max(0, (ts - base - latencyMs) / 1000);
-                eventsSecRef.current.push(tSec);
-                yRelLocalMaxRef.current = yRelE;
-              }
-            }
-          } catch {}
-        }
-        rafIdRef.current = requestAnimationFrame(tickRAF);
-      };
+
       const hasVFC = typeof (v as any).requestVideoFrameCallback === "function";
       if (hasVFC) {
+        const tickVFC = () => {
+          runOnce();
+          (v as any).requestVideoFrameCallback &&
+            (vfcIdRef.current = (v as any).requestVideoFrameCallback(tickVFC));
+        };
         vfcIdRef.current = (v as any).requestVideoFrameCallback(tickVFC);
       } else {
+        const tickRAF = () => {
+          runOnce();
+          rafIdRef.current = requestAnimationFrame(tickRAF);
+        };
         rafIdRef.current = requestAnimationFrame(tickRAF);
       }
+
       return () => { canceled = true; };
     },
-    [
-      ensureLandmarker,
-      latencyMs,
-      upVelThresh,
-      downVelThresh,
-      refractoryMs,
-      primeWindowMs,
-      primeRelBelow,
-      primeDropRelMin,
-      leaveMaxEps,
-      stopCamera,
-    ]
+    [ensureLandmarker, latencyMs, fireUpEps, confirmUpEps, downRearmEps, refractoryMs, noiseEps, minUpVel, stopCamera]
   );
+
   const stop = useCallback(() => {
     stopCamera();
   }, [stopCamera]);
+
   const snapshotEvents = useCallback(() => {
     return eventsSecRef.current.slice();
   }, []);
+
   useEffect(() => {
     return () => {
       stopCamera();
@@ -319,6 +306,7 @@ export default function useHandBeat(opts: Opts = {}) {
       lmRef.current = null;
     };
   }, [stopCamera]);
+
   return {
     ready,
     error,
