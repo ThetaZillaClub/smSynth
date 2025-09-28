@@ -144,6 +144,11 @@ export default function TrainingGame({
   const pretestActive = pretestRequired && pretest.status !== "done";
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
+  // ---- Rhythm / vision gating ----
+  const rhythmCfgAny = (sessionConfig.rhythm ?? {}) as any;
+  const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
+  const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
+  const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
   // ---- Recorder (persistent pipeline; gated capture) ----
   const {
     isRecording,
@@ -244,30 +249,32 @@ export default function TrainingGame({
     })();
   }, [warmPlayer, warmRecorder]);
 
-  // 2) Start camera/model once the exercise unlocks; keep it running for the session
+  // 2) Camera/model (hand-beat) — start/stop based on rhythm settings
+  //    We only need vision when rhythm line is enabled AND detection is enabled AND the exercise is unlocked.
   useEffect(() => {
-    if (!exerciseUnlocked || preflightDoneRef.current) return;
-    preflightDoneRef.current = true;
+    let cancelled = false;
     (async () => {
       try {
-        await hand.start(performance.now()); // boots model+camera+loop
-        // keep it RUNNING across phases; we only reset anchor below
+        if (needVision) {
+          await hand.start(performance.now());
+        } else {
+          hand.stop();
+        }
       } catch {}
     })();
-    // stop fully when component unmounts or if we leave the page
-    return () => { hand.stop(); };
-  }, [exerciseUnlocked, hand]);
+    return () => { if (!cancelled) {/* noop; useHandBeat cleans up on stop/unmount */} };
+  }, [needVision, hand]);
 
   // Phase-driven *reset only* (no start/stop/pause while loop is playing)
   useEffect(() => {
     if (pretestActive) return;
-    if (loop.loopPhase === "lead-in" || loop.loopPhase === "record") {
+    if (needVision && (loop.loopPhase === "lead-in" || loop.loopPhase === "record")) {
       hand.reset(loop.anchorMs ?? performance.now());
       sampler.reset();
     }
     // keep detection running during rest/idle for a flat CPU profile
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pretestActive, loop.loopPhase, loop.anchorMs]);
+  }, [pretestActive, loop.loopPhase, loop.anchorMs, needVision]);
 
   // ---- Review + scoring
   const haveRhythm: boolean =

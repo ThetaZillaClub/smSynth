@@ -292,7 +292,7 @@ export default function DynamicOverlay({
             const noteLabel = `${name}${octave}`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = "rgba(255,255,255,0.98)";
+            ctx.fillStyle = "rgba(255,255,255,1)";
             const text = word ?? noteLabel;
             const cy = ry + rh / 2;
             ctx.font = `${word ? "700 " : ""}${Math.min(36, Math.max(12, Math.floor(rh * 0.52)))}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
@@ -459,8 +459,6 @@ export default function DynamicOverlay({
         inset: 0,
         pointerEvents: "none",
         zIndex: 2,
-        willChange: "transform",
-        transition: "opacity 120ms ease-out",
       }}
     />
   );

@@ -103,11 +103,13 @@ export default function RhythmCard({
         lineEnabled: true,
         allowRests: true,
         restProb: 0.3,
+        detectEnabled: true,
       }) as any,
     [cfg.rhythm]
   );
 
   const lineEnabled: boolean = rhythmCfg.lineEnabled !== false;
+  const detectEnabled: boolean = rhythmCfg.detectEnabled !== false;
 
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
@@ -125,6 +127,19 @@ export default function RhythmCard({
         />
       </Field>
 
+      <Field label="Rhythm detection">
+        <FancyCheckbox
+          checked={detectEnabled}
+          onChange={(next) =>
+            onChange({
+              rhythm: { ...rhythmCfg, detectEnabled: next } as any,
+            })
+          }
+          label={
+            <span>{detectEnabled ? "On (uses camera)" : "Off"}</span>
+          }
+        />
+      </Field>
       {lineEnabled ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
           <RestControls
