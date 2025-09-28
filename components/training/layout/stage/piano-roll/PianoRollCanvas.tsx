@@ -4,8 +4,10 @@ import React, { useMemo } from "react";
 import DynamicOverlay from "./DynamicOverlay";
 import { getMidiRange, type Phrase } from "@/utils/stage";
 import useMeasuredWidth from "./roll/hooks/useMeasuredWidth";
+
 /** Re-export so upstream can import { type Phrase } from this file */
 export type { Phrase };
+
 type Props = {
   /** Fixed height in CSS pixels (wrapper provides this). */
   height: number;
@@ -19,7 +21,11 @@ type Props = {
   startAtMs?: number | null;
   /** Lyric words aligned 1:1 with phrase.notes (optional) */
   lyrics?: string[];
+  /** Shared timeline settings so it matches RhythmRoll exactly */
+  windowSec?: number;      // default 4
+  anchorRatio?: number;    // default 0.1
 };
+
 export default function PianoRollCanvas({
   height,
   phrase,
@@ -31,8 +37,11 @@ export default function PianoRollCanvas({
   leadInSec = 1.5,
   startAtMs = null,
   lyrics,
+  windowSec = 4,
+  anchorRatio = 0.1,
 }: Props) {
   const { hostRef, width } = useMeasuredWidth();
+
   const [minMidi, maxMidi] = useMemo<[number, number]>(() => {
     if (!phrase || !phrase.notes.length) return [60 - 6, 60 + 6]; // default around middle C
     const { minMidi: minP, maxMidi: maxP } = getMidiRange(phrase, 2);
@@ -47,10 +56,12 @@ export default function PianoRollCanvas({
     if (min >= max) return [min, min + 1];
     return [min, max];
   }, [phrase]);
+
   // If no phrase, still reserve height so layout doesn’t jump
   if (!phrase || phrase.notes.length === 0) {
     return <div ref={hostRef} className="relative w-full" style={{ height }} />;
   }
+
   return (
     <div ref={hostRef} className="relative w-full" style={{ height }}>
       {width && width > 4 ? (
@@ -62,8 +73,8 @@ export default function PianoRollCanvas({
           onActiveNoteChange={onActiveNoteChange}
           minMidi={minMidi}
           maxMidi={maxMidi}
-          windowSec={4}
-          anchorRatio={0.1}
+          windowSec={windowSec}
+          anchorRatio={anchorRatio}
           livePitchHz={livePitchHz}
           confidence={confidence}
           confThreshold={confThreshold}

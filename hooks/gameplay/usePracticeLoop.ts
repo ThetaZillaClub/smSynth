@@ -119,6 +119,9 @@ export default function usePracticeLoop({
   const hasPhrase = !!phrase;
   const canRun = step === "play" && hasPhrase;
 
+  // NEW: queue a start if user presses Start before phrase is ready
+  const pendingStartRef = useRef(false);
+
   // reset when entering play with valid content
   useEffect(() => {
     if (!canRun) return;
@@ -128,6 +131,7 @@ export default function usePracticeLoop({
     setRunning(false);
     setLoopPhase("idle");
     setAnchorMs(null);
+    pendingStartRef.current = false;
     onEnterPlay?.();
     sessionStartMsRef.current = performance.now();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,6 +142,7 @@ export default function usePracticeLoop({
     setRunning(false);
     setLoopPhase("idle");
     setAnchorMs(null);
+    pendingStartRef.current = false;
     clearTimers();
   }, [clearTimers]);
 
@@ -248,6 +253,7 @@ export default function usePracticeLoop({
           else startLeadInPhase();
         } else {
           // Stop; upstream can present review UI
+          setLooping(false);
           setRunning(false);
           setLoopPhase("idle");
           setAnchorMs(null);
@@ -281,15 +287,37 @@ export default function usePracticeLoop({
       clearTimers();
       setRunning(false);
       setLoopPhase("idle");
+      setAnchorMs(null);
+      pendingStartRef.current = false;
     }
   }, [hasPhrase, looping, clearTimers]);
 
+  // NEW: if Start was pressed before phrase was ready, begin automatically when it is.
+  useEffect(() => {
+    if (looping && pendingStartRef.current && canRun) {
+      pendingStartRef.current = false;
+      clearTimers();
+      if (callResponse) startCallPhase();
+      else startLeadInPhase();
+    }
+  }, [looping, canRun, callResponse, startCallPhase, startLeadInPhase, clearTimers]);
+
   // public controls
   const toggle = useCallback(() => {
-    if (!canRun) return;
+    // If user clicks Start while phrase isn't ready yet, arm & queue the start.
+    if (!canRun) {
+      setLooping(true);
+      setRunning(false);
+      setLoopPhase("idle");
+      setAnchorMs(null);
+      pendingStartRef.current = true;
+      return;
+    }
+
     if (!looping) {
       setLooping(true);
       clearTimers();
+      pendingStartRef.current = false;
       if (callResponse) startCallPhase();
       else startLeadInPhase();
     } else {
@@ -298,6 +326,7 @@ export default function usePracticeLoop({
       setRunning(false);
       setLoopPhase("idle");
       setAnchorMs(null);
+      pendingStartRef.current = false;
     }
   }, [canRun, looping, clearTimers, callResponse, startCallPhase, startLeadInPhase]);
 
@@ -307,6 +336,7 @@ export default function usePracticeLoop({
     setRunning(false);
     setLoopPhase("idle");
     setAnchorMs(null);
+    pendingStartRef.current = false;
   }, [clearTimers]);
 
   // derived

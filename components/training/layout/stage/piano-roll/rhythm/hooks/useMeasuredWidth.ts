@@ -11,10 +11,12 @@ export default function useMeasuredWidth() {
       const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
       if (w && w !== width) setWidth(w);
     };
+    // immediate + next frame + RO (mirrors piano roll)
     measure();
+    const raf = requestAnimationFrame(measure);
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

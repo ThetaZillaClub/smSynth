@@ -29,7 +29,6 @@ export function drawAll({
   ctx.fillStyle = PR_COLORS.bg;
   ctx.fillRect(0, 0, width, height);
 
-  // draw rhythm blocks (note = blue rect, rest = gap)
   const visLeft = -32,
     visRight = width + 32;
   const padY = 6;
@@ -38,18 +37,19 @@ export function drawAll({
 
   const sixteenthPx = Math.max(0, sixteenthSec * pxPerSec);
 
+  // same rounding model as the piano roll
+  const baseX = Math.round(anchorX - tView * pxPerSec);
+
   for (const seg of items) {
     if (!seg.isNote) continue;
 
-    const x = anchorX + (seg.t0 - tView) * pxPerSec;
+    const rx = baseX + Math.round(seg.t0 * pxPerSec);
     const noteDurSec = seg.t1 - seg.t0;
-    const w = Math.max(1, noteDurSec * pxPerSec);
-    if (x + w < visLeft || x > visRight) continue;
+    const rw = Math.max(1, Math.round(noteDurSec * pxPerSec));
+    if (rx + rw < visLeft || rx > visRight) continue;
 
-    const rx = Math.round(x);
     const ry = Math.round(laneY);
     const rh = Math.round(laneH);
-    const rw = Math.round(w);
 
     if (noteDurSec < sixteenthSec - 1e-6) {
       ctx.fillStyle = BLUE.fill;
@@ -72,9 +72,9 @@ export function drawAll({
     }
   }
 
-  // playhead dot (always visible)
+  // playhead dot (crisp, matches piano)
   const DOT_R = 6;
-  const xGuide = anchorX;
+  const xGuide = Math.round(anchorX) + 0.5;
   const yCenter = laneY + laneH / 2;
   ctx.fillStyle = PR_COLORS.dotFill;
   ctx.beginPath();
@@ -84,8 +84,4 @@ export function drawAll({
   ctx.strokeStyle = PR_COLORS.dotStroke;
   ctx.stroke();
 
-  // container border only
-  ctx.strokeStyle = PR_COLORS.gridMajor;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
 }

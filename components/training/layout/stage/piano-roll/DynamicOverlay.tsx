@@ -1,6 +1,6 @@
 // components/training/layout/stage/piano-roll/DynamicOverlay.tsx
 "use client";
-import React, { useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useCallback } from "react";
 import {
   clamp,
   midiToY,
@@ -10,6 +10,8 @@ import {
   type Phrase,
 } from "@/utils/stage";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
+import useRafLoop from "./rhythm/hooks/useRafLoop";
+import useDpr from "./rhythm/hooks/useDpr";
 
 type Props = {
   width: number;
@@ -25,13 +27,12 @@ type Props = {
   confidence?: number;
   confThreshold?: number;
   a4Hz?: number;
-  /** Pre-roll lead-in duration (seconds) */
   leadInSec?: number;
-  /** Recorder anchor in ms; when provided, overlay time is (now - startAtMs) */
   startAtMs?: number | null;
-  /** Optional lyric words aligned 1:1 with phrase.notes (word i → note i) */
   lyrics?: string[];
 };
+
+type BitmapLike = ImageBitmap | HTMLCanvasElement;
 
 export default function DynamicOverlay({
   width,
@@ -52,27 +53,117 @@ export default function DynamicOverlay({
   lyrics,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rafRef = useRef<number | null>(null);
 
-  // Fallback baseline used only for preview/static draws
-  const startRef = useRef<number | null>(null);
+  // Prepare drawRef *early* so builders can poke it.
+  const drawRef = useRef<(ts: number) => void>(() => {});
 
-  // Active note index (by *segment start*)
+  // Transport smoothing
+  const wasLiveRef = useRef<boolean>(false);
+  const smoothNowSecRef = useRef<number>(0);
+  const lastFrameMsRef = useRef<number | null>(null);
+  const liveBecameRef = useRef<number | null>(null);
+  const prevStartAtRef = useRef<number | null>(null);
+  const SMOOTH_TAU_MS = 45;
+  const SMOOTH_WINDOW_MS = 90;
+
   const lastActiveRef = useRef<number>(-1);
-
-  // Live pitch points for trace
   const pointsRef = useRef<Array<{ t: number; midi: number }>>([]);
-
-  // device pixel ratio
-  const dpr = useMemo(
-    () => (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1),
-    []
-  );
-
-  // Keep last Y for safety render if needed
+  const dpr = useDpr();
   const lastYRef = useRef<number | null>(null);
 
-  // --- small text width cache (12px baseline) ---
+  // ----- Cached grid bitmap -----
+  const gridBmpRef = useRef<BitmapLike | null>(null);
+  const gridKeyRef = useRef<string>("");
+
+  const disposeBitmap = (bmp: BitmapLike | null) => {
+    if (!bmp) return;
+    // @ts-ignore
+    if (typeof (bmp as any).close === "function") (bmp as any).close();
+  };
+
+  const buildCanvas = (w: number, h: number) => {
+    const c = document.createElement("canvas");
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
+    const ctx = c.getContext("2d");
+    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return c;
+  };
+
+  const toBitmap = async (c: HTMLCanvasElement): Promise<BitmapLike> => {
+    // @ts-ignore
+    if (typeof createImageBitmap === "function") {
+      try {
+        return await createImageBitmap(c);
+      } catch {}
+    }
+    return c;
+  };
+
+  const rebuildGridIfNeeded = useCallback(async () => {
+    const key = `${width}x${height}:${minMidi}-${maxMidi}:dpr${dpr}`;
+    if (!width || !height) return;
+    if (gridKeyRef.current === key && gridBmpRef.current) return;
+
+    disposeBitmap(gridBmpRef.current);
+    gridBmpRef.current = null;
+    gridKeyRef.current = key;
+
+    const c = buildCanvas(width, height);
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+
+    // bg
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = PR_COLORS.bg;
+    ctx.fillRect(0, 0, width, height);
+
+    // grid + labels
+    const span = maxMidi - minMidi;
+    for (let i = 0; i <= span; i++) {
+      const midi = minMidi + i;
+      const yLine = midiToY(midi, height, minMidi, maxMidi);
+      const isC = midi % 12 === 0;
+      ctx.strokeStyle = isC ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
+      ctx.lineWidth = isC ? 1.25 : 0.75;
+      ctx.beginPath();
+      ctx.moveTo(0, yLine);
+      ctx.lineTo(width, yLine);
+      ctx.stroke();
+
+      const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
+      const centerY = y + h / 2;
+      ctx.fillStyle = PR_COLORS.label;
+      ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      const { name, octave } = midiToNoteName(midi, { useSharps: true, octaveAnchor: "C" });
+      ctx.fillText(`${name}${octave}`, 4, centerY);
+    }
+
+    gridBmpRef.current = await toBitmap(c);
+
+    // 🔔 ensure one immediate paint even if we're idle
+    requestAnimationFrame(() => {
+      try { drawRef.current(performance.now()); } catch {}
+    });
+  }, [width, height, minMidi, maxMidi, dpr]);
+
+  // Build/refresh grid when inputs change
+  useEffect(() => {
+    void rebuildGridIfNeeded();
+  }, [rebuildGridIfNeeded]);
+
+  // Dispose ONLY on unmount
+  useEffect(() => {
+    return () => {
+      disposeBitmap(gridBmpRef.current);
+      gridBmpRef.current = null;
+      gridKeyRef.current = "";
+    };
+  }, []);
+
+  // small text width cache (kept)
   const width12CacheRef = useRef<Map<string, number>>(new Map());
   const getWidth12 = useCallback(
     (ctx: CanvasRenderingContext2D, text: string, bold = false) => {
@@ -87,7 +178,6 @@ export default function DynamicOverlay({
     []
   );
 
-  // --- easing (easeInOutCirc) ---
   const easeInOutCirc = (u: number) => {
     const x = clamp(u, 0, 1);
     if (x < 0.5) {
@@ -99,21 +189,12 @@ export default function DynamicOverlay({
     return (Math.sqrt(Math.max(0, z)) + 1) / 2;
   };
 
-  // --- time-base smoothing to remove the initial jerk when startAtMs drops in ---
-  const wasLiveRef = useRef<boolean>(false);
-  const smoothNowSecRef = useRef<number>(0); // displayed transport seconds
-  const lastFrameMsRef = useRef<number | null>(null);
-  const liveBecameRef = useRef<number | null>(null); // ms timestamp when we became "live"
-  const SMOOTH_TAU_MS = 120; // time constant for smoothing
-  const SMOOTH_WINDOW_MS = 220; // only smooth for this long after going live
-  const prevStartAtRef = useRef<number | null>(null);
-
   const draw = useCallback(
     (nowMs: number) => {
       const cnv = canvasRef.current;
       if (!cnv) return;
 
-      // Ensure backing store matches CSS pixels
+      // Backing store
       const wantW = Math.round(width * dpr);
       const wantH = Math.round(height * dpr);
       if (cnv.width !== wantW) cnv.width = wantW;
@@ -123,201 +204,115 @@ export default function DynamicOverlay({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // ----- Time base (with short settle filter when we first get startAtMs) -----
+      // Time base
       const isLive = running && startAtMs != null;
-      const targetNowSec = isLive
-        ? Math.max(0, (nowMs - (startAtMs as number)) / 1000)
-        : 0;
+      const rawNowSec = isLive ? Math.max(0, (nowMs - (startAtMs as number)) / 1000) : 0;
 
-      // detect live transition
       if (isLive && !wasLiveRef.current) {
         liveBecameRef.current = nowMs;
-        // start smoothing from where the preview sits (0s)
-        smoothNowSecRef.current = 0;
+        smoothNowSecRef.current = rawNowSec;
       } else if (!isLive) {
         liveBecameRef.current = null;
         smoothNowSecRef.current = 0;
       }
 
-      // Reset smoothing on startAtMs change (new take)
       if (isLive && startAtMs !== prevStartAtRef.current) {
         prevStartAtRef.current = startAtMs;
         liveBecameRef.current = nowMs;
-        smoothNowSecRef.current = 0;
+        smoothNowSecRef.current = rawNowSec;
       }
-
       wasLiveRef.current = isLive;
 
-      // smooth only briefly after we become live, to avoid the big jump
       const lastMs = lastFrameMsRef.current ?? nowMs;
       const dt = Math.max(0, nowMs - lastMs);
       lastFrameMsRef.current = nowMs;
 
       let tNowSec: number;
-      if (
-        isLive &&
-        liveBecameRef.current != null &&
-        nowMs - liveBecameRef.current < SMOOTH_WINDOW_MS
-      ) {
+      if (isLive && liveBecameRef.current != null && nowMs - liveBecameRef.current < SMOOTH_WINDOW_MS) {
         const alpha = 1 - Math.exp(-dt / SMOOTH_TAU_MS);
-        smoothNowSecRef.current +=
-          (targetNowSec - smoothNowSecRef.current) * alpha;
+        smoothNowSecRef.current += (rawNowSec - smoothNowSecRef.current) * alpha;
         tNowSec = smoothNowSecRef.current;
       } else {
-        tNowSec = targetNowSec;
-        smoothNowSecRef.current = targetNowSec;
+        tNowSec = rawNowSec;
+        smoothNowSecRef.current = rawNowSec;
       }
 
       const anchorX = Math.max(0, Math.min(width * anchorRatio, width - 1));
       const pxPerSec = (width - anchorX) / Math.max(0.001, windowSec);
 
-      // "headTime" = phrase-time at the anchor (left side shows lead-in)
       const tView = tNowSec - leadInSec;
-      const headTime = tView;
+      const baseX = Math.round(anchorX - tView * pxPerSec);
 
-      // ----- Clear + BG -----
+      // Background
       ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = PR_COLORS.bg;
-      ctx.fillRect(0, 0, width, height);
-
-      // ----- Grid -----
-      const span = maxMidi - minMidi;
-      for (let i = 0; i <= span; i++) {
-        const midi = minMidi + i;
-        const yLine = midiToY(midi, height, minMidi, maxMidi);
-        const isC = midi % 12 === 0;
-        ctx.strokeStyle = isC ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
-        ctx.lineWidth = isC ? 1.25 : 0.75;
-        ctx.beginPath();
-        ctx.moveTo(0, yLine);
-        ctx.lineTo(width, yLine);
-        ctx.stroke();
-
-        const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
-        const centerY = y + h / 2;
-        ctx.fillStyle = PR_COLORS.label;
-        ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        const { name, octave } = midiToNoteName(midi, {
-          useSharps: true,
-          octaveAnchor: "C",
-        });
-        ctx.fillText(`${name}${octave}`, 4, centerY);
+      const grid = gridBmpRef.current;
+      if (grid) {
+        try {
+          ctx.drawImage(grid as any, 0, 0, width, height);
+        } catch {
+          disposeBitmap(gridBmpRef.current);
+          gridBmpRef.current = null;
+          ctx.fillStyle = PR_COLORS.bg;
+          ctx.fillRect(0, 0, width, height);
+        }
+      } else {
+        ctx.fillStyle = PR_COLORS.bg;
+        ctx.fillRect(0, 0, width, height);
       }
 
-      // Text helper
-      const drawInlineWordAndNote = (
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        word: string | undefined,
-        noteLabel: string
-      ) => {
-        const paddingX = 4;
-        const available = Math.max(0, w - paddingX * 2);
-        if (available < 18 || h < 12) return;
+      // Notes
+      const visLeft = -64, visRight = width + 64;
 
-        const wordPx = Math.min(36, Math.max(12, Math.floor(h * 0.52)));
-        const notePx = Math.min(12, Math.max(10, Math.floor(h * 0.4)));
-
-        const wordW12 = word ? getWidth12(ctx, word, true) : 0;
-        const noteW12 = getWidth12(ctx, noteLabel, false);
-        const wWord = (wordW12 * wordPx) / 12;
-        const wNote = (noteW12 * notePx) / 12;
-
-        const gap = 6;
-        const cx = x + w / 2;
-        const cy = y + h / 2;
-
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-
-        const canShowBoth = word ? wWord + gap + wNote <= available : wNote <= available;
-
-        let lyricStr = word ?? "";
-        let wLyric = wWord;
-        if (lyricStr && !canShowBoth && wWord > available) {
-          const avgChar = Math.max(1, wordW12 / Math.max(1, lyricStr.length));
-          const maxChars = Math.max(
-            1,
-            Math.floor((available * 12) / (avgChar * wordPx)) - 1
-          );
-          lyricStr = lyricStr.slice(0, maxChars) + "…";
-          const ell12 = getWidth12(ctx, lyricStr, true);
-          wLyric = (ell12 * wordPx) / 12;
-        }
-
-        const total = lyricStr
-          ? canShowBoth
-            ? wLyric + gap + (wNote <= available ? wNote : 0)
-            : wLyric
-          : wNote;
-
-        const startX = cx - total / 2;
-
-        if (lyricStr) {
-          ctx.font = `700 ${wordPx}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
-          ctx.fillStyle = "rgba(255,255,255,0.98)";
-          ctx.fillText(lyricStr, startX, cy);
-        }
-        const showNote =
-          (!lyricStr && wNote <= available) || (lyricStr && canShowBoth);
-        if (showNote) {
-          const noteX = lyricStr ? startX + wLyric + gap : startX;
-          ctx.font = `${notePx}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
-          ctx.fillStyle = "rgba(255,255,255,0.78)";
-          ctx.fillText(noteLabel, noteX, cy);
-        }
-      };
-
-      // ----- Notes (scroll by view time) -----
-      const visLeft = -64,
-        visRight = width + 64;
       for (let i = 0; i < phrase.notes.length; i++) {
         const n = phrase.notes[i];
-        const x = anchorX + (n.startSec - tView) * pxPerSec;
-        const w = n.durSec * pxPerSec;
-        if (x + w < visLeft || x > visRight) continue;
+
+        const rxInt = baseX + Math.round(n.startSec * pxPerSec);
+        const drawW = Math.max(2, Math.round(n.durSec * pxPerSec));
+        if (rxInt + drawW < visLeft || rxInt > visRight) continue;
 
         const { y, h } = midiCellRect(n.midi, height, minMidi, maxMidi);
 
         ctx.fillStyle = PR_COLORS.noteFill;
-        const drawW = Math.max(2, Math.round(w));
-        const rx = Math.round(x) + 0.5;
-        const ry = Math.round(y) + 0.5;
+        const rx = rxInt;
+        const ry = Math.round(y);
         const rh = Math.round(h);
 
         ctx.fillRect(rx, ry, drawW, rh);
+
         ctx.strokeStyle = PR_COLORS.noteStroke;
         ctx.lineWidth = 1;
-        ctx.strokeRect(rx, ry, drawW, rh);
+        ctx.strokeRect(rx + 0.5, ry + 0.5, drawW, rh);
 
         if (drawW >= 24 && h >= 14) {
-          const { name, octave } = midiToNoteName(n.midi, {
-            useSharps: true,
-            octaveAnchor: "C",
-          });
-          drawInlineWordAndNote(
-            rx,
-            ry,
-            drawW,
-            rh,
-            lyrics?.[i],
-            `${name}${octave}`
-          );
+          const { name, octave } = midiToNoteName(n.midi, { useSharps: true, octaveAnchor: "C" });
+          const word = lyrics?.[i];
+          const paddingX = 4;
+          const available = Math.max(0, drawW - paddingX * 2);
+          if (available >= 18) {
+            const noteLabel = `${name}${octave}`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "rgba(255,255,255,0.98)";
+            const text = word ?? noteLabel;
+            const cy = ry + rh / 2;
+            ctx.font = `${word ? "700 " : ""}${Math.min(36, Math.max(12, Math.floor(rh * 0.52)))}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
+            ctx.fillText(text, rx + drawW / 2, cy);
+          }
         }
       }
 
-      // ----- Live pitch curve (only when "live") -----
+      // Live pitch trace
       if (isLive && pointsRef.current.length > 1) {
         ctx.lineWidth = 2;
         ctx.strokeStyle = PR_COLORS.trace;
         ctx.beginPath();
         let pen = false;
+        let lastX: number | null = null;
         for (const p of pointsRef.current) {
-          const x = anchorX + (p.t - tNowSec) * pxPerSec; // use smoothed transport
+          const x = baseX + Math.round(p.t * pxPerSec);
+          if (x < visLeft - 64 || x > visRight + 64) continue;
+          if (lastX !== null && x === lastX) continue;
+          lastX = x;
           const y = midiToY(p.midi, height, minMidi, maxMidi);
           if (!pen) {
             ctx.moveTo(x, y);
@@ -326,13 +321,10 @@ export default function DynamicOverlay({
             ctx.lineTo(x, y);
           }
         }
-        ctx.stroke();
+        if (pen) ctx.stroke();
       }
 
-      // =========================
-      // Playhead dot (ALWAYS on)
-      // Ease between note STARTS so it survives rests.
-      // =========================
+      // Playhead dot
       const DOT_RADIUS = 7;
       const xGuide = Math.round(anchorX) + 0.5;
 
@@ -348,25 +340,19 @@ export default function DynamicOverlay({
       };
 
       if (phrase.notes.length) {
-        // Find the current *segment* by note starts:
-        // segment i covers [start_i, start_{i+1})
+        // active segment
         let segIdx = -1;
         for (let i = 0; i < phrase.notes.length; i++) {
           const s0 = phrase.notes[i].startSec;
           const s1 = phrase.notes[i + 1]?.startSec ?? Infinity;
-          if (headTime >= s0 && headTime < s1) {
-            segIdx = i;
-            break;
-          }
+          if (tView >= s0 && tView < s1) { segIdx = i; break; }
         }
 
-        // Notify the active starting note *only* when inside the phrase
         if (segIdx !== lastActiveRef.current) {
           lastActiveRef.current = segIdx;
           if (segIdx >= 0) onActiveNoteChange?.(segIdx);
         }
 
-        // Clamp to a valid index so the dot is stable before/after the phrase
         let i = segIdx;
         if (i < 0) i = 0;
         if (i >= phrase.notes.length) i = phrase.notes.length - 1;
@@ -375,7 +361,7 @@ export default function DynamicOverlay({
         const nxt = phrase.notes[i + 1] ?? cur;
 
         const denom = Math.max(0.001, nxt.startSec - cur.startSec);
-        const uRaw = (headTime - cur.startSec) / denom; // may be <0 or >1 at the edges
+        const uRaw = (tView - cur.startSec) / denom;
         const u = easeInOutCirc(clamp(uRaw, 0, 1));
 
         const yStart = midiToYCenter(cur.midi, height, minMidi, maxMidi);
@@ -384,7 +370,6 @@ export default function DynamicOverlay({
 
         drawDotAtY(yGuide);
       } else {
-        // No notes at all → center the dot
         drawDotAtY(height / 2);
       }
     },
@@ -407,69 +392,58 @@ export default function DynamicOverlay({
   );
 
   // keep draw stable across renders
-  const drawRef = useRef(draw);
-  useEffect(() => {
-    drawRef.current = draw;
-  }, [draw]);
+  useEffect(() => { drawRef.current = draw; }, [draw]);
 
-  // RAF loop — ALWAYS run while "running"; we'll freeze visually until startAtMs is set
+  // RAF loop — run only when truly live
+  useRafLoop({
+    running: running && startAtMs != null,
+    onFrame: (ts: number) => drawRef.current(ts),
+    onStart: () => { drawRef.current(performance.now()); },
+    onStop: () => { drawRef.current(performance.now()); },
+  });
+
+  // When transport is armed but not started yet, draw a static frame
   useEffect(() => {
-    if (running) {
-      if (startRef.current == null) {
-        startRef.current = performance.now();
-        pointsRef.current = [];
-        // reset smoothing trackers on (re)start
-        wasLiveRef.current = false;
-        smoothNowSecRef.current = 0;
-        lastFrameMsRef.current = null;
-        liveBecameRef.current = null;
-        prevStartAtRef.current = null;
-        // Initial lastY (middle of range if no notes)
-        lastYRef.current = height / 2;
-      }
-      const step = (ts: number) => {
-        drawRef.current(ts);
-        rafRef.current = requestAnimationFrame(step);
-      };
-      rafRef.current = requestAnimationFrame(step);
-    } else {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      startRef.current = null;
-      drawRef.current(performance.now()); // paint a clean static frame
-      lastActiveRef.current = -1;
-      pointsRef.current = [];
-      // reset smoothing state
-      wasLiveRef.current = false;
-      smoothNowSecRef.current = 0;
-      lastFrameMsRef.current = null;
-      liveBecameRef.current = null;
-      prevStartAtRef.current = null;
+    if (running && startAtMs == null) {
+      drawRef.current(performance.now());
     }
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    };
-  }, [running, height]);
+  }, [running, startAtMs]);
 
-  // Append live pitch samples only when truly "live" (prevents pre-anchor jitter)
+  // 🔔 NEW: also draw once on key input changes while idle
+  useEffect(() => {
+    drawRef.current(performance.now());
+  }, [width, height, minMidi, maxMidi, phrase, lyrics]);
+
+  // Append live pitch samples only when truly "live"
   useEffect(() => {
     const isLive = running && startAtMs != null;
     if (!isLive) return;
     if (!livePitchHz || confidence < (confThreshold ?? 0.5)) return;
 
-    const tNow = (performance.now() - (startAtMs as number)) / 1000;
+    const nowSec = (performance.now() - (startAtMs as number)) / 1000;
+    const tPhrase = nowSec - (leadInSec ?? 0);
     const midi = hzToMidi(livePitchHz, a4Hz);
     if (!isFinite(midi)) return;
 
-    pointsRef.current.push({ t: tNow, midi });
-    const keepFrom = tNow - windowSec * 1.5;
+    pointsRef.current.push({ t: tPhrase, midi });
+
+    const head = tPhrase;
+    const keepFrom = head - windowSec * 1.5;
     if (pointsRef.current.length > 2000) {
       pointsRef.current = pointsRef.current.filter((p) => p.t >= keepFrom);
     }
-  }, [running, livePitchHz, confidence, confThreshold, a4Hz, windowSec, startAtMs]);
+  }, [
+    running,
+    livePitchHz,
+    confidence,
+    confThreshold,
+    a4Hz,
+    windowSec,
+    startAtMs,
+    leadInSec,
+  ]);
 
-  // Clear pitch points when startAtMs changes (new take)
+  // Clear pitch points when startAtMs changes (NEW take)
   useEffect(() => {
     pointsRef.current = [];
   }, [startAtMs]);
@@ -483,7 +457,8 @@ export default function DynamicOverlay({
         display: "block",
         position: "absolute",
         inset: 0,
-        // micro-UX: make initial paint feel smoother when styles/fonts settle
+        pointerEvents: "none",
+        zIndex: 2,
         willChange: "transform",
         transition: "opacity 120ms ease-out",
       }}

@@ -13,7 +13,7 @@ export default function useMeasuredWidth() {
       if (w && w !== width) setWidth(w);
     };
 
-    // immediate + next frame + resize observer
+    // immediate + next frame + resize observer (mirrors the PianoRoll hook)
     measure();
     const raf = requestAnimationFrame(measure);
     const ro = new ResizeObserver(measure);

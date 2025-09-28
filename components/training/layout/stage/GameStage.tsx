@@ -65,6 +65,10 @@ export default function GameStage({
   highHz = null,
   clef = null,
 }: Props) {
+  // 🔁 unify timeline settings so both canvases compute identical px/sec + anchor
+  const WINDOW_SEC = 4;
+  const ANCHOR_RATIO = 0.1;
+
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [fillH, setFillH] = useState<number>(height ?? 360);
 
@@ -151,9 +155,8 @@ export default function GameStage({
                 rhythm={rhythm}
                 melodyRhythm={melodyRhythm}
                 keySig={keySig || null}
-                useSharps={useSharpsPref} // ← choose sharps or flats from key signature
+                useSharps={useSharpsPref}
               />
-              {/* Render overlay only after systems are ready to avoid initial misalignment */}
               {sheetW && sheetW > 4 && sheetReady ? (
                 <SheetOverlay
                   width={sheetW}
@@ -167,10 +170,10 @@ export default function GameStage({
                   confThreshold={confThreshold}
                   a4Hz={440}
                   systems={systems!}
-                  clef={resolvedClef} // ✅ melody staff clef (treble or bass)
-                  lowHz={lowHz} // ✅ singer range low
-                  highHz={highHz} // ✅ singer range high
-                  useSharps={useSharpsPref} // ✅ pass enharmonic preference to overlay
+                  clef={resolvedClef}
+                  lowHz={lowHz}
+                  highHz={highHz}
+                  useSharps={useSharpsPref}
                 />
               ) : null}
             </div>
@@ -187,11 +190,15 @@ export default function GameStage({
             leadInSec={leadInSecEff}
             startAtMs={startAtMs}
             lyrics={lyrics}
+            /** keep in lockstep with rhythm roll */
+            windowSec={WINDOW_SEC}
+            anchorRatio={ANCHOR_RATIO}
           />
         )}
       </div>
+
       {showRhythm && view !== "sheet" ? (
-        <div className="w-full mt-2 px-0">
+        <div className="w-full mt-2">
           <RhythmRollCanvas
             height={rhythmH}
             rhythm={rhythm}
@@ -200,6 +207,9 @@ export default function GameStage({
             leadInSec={leadInSecEff}
             bpm={bpm}
             den={den}
+            /** keep in lockstep with piano roll */
+            windowSec={WINDOW_SEC}
+            anchorRatio={ANCHOR_RATIO}
           />
         </div>
       ) : null}
