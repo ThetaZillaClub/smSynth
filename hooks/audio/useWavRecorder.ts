@@ -3,6 +3,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { encodeWavPCM16 } from "@/utils/audio/wav";
+import {
+  getAudioContext,
+  ensureAudioWorkletLoaded,
+  createAudioProcessorNode,
+  suspendAudio,
+  resumeAudio,
+} from "@/lib/audioEngine";
 
 type Metrics = { rmsDb: number; maxAbs: number; clippedPct: number };
 
@@ -66,10 +73,9 @@ export default function useWavRecorder(opts?: {
       for (const t of streamRef.current.getTracks()) t.stop();
       streamRef.current = null;
     }
-    if (ctxRef.current) {
-      try { await ctxRef.current.close(); } catch {}
-      ctxRef.current = null;
-    }
+    // Keep the shared AC; just suspend to save CPU.
+    void suspendAudio();
+    ctxRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -85,7 +91,6 @@ export default function useWavRecorder(opts?: {
 
   // FIR design: Hann-windowed low-pass (cutoff normalized to fs)
   const designLowpassFIR = (numTaps: number, cutoffNormFs: number) => {
-    // cutoffNormFs in (0, 0.5]; e.g., 0.15 => 0.15 * fs
     const N = numTaps | 0;
     const M = N - 1;
     const h = new Float32Array(N);
@@ -95,7 +100,7 @@ export default function useWavRecorder(opts?: {
       const w = 0.5 * (1 - Math.cos((2 * Math.PI * n) / M)); // Hann
       h[n] = 2 * cutoffNormFs * sinc(2 * cutoffNormFs * k) * w;
     }
-    // normalize gain at DC
+    // normalize DC gain
     let sum = 0;
     for (let i = 0; i < N; i++) sum += h[i]!;
     if (sum !== 0) {
@@ -104,10 +109,9 @@ export default function useWavRecorder(opts?: {
     return h;
   };
 
-  // 48k -> 16k FIR decimator WITH edge padding ("same-length" decimation).
-  // Output length ≈ round(N / 3). Centers at i*3; edges clamp to x[0]/x[N-1].
+  // 48k -> 16k FIR decimator WITH edge padding.
   const decimate48kTo16kFIR = (() => {
-    const TAPS = designLowpassFIR(63, 7000 / 48000); // ~7 kHz cutoff (below new Nyquist 8k)
+    const TAPS = designLowpassFIR(63, 7000 / 48000); // ~7 kHz cutoff (< 8k Nyquist)
     const L = TAPS.length;
     const HALF = (L - 1) >> 1;
     const M = 3;
@@ -129,9 +133,7 @@ export default function useWavRecorder(opts?: {
         const center = i * M;
         const base = center - HALF;
         let acc = 0;
-        for (let k = 0; k < L; k++) {
-          acc += sampleClamped(base + k) * TAPS[k]!;
-        }
+        for (let k = 0; k < L; k++) acc += sampleClamped(base + k) * TAPS[k]!;
         y[i] = acc;
       }
       return y;
@@ -171,15 +173,14 @@ export default function useWavRecorder(opts?: {
       setPcm16k(null);
       setResampleMethod("linear");
 
-      const AC: typeof AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AC({ sampleRate: 48000 });
+      const ctx = getAudioContext();
       ctxRef.current = ctx;
       deviceSrRef.current = ctx.sampleRate || 48000;
       setDeviceSampleRateHz(deviceSrRef.current);
       setBaseLatencySec((ctx as any).baseLatency ?? null);
 
-      // Load the same worklet module (downmix→mono & transfer buffers)
-      try { await ctx.audioWorklet.addModule("/audio-processor.js"); } catch {}
+      await ensureAudioWorkletLoaded(ctx);
+      await resumeAudio();
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -196,14 +197,12 @@ export default function useWavRecorder(opts?: {
 
       // choose buffer size similar to pitch hook
       const deviceSR = ctx.sampleRate || 48000;
-      const minBuf = (deviceSR / sampleRateOut) * 256; // scale with actual output SR
+      const minBuf = (deviceSR / sampleRateOut) * 256;
       let bufferSize = 1024;
       while (bufferSize < Math.max(bufferSizeMin, minBuf)) bufferSize *= 2;
       setWorkletBufferSize(bufferSize);
 
-      const node = new AudioWorkletNode(ctx, "audio-processor", {
-        processorOptions: { bufferSize },
-      });
+      const node = await createAudioProcessorNode({ bufferSize }, ctx);
       procRef.current = node;
 
       node.port.onmessage = (ev: MessageEvent) => {
@@ -233,7 +232,6 @@ export default function useWavRecorder(opts?: {
         chunksRef.current.push(data);
         totalRef.current += data.length;
 
-        // use the ref'd device SR to avoid stale closures
         const sr = deviceSrRef.current || (ctx.sampleRate || 48000);
         setDurationSec(totalRef.current / sr);
       };
@@ -252,19 +250,12 @@ export default function useWavRecorder(opts?: {
     await new Promise((r) => setTimeout(r, 0)); // let final postMessage arrive
 
     const deviceSR = deviceSrRef.current;
-    // concat @ device SR
-    const mono = (() => {
-      const total = totalRef.current;
-      const out = new Float32Array(total);
-      let o = 0;
-      for (const a of chunksRef.current) { out.set(a, o); o += a.length; }
-      return out;
-    })();
+    const mono = concat(chunksRef.current, totalRef.current);
 
     // Choose resampler
     let resampled: Float32Array;
     if (deviceSR === 48000 && sampleRateOut === 16000) {
-      resampled = decimate48kTo16kFIR(mono); // padded FIR decimator
+      resampled = decimate48kTo16kFIR(mono);
       setResampleMethod("fir-decimate");
     } else if (deviceSR === sampleRateOut) {
       resampled = mono;
@@ -280,14 +271,13 @@ export default function useWavRecorder(opts?: {
     setWavUrl(url);
     setIsRecording(false);
 
-    // duration from output SR
     const N = resampled.length;
     const dur = N / sampleRateOut;
     setDurationSec(dur);
     setNumSamplesOut(N);
     setPcm16k(resampled);
 
-    // metrics (computed at device SR) → convert to dBFS scale (identical for float)
+    // metrics (computed at device SR)
     const m = metricsRef.current;
     const rms = Math.sqrt(m.sumSq / Math.max(1, m.samples));
     const rmsDb = 20 * Math.log10(rms + 1e-12);
@@ -296,7 +286,7 @@ export default function useWavRecorder(opts?: {
 
     setEndedAtMs(performance.now());
 
-    await cleanup(); // release devices
+    await cleanup(); // release devices (keeps AC suspended)
     return { blob, url, durationSec: dur };
   }, [cleanup, isRecording, sampleRateOut]);
 

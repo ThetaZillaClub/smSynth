@@ -5,6 +5,7 @@ import type { Phrase } from "@/utils/stage";
 import { midiToHz } from "@/utils/pitch/pitchMath";
 import { beatsToSeconds, barsToBeats, noteValueToSeconds } from "@/utils/time/tempo";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
+import { getAudioContext, resumeAudio, suspendAudio } from "@/lib/audioEngine";
 
 type PlayOptions = {
   bpm: number;
@@ -21,6 +22,7 @@ export default function usePhrasePlayer() {
   const metronomeGainRef = useRef<GainNode | null>(null);
   const noteMasterGainRef = useRef<GainNode | null>(null);
 
+  // kept for compatibility, but live mapping below is used instead
   const perfAtCtxStartRef = useRef<number | null>(null);
   const ctxAtPerfStartRef = useRef<number | null>(null);
 
@@ -28,33 +30,38 @@ export default function usePhrasePlayer() {
 
   const initCtx = useCallback(async () => {
     if (!ctxRef.current) {
-      const AC: typeof AudioContext =
-        (window as any).AudioContext || (window as any).webkitAudioContext;
-      ctxRef.current = new AC();
-      if (ctxRef.current.state === "suspended") await ctxRef.current.resume();
+      const ctx = getAudioContext();
+      ctxRef.current = ctx;
 
-      metronomeGainRef.current = ctxRef.current.createGain();
-      metronomeGainRef.current.gain.value = 0.5;
-      metronomeGainRef.current.connect(ctxRef.current.destination);
+      // ensure running on first init
+      await resumeAudio();
 
-      noteMasterGainRef.current = ctxRef.current.createGain();
-      noteMasterGainRef.current.gain.value = 0.35;
-      noteMasterGainRef.current.connect(ctxRef.current.destination);
+      if (!metronomeGainRef.current) {
+        metronomeGainRef.current = ctx.createGain();
+        metronomeGainRef.current.gain.value = 0.5;
+        metronomeGainRef.current.connect(ctx.destination);
+      }
+
+      if (!noteMasterGainRef.current) {
+        noteMasterGainRef.current = ctx.createGain();
+        noteMasterGainRef.current.gain.value = 0.35;
+        noteMasterGainRef.current.connect(ctx.destination);
+      }
 
       perfAtCtxStartRef.current = performance.now();
-      ctxAtPerfStartRef.current = ctxRef.current.currentTime;
+      ctxAtPerfStartRef.current = ctx.currentTime;
     }
   }, []);
 
+  /**
+   * LIVE perf.ms -> AudioContext time mapping.
+   * Uses NOW (not a boot-time anchor) so suspend/resume doesn't skew mapping.
+   */
   const perfMsToCtxTime = (perfMs: number | null | undefined) => {
-    if (
-      perfMs == null ||
-      !ctxRef.current ||
-      perfAtCtxStartRef.current == null ||
-      ctxAtPerfStartRef.current == null
-    )
-      return null;
-    return ctxAtPerfStartRef.current + (perfMs - perfAtCtxStartRef.current) / 1000;
+    if (perfMs == null || !ctxRef.current) return null;
+    const nowPerf = performance.now();
+    const nowCtx = ctxRef.current.currentTime;
+    return nowCtx + (perfMs - nowPerf) / 1000;
   };
 
   const stopAllScheduled = useCallback(() => {
@@ -158,6 +165,12 @@ export default function usePhrasePlayer() {
     async (phrase: Phrase, opts: PlayOptions) => {
       await initCtx();
       if (!ctxRef.current) return;
+
+      // ensure AC is running before we schedule anything
+      if (ctxRef.current.state !== "running") {
+        await resumeAudio();
+      }
+
       stopAllScheduled();
 
       const { bpm, tsNum, tsDen, leadBars = 0, a4Hz = 440, metronome = true } = opts;
@@ -180,14 +193,11 @@ export default function usePhrasePlayer() {
 
   const stop = useCallback(() => {
     stopAllScheduled();
-    if (ctxRef.current) {
-      try {
-        ctxRef.current.close();
-      } catch {}
-      ctxRef.current = null;
-      perfAtCtxStartRef.current = null;
-      ctxAtPerfStartRef.current = null;
-    }
+    // Do not close shared context; optionally suspend if nothing else is using it.
+    void suspendAudio();
+    ctxRef.current = null;
+    perfAtCtxStartRef.current = null;
+    ctxAtPerfStartRef.current = null;
   }, [stopAllScheduled]);
 
   useEffect(() => () => stop(), [stop]);
@@ -197,6 +207,11 @@ export default function usePhrasePlayer() {
     async (hz: number, durSec: number) => {
       await initCtx();
       if (!ctxRef.current || !noteMasterGainRef.current) return;
+
+      if (ctxRef.current.state !== "running") {
+        await resumeAudio();
+      }
+
       stopAllScheduled();
 
       const ctx = ctxRef.current;
@@ -232,6 +247,11 @@ export default function usePhrasePlayer() {
     async (midi: number[], noteDurSec: number, a4Hz: number = 440) => {
       await initCtx();
       if (!ctxRef.current) return;
+
+      if (ctxRef.current.state !== "running") {
+        await resumeAudio();
+      }
+
       stopAllScheduled();
 
       const base = ctxRef.current.currentTime + 0.05;
@@ -244,18 +264,27 @@ export default function usePhrasePlayer() {
 
   /**
    * Lead-in tick scheduler aligned to an optional perf anchor.
-   * Now clears any pending clicks first to prevent doubled bars.
+   * Ensures AudioContext is running and clamps the start time slightly ahead of now
+   * so clicks always sound during LEAD-IN (and never slip into the record bar).
    */
   const playLeadInTicks = useCallback(
     async (countBeats: number, secPerBeat: number, startAtPerfMs?: number | null) => {
       await initCtx();
       if (!ctxRef.current) return;
 
+      // make sure AC is running — recorder may have suspended it after the last take
+      if (ctxRef.current.state !== "running") {
+        await resumeAudio();
+      }
+
       // clear any previously scheduled clicks (avoid doubled count-ins)
       stopAllScheduled();
 
+      // map the perf anchor to audio time and clamp to just-ahead-of-now
       const mapped = perfMsToCtxTime(startAtPerfMs ?? null);
-      const startTime = mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
+      const ctxNow = ctxRef.current.currentTime;
+      const earliest = ctxNow + 0.05; // small safety margin
+      const startTime = mapped != null ? Math.max(mapped, earliest) : earliest;
 
       for (let b = 0; b < countBeats; b++) {
         playTick(startTime + b * secPerBeat);
@@ -268,11 +297,17 @@ export default function usePhrasePlayer() {
     async (rhythm: RhythmEvent[], opts: PlayOptions & { startAtPerfMs?: number }) => {
       await initCtx();
       if (!ctxRef.current) return;
+
+      if (ctxRef.current.state !== "running") {
+        await resumeAudio();
+      }
+
       stopAllScheduled();
 
       const { bpm, tsDen, startAtPerfMs } = opts;
       const mapped = perfMsToCtxTime(startAtPerfMs ?? null);
-      const startTime = mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
+      const ctxNow = ctxRef.current.currentTime;
+      const startTime = mapped != null ? Math.max(mapped, ctxNow + 0.05) : ctxNow + 0.08;
 
       let t = 0;
       for (const ev of rhythm) {
@@ -285,7 +320,7 @@ export default function usePhrasePlayer() {
     [initCtx, playTick, stopAllScheduled]
   );
 
-  /** NEW: schedule melody + rhythm together (no double-clear). */
+  /** schedule melody + rhythm together (no double-clear) */
   const playMelodyAndRhythm = useCallback(
     async (
       phrase: Phrase,
@@ -295,12 +330,17 @@ export default function usePhrasePlayer() {
       await initCtx();
       if (!ctxRef.current) return;
 
+      if (ctxRef.current.state !== "running") {
+        await resumeAudio();
+      }
+
       // clear once, then schedule both
       stopAllScheduled();
 
       const { bpm, tsDen, startAtPerfMs, a4Hz = 440, metronome = true } = opts;
       const mapped = perfMsToCtxTime(startAtPerfMs ?? null);
-      const startTime = mapped != null ? mapped : ctxRef.current.currentTime + 0.08;
+      const ctxNow = ctxRef.current.currentTime;
+      const startTime = mapped != null ? Math.max(mapped, ctxNow + 0.05) : ctxNow + 0.08;
 
       // rhythm ticks
       if (metronome && Array.isArray(rhythm) && rhythm.length) {
@@ -325,7 +365,7 @@ export default function usePhrasePlayer() {
     playMidiList,
     playRhythm,
     playLeadInTicks,
-    playMelodyAndRhythm, // ← exposed
+    playMelodyAndRhythm,
     stop,
   };
 }

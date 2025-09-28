@@ -8,6 +8,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as ort from "onnxruntime-web";
 import { initOrtEnv } from "@/lib/ortSetup";
+import {
+  getAudioContext,
+  ensureAudioWorkletLoaded,
+  createAudioProcessorNode,
+  suspendAudio,
+  resumeAudio,
+} from "@/lib/audioEngine";
 
 export type PitchDetectionOptions = {
   enabled?: boolean;
@@ -41,13 +48,12 @@ export default function usePitchDetection(
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const procRef = useRef<AudioWorkletNode | null>(null);
-  const abortRef = useRef<AbortController | null>(null); // still used for our own flow control
+  const abortRef = useRef<AbortController | null>(null);
   const lastEmit = useRef<{ t: number; hz: number | null }>({ t: 0, hz: null });
 
   // ORT / SwiftF0
   const sessionRef = useRef<ort.InferenceSession | null>(null);
   const inputNameRef = useRef<string | null>(null);
-  // keep as readonly; we don't mutate it
   const outNamesRef = useRef<readonly string[]>([]);
 
   // Runtime config (loaded from swiftf0-config.json)
@@ -145,20 +151,6 @@ export default function usePitchDetection(
     return out;
   }, []);
 
-  const resampleLinear = (buffer: Float32Array, srcRate: number, dstRate: number) => {
-    if (srcRate === dstRate) return buffer.slice(0);
-    const ratio = srcRate / dstRate;
-    const dst = new Float32Array(Math.max(1, Math.round(buffer.length / ratio)));
-    for (let i = 0; i < dst.length; i++) {
-      const pos = i * ratio;
-      const i0 = Math.floor(pos);
-      const i1 = Math.min(i0 + 1, buffer.length - 1);
-      const frac = pos - i0;
-      dst[i] = buffer[i0] * (1 - frac) + buffer[i1] * frac;
-    }
-    return dst;
-  };
-
   /* -------------------------- EP preflight --------------------------- */
   const canUseWebGPU = useCallback(async () => {
     if (!("gpu" in navigator)) return false;
@@ -178,13 +170,11 @@ export default function usePitchDetection(
   const chooseExecutionProvider = useCallback(async () => {
     const want = (cfgRef.current.backend || "wasm").toLowerCase();
     const strictSingle = !!cfgRef.current.ep_strict_single;
+    void strictSingle; // keep single EP policy; handled by returning a single provider
 
     if (want === "webgpu") {
       const ok = await canUseWebGPU();
-      if (ok) {
-        // single provider to avoid mismatch warnings
-        return { providers: (["webgpu"] as const) };
-      }
+      if (ok) return { providers: (["webgpu"] as const) };
       return { providers: (["wasm"] as const) };
     }
     return { providers: (["wasm"] as const) };
@@ -205,7 +195,6 @@ export default function usePitchDetection(
     inferBusyRef.current = true;
     try {
       const audio = new ort.Tensor("float32", win, [1, win.length]);
-      // ORT Web: only (feeds, options?) overload — no "fetches" param
       const outputs = await session.run({ [inputNameRef.current as string]: audio });
 
       const outTensors = Object.values(outputs);
@@ -264,7 +253,16 @@ export default function usePitchDetection(
       if (gateActiveRef.current) gateActiveRef.current = false;
 
       const targetSr = targetSrRef.current;
-      const monoDst = resampleLinear(monoFloat32AtDeviceRate, deviceSampleRate, targetSr);
+      const ratio = deviceSampleRate / targetSr;
+      const dstLen = Math.max(1, Math.round(monoFloat32AtDeviceRate.length / ratio));
+      const monoDst = new Float32Array(dstLen);
+      for (let i = 0; i < dstLen; i++) {
+        const pos = i * ratio;
+        const i0 = Math.floor(pos);
+        const i1 = Math.min(i0 + 1, monoFloat32AtDeviceRate.length - 1);
+        const frac = pos - i0;
+        monoDst[i] = monoFloat32AtDeviceRate[i0] * (1 - frac) + monoFloat32AtDeviceRate[i1] * frac;
+      }
 
       const ring = ringRef.current;
       const N = ring.data.length;
@@ -302,13 +300,9 @@ export default function usePitchDetection(
       ringRef.current.writeIdx = 0;
       ringRef.current.totalWritten = 0;
 
-      // Choose exactly ONE EP to avoid provider mismatch warnings.
       const { providers } = await chooseExecutionProvider();
-
       const session = await ort.InferenceSession.create(`${dir.replace(/\/$/, "")}/model.onnx`, {
-        // ORT Web expects string[] of provider names (e.g., ['wasm'] or ['webgpu'])
         executionProviders: providers as unknown as string[],
-        // ORT Web accepts string literal for optimization level
         graphOptimizationLevel: "all",
       });
 
@@ -316,7 +310,7 @@ export default function usePitchDetection(
       inputNameRef.current =
         session.inputNames?.[0] ?? Object.keys(session.inputMetadata ?? {})[0] ?? "input";
       outNamesRef.current = session.outputNames?.length
-        ? session.outputNames.slice() // copy to avoid readonly assignment issues
+        ? session.outputNames.slice()
         : Object.keys(session.outputMetadata ?? {});
 
       // Warmup with the correct shape
@@ -353,10 +347,10 @@ export default function usePitchDetection(
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (ctxRef.current) {
-      ctxRef.current.close();
-      ctxRef.current = null;
-    }
+
+    // keep the shared context alive; just suspend to save CPU
+    void suspendAudio();
+    ctxRef.current = null;
 
     setIsReady(false);
     setPitch(null);
@@ -375,15 +369,13 @@ export default function usePitchDetection(
     try {
       if (!sessionRef.current) await setupSession(modelDir);
 
-      const AC: typeof AudioContext =
-        (window as any).AudioContext || (window as any).webkitAudioContext;
-      ctxRef.current = new AC({ sampleRate: 48000 });
-      try {
-        await ctxRef.current.audioWorklet.addModule("/audio-processor.js");
-      } catch {}
-      if (ctxRef.current.state === "suspended") await ctxRef.current.resume();
+      const ctx = getAudioContext();
+      ctxRef.current = ctx;
 
-      // NOTE: 'signal' is not in TS typings for MediaStreamConstraints; omit it.
+      await ensureAudioWorkletLoaded(ctx);
+      await resumeAudio();
+
+      // gUM after context is alive
       streamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -393,23 +385,18 @@ export default function usePitchDetection(
           autoGainControl: false,
         },
       });
-      const mic = ctxRef.current.createMediaStreamSource(streamRef.current);
+      const mic = ctx.createMediaStreamSource(streamRef.current);
 
-      const deviceSR = ctxRef.current.sampleRate || 48000;
+      const deviceSR = ctx.sampleRate || 48000;
       const targetSR = targetSrRef.current;
       const minBuf = (deviceSR / targetSR) * 256;
       let bufferSize = 1024;
       while (bufferSize < minBuf) bufferSize *= 2;
       if (bufferSize < 1024) bufferSize = 1024;
 
-      procRef.current = new AudioWorkletNode(ctxRef.current, "audio-processor", {
-        processorOptions: { bufferSize },
-      });
+      procRef.current = await createAudioProcessorNode({ bufferSize }, ctx);
 
       procRef.current.port.onmessage = (ev: MessageEvent) => {
-        const ctx = ctxRef.current;
-        if (!ctx) return;
-
         let data: Float32Array | ArrayBuffer | any = ev.data;
         if (data instanceof ArrayBuffer) {
           data = new Float32Array(data);

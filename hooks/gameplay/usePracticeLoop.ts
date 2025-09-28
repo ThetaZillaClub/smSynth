@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export type LoopPhase = "idle" | "call" | "record" | "rest";
+export type LoopPhase = "idle" | "call" | "lead-in" | "record" | "rest";
 
 type Opts = {
   step: "low" | "high" | "play";
@@ -16,7 +16,7 @@ type Opts = {
   windowOnSec: number;
   /** Rest window (seconds). */
   windowOffSec: number;
-  /** Visual/audio pre-roll before first note of the CALL (seconds). */
+  /** Visual/audio pre-roll before first note (seconds). */
   preRollSec?: number;
 
   maxTakes: number;
@@ -37,10 +37,10 @@ type Opts = {
   onAdvancePhrase: () => void;
   onEnterPlay?: () => void; // e.g., resetPhraseLyrics
 
-  /** NEW: if false, do not auto-continue after REST; user will review. */
+  /** if false, do not auto-continue after REST; user will review. */
   autoContinue?: boolean;
 
-  /** NEW: called after REST window completes (both modes). */
+  /** called after REST window completes (both modes). */
   onRestComplete?: () => void;
 };
 
@@ -53,7 +53,7 @@ type ReturnShape = {
   statusText: string;
   toggle: () => void;
   clearAll: () => void;
-  /** Anchor for UI overlays (ms since perf.now) at the start of CALL pre-roll. */
+  /** Anchor for UI overlays (ms since perf.now) at the start of pre-roll. */
   anchorMs: number | null;
 };
 
@@ -89,10 +89,16 @@ export default function usePracticeLoop({
     countsRef.current.takeCount = takeCount;
   }, [takeCount]);
 
+  const leadTimerRef = useRef<number | null>(null);
   const callTimerRef = useRef<number | null>(null);
   const recordTimerRef = useRef<number | null>(null);
   const restTimerRef = useRef<number | null>(null);
+
   const clearTimers = useCallback(() => {
+    if (leadTimerRef.current != null) {
+      clearTimeout(leadTimerRef.current);
+      leadTimerRef.current = null;
+    }
     if (callTimerRef.current != null) {
       clearTimeout(callTimerRef.current);
       callTimerRef.current = null;
@@ -127,26 +133,30 @@ export default function usePracticeLoop({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canRun]);
 
-  const startCallPhase = useCallback(() => {
-    if (!canRun) return;
+  const capOrIdle = useCallback(() => {
+    setLooping(false);
+    setRunning(false);
+    setLoopPhase("idle");
+    setAnchorMs(null);
+    clearTimers();
+  }, [clearTimers]);
 
+  const isSessionCapped = useCallback(() => {
     const elapsed =
       sessionStartMsRef.current != null
         ? (performance.now() - sessionStartMsRef.current) / 1000
         : 0;
+    return countsRef.current.takeCount >= maxTakes || elapsed >= maxSessionSec;
+  }, [maxTakes, maxSessionSec]);
 
-    if (countsRef.current.takeCount >= maxTakes || elapsed >= maxSessionSec) {
-      setLooping(false);
-      setRunning(false);
-      setLoopPhase("idle");
-      clearTimers();
-      return;
-    }
+  const startCallPhase = useCallback(() => {
+    if (!canRun) return;
+    if (isSessionCapped()) return capOrIdle();
 
     setLoopPhase("call");
     setRunning(true);
 
-    // Establish UI anchor at the start of the CALL pre-roll.
+    // Establish UI anchor at the start of CALL pre-roll.
     const SCHED_AHEAD_MS = 100; // align with AudioContext scheduling lead
     setAnchorMs(performance.now() + SCHED_AHEAD_MS);
 
@@ -164,31 +174,28 @@ export default function usePracticeLoop({
       setLoopPhase("record"); // RESPONSE
       setRunning(true);
     }, delayMs);
-  }, [canRun, preRollSec, callWindowSec, maxTakes, maxSessionSec, clearTimers, onStartCall]);
+  }, [canRun, isSessionCapped, capOrIdle, preRollSec, callWindowSec, onStartCall]);
 
-  const startRecordPhaseLegacy = useCallback(() => {
-    // Legacy single-phase flow (no explicit CALL)
+  const startLeadInPhase = useCallback(() => {
+    // Legacy single-phase flow (explicit LEAD-IN → RECORD)
     if (!canRun) return;
+    if (isSessionCapped()) return capOrIdle();
 
-    const elapsed =
-      sessionStartMsRef.current != null
-        ? (performance.now() - sessionStartMsRef.current) / 1000
-        : 0;
-
-    if (countsRef.current.takeCount >= maxTakes || elapsed >= maxSessionSec) {
-      setLooping(false);
-      setRunning(false);
-      setLoopPhase("idle");
-      clearTimers();
-      return;
-    }
-    // Anchor for overlay in legacy mode too
     const SCHED_AHEAD_MS = 100;
     setAnchorMs(performance.now() + SCHED_AHEAD_MS);
 
-    setLoopPhase("record");
+    // enter lead-in (stage runs, transport anchored)
+    setLoopPhase("lead-in");
     setRunning(true);
-  }, [canRun, maxTakes, maxSessionSec, clearTimers]);
+
+    // after preRoll, flip to record
+    const FRAME_MS = 16;
+    const delayMs = Math.max(0, preRollSec * 1000 + FRAME_MS);
+    leadTimerRef.current = window.setTimeout(() => {
+      leadTimerRef.current = null;
+      setLoopPhase("record");
+    }, delayMs);
+  }, [canRun, isSessionCapped, capOrIdle, preRollSec]);
 
   // exact end of RESPONSE record window
   useEffect(() => {
@@ -200,30 +207,22 @@ export default function usePracticeLoop({
       return;
     }
 
-    // Total duration to stay in "record":
-    // - legacy: lead-in + phrase window
-    // - call/response: response window only
-    const totalMs = (callResponse ? windowOnSec : preRollSec + windowOnSec) * 1000;
-
+    // In both modes, "record" lasts exactly windowOnSec (lead-in handled earlier)
     if (recordTimerRef.current == null) {
       const FRAME_MS = 16;
-      // ✨ Use TRANSPORT anchor (not recorder) to measure elapsed lead-in.
-      const elapsedMs = callResponse
-        ? 0
-        : Math.max(0, performance.now() - (anchorMs ?? performance.now()));
-      const delayMs = Math.max(0, totalMs - elapsedMs + FRAME_MS);
+      const totalMs = Math.max(0, windowOnSec * 1000 + FRAME_MS);
 
       recordTimerRef.current = window.setTimeout(() => {
         recordTimerRef.current = null;
         setLoopPhase("rest");
 
-        // NEW: advance phrase only if autoContinue
+        // advance phrase only if auto-continue
         if (autoContinue) onAdvancePhrase();
 
         setTakeCount((n) => n + 1);
-      }, delayMs);
+      }, totalMs);
     }
-  }, [loopPhase, callResponse, windowOnSec, preRollSec, anchorMs, onAdvancePhrase, autoContinue]);
+  }, [loopPhase, windowOnSec, onAdvancePhrase, autoContinue]);
 
   // rest -> next take (if looping) or review (if !autoContinue)
   useEffect(() => {
@@ -243,13 +242,10 @@ export default function usePracticeLoop({
         onRestComplete?.();
 
         if (countsRef.current.takeCount >= maxTakes) {
-          setLooping(false);
-          setRunning(false);
-          setLoopPhase("idle");
-          clearTimers();
+          capOrIdle();
         } else if (looping && autoContinue) {
           if (callResponse) startCallPhase();
-          else startRecordPhaseLegacy();
+          else startLeadInPhase();
         } else {
           // Stop; upstream can present review UI
           setRunning(false);
@@ -264,22 +260,19 @@ export default function usePracticeLoop({
     autoContinue,
     callResponse,
     startCallPhase,
-    startRecordPhaseLegacy,
+    startLeadInPhase,
     windowOffSec,
     maxTakes,
-    clearTimers,
     onRestComplete,
+    capOrIdle,
   ]);
 
   // cap guard
   useEffect(() => {
     if (takeCount >= maxTakes) {
-      setLooping(false);
-      setRunning(false);
-      setLoopPhase("idle");
-      clearTimers();
+      capOrIdle();
     }
-  }, [takeCount, maxTakes, clearTimers]);
+  }, [takeCount, maxTakes, capOrIdle]);
 
   // stop if we lose phrase mid-session
   useEffect(() => {
@@ -298,7 +291,7 @@ export default function usePracticeLoop({
       setLooping(true);
       clearTimers();
       if (callResponse) startCallPhase();
-      else startRecordPhaseLegacy();
+      else startLeadInPhase();
     } else {
       setLooping(false);
       clearTimers();
@@ -306,7 +299,7 @@ export default function usePracticeLoop({
       setLoopPhase("idle");
       setAnchorMs(null);
     }
-  }, [canRun, looping, clearTimers, callResponse, startCallPhase, startRecordPhaseLegacy]);
+  }, [canRun, looping, clearTimers, callResponse, startCallPhase, startLeadInPhase]);
 
   const clearAll = useCallback(() => {
     setLooping(false);
@@ -317,15 +310,13 @@ export default function usePracticeLoop({
   }, [clearTimers]);
 
   // derived
-  const shouldRecord = useMemo(() => {
-    return loopPhase === "record";
-  }, [loopPhase]);
+  const shouldRecord = useMemo(() => loopPhase === "record", [loopPhase]);
 
   const statusText = useMemo(() => {
     if (loopPhase === "call") return "Listen…";
+    if (loopPhase === "lead-in") return "Counting in…";
     if (loopPhase === "record") return "Recording…";
     if (loopPhase === "rest" && looping) return "Breather…";
-    if (looping && loopPhase === "idle") return "Counting in…";
     return "Idle";
   }, [loopPhase, looping]);
 
