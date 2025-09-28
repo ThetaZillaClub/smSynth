@@ -190,6 +190,7 @@ export default function GameStage({
             leadInSec={leadInSecEff}
             startAtMs={startAtMs}
             lyrics={lyrics}
+            keySig={keySig}
             /** keep in lockstep with rhythm roll */
             windowSec={WINDOW_SEC}
             anchorRatio={ANCHOR_RATIO}

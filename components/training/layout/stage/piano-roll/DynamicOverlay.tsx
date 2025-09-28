@@ -30,6 +30,8 @@ type Props = {
   leadInSec?: number;
   startAtMs?: number | null;
   lyrics?: string[];
+  /** Tonic pitch class 0..11; controls bottom row + heavy grid lines. */
+  tonicPc?: number;
 };
 
 type BitmapLike = ImageBitmap | HTMLCanvasElement;
@@ -51,6 +53,7 @@ export default function DynamicOverlay({
   leadInSec = 1.5,
   startAtMs = null,
   lyrics,
+  tonicPc = 0,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -101,7 +104,7 @@ export default function DynamicOverlay({
   };
 
   const rebuildGridIfNeeded = useCallback(async () => {
-    const key = `${width}x${height}:${minMidi}-${maxMidi}:dpr${dpr}`;
+    const key = `${width}x${height}:${minMidi}-${maxMidi}:pc${tonicPc}:dpr${dpr}`;
     if (!width || !height) return;
     if (gridKeyRef.current === key && gridBmpRef.current) return;
 
@@ -123,9 +126,9 @@ export default function DynamicOverlay({
     for (let i = 0; i <= span; i++) {
       const midi = minMidi + i;
       const yLine = midiToY(midi, height, minMidi, maxMidi);
-      const isC = midi % 12 === 0;
-      ctx.strokeStyle = isC ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
-      ctx.lineWidth = isC ? 1.25 : 0.75;
+      const isTonic = ((midi - tonicPc) % 12 + 12) % 12 === 0;
+      ctx.strokeStyle = isTonic ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
+      ctx.lineWidth = isTonic ? 1.25 : 0.75;
       ctx.beginPath();
       ctx.moveTo(0, yLine);
       ctx.lineTo(width, yLine);
@@ -147,7 +150,7 @@ export default function DynamicOverlay({
     requestAnimationFrame(() => {
       try { drawRef.current(performance.now()); } catch {}
     });
-  }, [width, height, minMidi, maxMidi, dpr]);
+  }, [width, height, minMidi, maxMidi, tonicPc, dpr]);
 
   // Build/refresh grid when inputs change
   useEffect(() => {

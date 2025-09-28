@@ -34,6 +34,7 @@ export type BuildPhraseWithRhythmParams = {
 
   /** Legacy absolute whitelist (still supported if present). */
   allowedMidis?: number[] | null;
+  
 };
 
 /** Generate a phrase inside [lowHz, highHz] using a scale + rhythm. */
