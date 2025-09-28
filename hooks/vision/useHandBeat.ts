@@ -61,9 +61,22 @@ export default function useHandBeat(opts: Opts = {}) {
       }
     } catch {}
     if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
-    vfcIdRef.current = null;
-    rafIdRef.current = null;
+    vfcIdRef.current = null; // ✅ correct: mutate .current, don’t reassign the ref
+    rafIdRef.current = null; // ✅
   };
+
+  // Reset internal timing/counters WITHOUT touching the camera
+  const reset = useCallback((anchorMs?: number) => {
+    anchorMsRef.current = typeof anchorMs === "number" ? anchorMs : performance.now();
+    eventsSecRef.current = [];
+    lastYRef.current = null;
+    lastTsRef.current = null;
+    cumUpRef.current = 0;
+    cumDownRef.current = 0;
+    armedRef.current = true;
+    lastFireMsRef.current = null;
+    pendingFirstMsRef.current = null;
+  }, []);
 
   const stopCamera = useCallback(() => {
     cancelFrameCallbacks();
@@ -76,6 +89,12 @@ export default function useHandBeat(opts: Opts = {}) {
     }
     setHasCamera(false);
     setReady(false);
+  }, []);
+
+  // Pause detection loop but keep the stream alive
+  const pause = useCallback(() => {
+    cancelFrameCallbacks();
+    // keep hasCamera/ready as-is so UI doesn’t flicker
   }, []);
 
   const muffleTfLiteInfoOnce = () => {
@@ -134,22 +153,12 @@ export default function useHandBeat(opts: Opts = {}) {
   };
 
   const start = useCallback(
-    async (anchorMs: number) => {
+    async (anchorMs?: number) => {
       setError(null);
       await ensureLandmarker();
       if (!lmRef.current) return;
 
-      // reset
-      anchorMsRef.current = anchorMs;
-      eventsSecRef.current = [];
-      lastYRef.current = null;
-      lastTsRef.current = null;
-      cumUpRef.current = 0;
-      cumDownRef.current = 0;
-      armedRef.current = true;
-      lastFireMsRef.current = null;
-      pendingFirstMsRef.current = null;
-
+      // ensure hidden <video> exists
       if (!videoRef.current) {
         const v = document.createElement("video");
         v.playsInline = true;
@@ -165,28 +174,41 @@ export default function useHandBeat(opts: Opts = {}) {
         videoRef.current = v;
       }
 
-      try {
-        streamRef.current = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
-          audio: false,
-        });
+      // Idempotent: reuse existing stream if we have one; otherwise request it
+      if (!streamRef.current) {
+        try {
+          streamRef.current = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+            audio: false,
+          });
+          const v = videoRef.current!;
+          v.srcObject = streamRef.current;
+          await v.play();
+          await waitForVideoReady(v);
+          setHasCamera(true);
+          setReady(true);
+          const [track] = streamRef.current.getVideoTracks();
+          track.onended = () => {
+            setError("Camera track ended.");
+            stopCamera();
+          };
+        } catch (e) {
+          setError((e as any)?.message || String(e));
+          setHasCamera(false);
+          return;
+        }
+      } else {
         const v = videoRef.current!;
-        v.srcObject = streamRef.current;
-        await v.play();
-        await waitForVideoReady(v);
+        if (v.srcObject !== streamRef.current) v.srcObject = streamRef.current;
+        try { await v.play(); } catch {}
         setHasCamera(true);
         setReady(true);
-        const [track] = streamRef.current.getVideoTracks();
-        track.onended = () => {
-          setError("Camera track ended.");
-          stopCamera();
-        };
-      } catch (e) {
-        setError((e as any)?.message || String(e));
-        setHasCamera(false);
-        return;
       }
 
+      // Optional anchor reset on (re)start
+      if (typeof anchorMs === "number") reset(anchorMs);
+
+      // (Re)start the detection loop fresh
       const v = videoRef.current!;
       const lm = lmRef.current!;
       cancelFrameCallbacks();
@@ -218,10 +240,10 @@ export default function useHandBeat(opts: Opts = {}) {
               if (Math.abs(dy) < noiseEps) dy = 0;
 
               const dtSec = Math.min(0.1, Math.max(1 / 240, (ts - prevTs) / 1000));
-              const upVel = dy > 0 ? (dy / dtSec) : 0;
+              const upVel = dy > 0 ? dy / dtSec : 0;
 
               const lastFire = lastFireMsRef.current;
-              const cooling = lastFire != null && (ts - lastFire) < refractoryMs;
+              const cooling = lastFire != null && ts - lastFire < refractoryMs;
 
               if (dy > 0) {
                 cumUpRef.current += dy;
@@ -283,7 +305,7 @@ export default function useHandBeat(opts: Opts = {}) {
 
       return () => { canceled = true; };
     },
-    [ensureLandmarker, latencyMs, fireUpEps, confirmUpEps, downRearmEps, refractoryMs, noiseEps, minUpVel, stopCamera]
+    [ensureLandmarker, latencyMs, fireUpEps, confirmUpEps, downRearmEps, refractoryMs, noiseEps, minUpVel, stopCamera, reset]
   );
 
   const stop = useCallback(() => {
@@ -311,8 +333,10 @@ export default function useHandBeat(opts: Opts = {}) {
     ready,
     error,
     hasCamera,
-    start,
-    stop,
+    start,       // boots model+camera if needed; restarts loop
+    pause,       // stop loop, keep camera alive
+    stop,        // full teardown (end of session/unmount)
+    reset,       // per-take re-anchor & clear events
     snapshotEvents,
   };
 }

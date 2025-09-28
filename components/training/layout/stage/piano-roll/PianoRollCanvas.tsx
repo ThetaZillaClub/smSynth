@@ -1,13 +1,11 @@
-// components/piano-roll/PianoRollCanvas.tsx
+// components/training/layout/stage/piano-roll/PianoRollCanvas.tsx
 "use client";
-
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo } from "react";
 import DynamicOverlay from "./DynamicOverlay";
 import { getMidiRange, type Phrase } from "@/utils/stage";
-
+import useMeasuredWidth from "./roll/hooks/useMeasuredWidth";
 /** Re-export so upstream can import { type Phrase } from this file */
 export type { Phrase };
-
 type Props = {
   /** Fixed height in CSS pixels (wrapper provides this). */
   height: number;
@@ -22,7 +20,6 @@ type Props = {
   /** Lyric words aligned 1:1 with phrase.notes (optional) */
   lyrics?: string[];
 };
-
 export default function PianoRollCanvas({
   height,
   phrase,
@@ -35,52 +32,27 @@ export default function PianoRollCanvas({
   startAtMs = null,
   lyrics,
 }: Props) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-
-  // Render the canvas only after we have a real measured width
-  const [width, setWidth] = useState<number | null>(null);
-
-  // Measure width responsively (sync + RAF + ResizeObserver for robustness)
-  useLayoutEffect(() => {
-    const el = hostRef.current;
-    if (!el) return;
-
-    const measure = () => {
-      const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
-      if (w && w !== width) setWidth(w);
-    };
-
-    // Synchronous first read
-    measure();
-    // One-frame-later read in case flex/layout hasn’t settled
-    const raf = requestAnimationFrame(measure);
-    // Keep in sync on resizes
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+  const { hostRef, width } = useMeasuredWidth();
   const [minMidi, maxMidi] = useMemo<[number, number]>(() => {
     if (!phrase || !phrase.notes.length) return [60 - 6, 60 + 6]; // default around middle C
-    const { minMidi, maxMidi } = getMidiRange(phrase, 2);
-    // ensure at least 1-semitone span
-    if (minMidi >= maxMidi) return [minMidi, minMidi + 1];
-    return [minMidi, maxMidi];
+    const { minMidi: minP, maxMidi: maxP } = getMidiRange(phrase, 2);
+    let min = minP;
+    let max = maxP;
+    const range = max - min;
+    if (range < 12) {
+      const center = Math.round((min + max) / 2);
+      min = center - 6;
+      max = center + 6;
+    }
+    if (min >= max) return [min, min + 1];
+    return [min, max];
   }, [phrase]);
-
-  // If no phrase, we still reserve vertical space so layout doesn’t jump
+  // If no phrase, still reserve height so layout doesn’t jump
   if (!phrase || phrase.notes.length === 0) {
     return <div ref={hostRef} className="relative w-full" style={{ height }} />;
   }
-
   return (
     <div ref={hostRef} className="relative w-full" style={{ height }}>
-      {/* Only render when we have a non-zero width to avoid the 1px “squished” first frame */}
       {width && width > 4 ? (
         <DynamicOverlay
           width={width}
@@ -104,4 +76,3 @@ export default function PianoRollCanvas({
     </div>
   );
 }
-

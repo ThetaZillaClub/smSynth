@@ -260,14 +260,29 @@ export default function TrainingGame({
 
   // start/stop gesture capture + reset sampler on phase changes
   useEffect(() => {
+    // During pretest we fully stop (no need for camera).
+    if (pretestActive) {
+      hand.stop();
+      return;
+    }
+
     if (loop.loopPhase === "record") {
       hand.start(loop.anchorMs ?? performance.now());
       sampler.reset();
     } else {
-      hand.stop();
+      // Between takes (rest/review), keep the stream alive to avoid camera glitches.
+      hand.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loop.loopPhase, loop.anchorMs]);
+  }, [pretestActive, loop.loopPhase, loop.anchorMs]);
+
+  // ensure full teardown if this page unmounts
+  useEffect(() => {
+    return () => {
+      hand.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- Review + scoring state
   const haveRhythm: boolean = ((fabric.melodyRhythm?.length ?? 0) > 0) || ((fabric.syncRhythmFabric?.length ?? 0) > 0);
@@ -286,7 +301,7 @@ export default function TrainingGame({
       t += dur;
     }
     return out;
-    };
+  };
 
   // 🔔 Compute score exactly when a take ends (record → rest), regardless of looping.
   const prevPhaseRef = useRef(loop.loopPhase);
