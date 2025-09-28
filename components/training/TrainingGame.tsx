@@ -25,12 +25,8 @@ import { useLeadInMetronome } from "@/hooks/gameplay/useLeadInMetronome";
 import TakeReview from "@/components/training/take-review-layout/TakeReview";
 import useHandBeat from "@/hooks/vision/useHandBeat";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
-
-// alignment + scoring
 import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";
 import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
-
-// ✅ steady-cadence pitch sampler (rAF)
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 
 type Props = {
@@ -45,7 +41,6 @@ type Props = {
 };
 
 const CONF_THRESHOLD = 0.5;
-// SwiftF0 window ≈ 0.20s ⇒ ~0.10–0.12s group delay (+ a touch for smoothing)
 const DEFAULT_PITCH_LATENCY_MS = 120;
 
 export default function TrainingGame({
@@ -65,23 +60,12 @@ export default function TrainingGame({
 
   const step: "play" = "play";
   const {
-    bpm,
-    ts,
-    leadBars,
-    restBars,
-    noteValue,
-    noteDurSec,
-    view,
-    callResponseSequence,
-    exerciseLoops,
-    regenerateBetweenTakes,
-    metronome,
-    loopingMode,
-    gestureLatencyMs = 90,
+    bpm, ts, leadBars, restBars, noteValue, noteDurSec, view,
+    callResponseSequence, exerciseLoops, regenerateBetweenTakes,
+    metronome, loopingMode, gestureLatencyMs = 90,
   } = sessionConfig;
 
   const secPerBeat = secondsPerBeat(bpm, ts.den);
-  const secPerBar = ts.num * secPerBeat;
   const leadBeats = barsToBeats(leadBars, ts.num);
   const leadInSec = beatsToSeconds(leadBeats, bpm, ts.den);
   const restBeats = barsToBeats(restBars, ts.num);
@@ -90,7 +74,7 @@ export default function TrainingGame({
   const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 24));
   const MAX_SESSION_SEC = 15 * 60;
 
-  // ---- Pitch (real-time) ----
+  // ---- Pitch (always-on detector; hot idle) ----
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true,
     fps: 50,
@@ -100,20 +84,16 @@ export default function TrainingGame({
   });
   const liveHz = typeof pitch === "number" ? pitch : null;
 
-  // Regeneration seed between takes
   const [seedBump, setSeedBump] = useState(0);
 
-  // ---- Build the exercise (phrase, rhythms, lyrics, key) ----
   const fabric = useExerciseFabric({
     sessionConfig,
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     seedBump,
   });
-
   const phrase: Phrase | null = fabric.phrase;
 
-  // Clef (stable)
   const melodyClef = useMelodyClef({
     phrase,
     scale: sessionConfig.scale,
@@ -122,25 +102,22 @@ export default function TrainingGame({
     highHz: highHz ?? null,
   });
 
-  // Derived time windows
   const genNoteDurSec =
     typeof noteValue === "string"
       ? beatsToSeconds(noteValueToBeats(noteValue, ts.den), bpm, ts.den)
       : noteDurSec ?? secPerBeat;
 
   const fallbackPhraseSec = fabric.fallbackPhraseSec ?? genNoteDurSec * 8;
-
   const phraseSec =
     phrase?.notes?.length ? phrase.durationSec ?? fallbackPhraseSec : fallbackPhraseSec;
-
   const lastEndSec = phrase?.notes?.length
     ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
     : phraseSec;
-
-  const recordWindowSec = Math.ceil(lastEndSec / Math.max(1e-9, secPerBar)) * secPerBar;
+  const recordWindowSec = Math.ceil(lastEndSec / Math.max(1e-9, ts.num * secPerBeat)) * (ts.num * secPerBeat);
 
   // ---- Audio player + pretest ----
   const {
+    warm: warmPlayer,
     playA440,
     playMidiList,
     playLeadInTicks,
@@ -158,25 +135,23 @@ export default function TrainingGame({
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     player: {
-      playA440: async (durSec) => {
-        await playA440(durSec);
-      },
-      playMidiList: async (midi, noteDurSec) => {
-        await playMidiList(midi, noteDurSec);
-      },
+      playA440: async (durSec) => { await playA440(durSec); },
+      playMidiList: async (midi, noteDurSec) => { await playMidiList(midi, noteDurSec); },
     },
   });
 
-  // —— Pre-test gating —— //
   const pretestRequired = (callResponseSequence?.length ?? 0) > 0;
   const pretestActive = pretestRequired && pretest.status !== "done";
-  // Exercise is unlocked only when no pretest OR pretest finished
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
-  // ---- Practice loop ----
-  const { isRecording, start: startRec, stop: stopRec, startedAtMs } = useWavRecorder({
-    sampleRateOut: 16000,
-  });
+  // ---- Recorder (persistent pipeline; gated capture) ----
+  const {
+    isRecording,
+    start: startRec,
+    stop: stopRec,
+    startedAtMs,
+    warm: warmRecorder,
+  } = useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
 
   const [reviewVisible, setReviewVisible] = useState(false);
 
@@ -196,31 +171,22 @@ export default function TrainingGame({
     callResponse: false,
     callWindowSec: 0,
     onStartCall: undefined,
-
-    onAdvancePhrase: () => {
-      if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1);
-    },
-
+    onAdvancePhrase: () => { if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1); },
     onEnterPlay: () => {},
-
     autoContinue: !!loopingMode,
-    onRestComplete: () => {
-      if (!loopingMode) setReviewVisible(true);
-    },
+    onRestComplete: () => { if (!loopingMode) setReviewVisible(true); },
   });
 
-  // 🔒 When pre-test starts, ensure the exercise is fully idle & silent.
+  // 🔒 enter pretest with everything silenced
   const startPretestSafe = async () => {
-    loop.clearAll();       // stop the practice loop & freeze stage overlays
-    stopPlayback();        // stop any scheduled synth/metronome
-    await stopRec().catch(() => {}); // ensure mic isn’t recording for loop
+    loop.clearAll();
+    stopPlayback();
+    await stopRec().catch(() => {});
     pretest.start();
   };
 
-  // ---- Recorder auto start/stop
-  const shouldRecord =
-    (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
-
+  // ---- Recorder auto-sync: no start/stop during lead-in anymore (just during record)
+  const shouldRecord = (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
   useRecorderAutoSync({
     enabled: step === "play",
     shouldRecord,
@@ -229,8 +195,7 @@ export default function TrainingGame({
     stopRec,
   });
 
-  // ---- Metronome lead-in
-  // ✅ Always use a lead-in + metronome for the EXERCISE (not for pre-test).
+  // ---- Lead-in metronome (scheduling only; AC already warm)
   useLeadInMetronome({
     enabled: exerciseUnlocked,
     metronome,
@@ -241,7 +206,7 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // ---- Hand-gesture beat detection (use your new flick API + calibrated latency)
+  // ---- Hand-gesture detection (keep running for the whole session)
   const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
   useEffect(() => {
     try {
@@ -251,7 +216,6 @@ export default function TrainingGame({
     } catch {
       setGestureLatencyMsEff(gestureLatencyMs);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gestureLatencyMs]);
 
   const hand = useHandBeat({
@@ -264,49 +228,53 @@ export default function TrainingGame({
     minUpVel: 0.35,
   });
 
-  // ✅ steady-cadence pitch sampler (wired with definite booleans)
+  // ✅ steady-cadence pitch sampler
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
   const samplerAnchor: number | null = !pretestActive ? loop.anchorMs ?? null : null;
+  const sampler = usePitchSampler({ active: samplerActive, anchorMs: samplerAnchor, hz: liveHz, confidence, fps: 60 });
 
-  const sampler = usePitchSampler({
-    active: samplerActive,
-    anchorMs: samplerAnchor,
-    hz: liveHz,
-    confidence,
-    fps: 60,
-  });
+  // 🔥 ONE-TIME PREFLIGHTS (do all heavy work *before* the exercise)
+  const preflightDoneRef = useRef(false);
 
-  // start/stop gesture capture + reset sampler on phase changes
+  // 1) Audio engine/player & recorder pipeline: right away on mount
   useEffect(() => {
-    if (pretestActive) {
-      hand.stop();
-      return;
-    }
-    if (loop.loopPhase === "record") {
-      hand.start(loop.anchorMs ?? performance.now());
+    (async () => {
+      try { await warmPlayer(); } catch {}
+      try { await warmRecorder(); } catch {}
+    })();
+  }, [warmPlayer, warmRecorder]);
+
+  // 2) Start camera/model once the exercise unlocks; keep it running for the session
+  useEffect(() => {
+    if (!exerciseUnlocked || preflightDoneRef.current) return;
+    preflightDoneRef.current = true;
+    (async () => {
+      try {
+        await hand.start(performance.now()); // boots model+camera+loop
+        // keep it RUNNING across phases; we only reset anchor below
+      } catch {}
+    })();
+    // stop fully when component unmounts or if we leave the page
+    return () => { hand.stop(); };
+  }, [exerciseUnlocked, hand]);
+
+  // Phase-driven *reset only* (no start/stop/pause while loop is playing)
+  useEffect(() => {
+    if (pretestActive) return;
+    if (loop.loopPhase === "lead-in" || loop.loopPhase === "record") {
+      hand.reset(loop.anchorMs ?? performance.now());
       sampler.reset();
-    } else {
-      hand.pause();
     }
+    // keep detection running during rest/idle for a flat CPU profile
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pretestActive, loop.loopPhase, loop.anchorMs]);
 
-  // ensure full teardown if this page unmounts
-  useEffect(() => {
-    return () => {
-      hand.stop();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ---- Review + scoring state
+  // ---- Review + scoring
   const haveRhythm: boolean =
     (fabric.melodyRhythm?.length ?? 0) > 0 || (fabric.syncRhythmFabric?.length ?? 0) > 0;
-
   const { lastScore, sessionScores, scoreTake } = useTakeScoring();
   const alignForScoring = useScoringAlignment();
 
-  // helper: turn rhythm fabric into onsets (phrase-relative)
   const makeOnsetsFromRhythm = (rh: RhythmEvent[] | null | undefined): number[] => {
     if (!rh?.length) return [];
     const out: number[] = [];
@@ -319,7 +287,6 @@ export default function TrainingGame({
     return out;
   };
 
-  // 🔔 Compute score at the instant a take ends (record → rest)
   const prevPhaseRef = useRef(loop.loopPhase);
   useEffect(() => {
     const prev = prevPhaseRef.current;
@@ -362,10 +329,7 @@ export default function TrainingGame({
     scoreTake,
   ]);
 
-  const onNextPhrase = () => {
-    setSeedBump((n) => n + 1);
-    setReviewVisible(false);
-  };
+  const onNextPhrase = () => { setSeedBump((n) => n + 1); setReviewVisible(false); };
 
   // ---- UI plumbing
   const showLyrics = step === "play" && !!fabric.words?.length;
@@ -376,46 +340,27 @@ export default function TrainingGame({
       ? "No saved range found. Please set your vocal range first."
       : null;
 
-  // During the pre-test, do NOT drive the exercise stage at all
   const showExercise = !pretestActive;
   const running = showExercise && loop.running;
   const startAtMs = showExercise ? loop.anchorMs : null;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
-  const onPlayMelody = async () => {
-    if (!phrase) return;
-    await playPhrase(phrase, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0, metronome: false });
-  };
+  const onPlayMelody = async () => { if (phrase) await playPhrase(phrase, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0, metronome: false }); };
   const onPlayRhythm = async () => {
     if (!haveRhythm) return;
-    const rhythmToUse = (fabric.melodyRhythm?.length
-      ? fabric.melodyRhythm
-      : fabric.syncRhythmFabric ?? []) as any[];
+    const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
     await playRhythm(rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0 });
   };
   const onPlayBoth = async () => {
     if (!phrase) return;
-    const rhythmToUse = (fabric.melodyRhythm?.length
-      ? fabric.melodyRhythm
-      : fabric.syncRhythmFabric ?? []) as any[];
-    await playMelodyAndRhythm(phrase, rhythmToUse as any, {
-      bpm,
-      tsNum: ts.num,
-      tsDen: ts.den,
-      metronome: true,
-    });
+    const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
+    await playMelodyAndRhythm(phrase, rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den, metronome: true });
   };
   const onStopPlayback = () => stopPlayback();
 
-  // UI-only running flag: pause the header during REST (stage already freezes via usePracticeLoop)
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
+  const onToggleExercise = () => { if (exerciseUnlocked) loop.toggle(); };
 
-  // 🔑 Only allow toggling the practice loop when the exercise is unlocked
-  const onToggleExercise = () => {
-  if (exerciseUnlocked) loop.toggle();
-};
-
-  // ---- Render
   return (
     <GameLayout
       title={title}
@@ -451,10 +396,7 @@ export default function TrainingGame({
           running={pretest.running}
           onStart={startPretestSafe}
           onContinue={pretest.continueResponse}
-          onReset={() => {
-            stopPlayback();
-            pretest.reset();
-          }}
+          onReset={() => { stopPlayback(); pretest.reset(); }}
         />
       ) : reviewVisible ? (
         <TakeReview

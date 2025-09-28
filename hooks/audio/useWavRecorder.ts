@@ -1,4 +1,4 @@
-// hooks/useWavRecorder.ts
+// hooks/audio/useWavRecorder.ts
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,18 +15,21 @@ type Metrics = { rmsDb: number; maxAbs: number; clippedPct: number };
 
 /**
  * Lightweight WAV recorder using the same AudioWorklet module as pitch detection.
- * - Always records MONO
- * - Encodes to 16-bit PCM WAV at `sampleRateOut` (default 16000)
- * - Keeps everything on the client (Blob + object URL)
- * - Exposes high-precision start/end timestamps (performance.now() ms)
- * - Exposes simple QC metrics and the resampled PCM (e.g., 16 kHz) for analytics
+ *
+ * ✅ Session-stable design:
+ *  - Persistent mic stream/worklet across takes (no re-gUM / no device churn).
+ *  - "Armed" gating: the worklet can stay alive; we only buffer audio while recording.
+ *  - Provides a `warm()` preflight to build the pipeline before any take starts.
+ *  - Keeps everything on the client (Blob + object URL).
  */
 export default function useWavRecorder(opts?: {
-  sampleRateOut?: number; // default 16000
-  bufferSizeMin?: number; // minimum processor buffer size in samples @ device SR (defaults to 1024)
+  sampleRateOut?: number;     // default 16000
+  bufferSizeMin?: number;     // min processor buffer size at device SR (default 1024)
+  persistentStream?: boolean; // default true — reuse mic/worklet across takes
 }) {
   const sampleRateOut = opts?.sampleRateOut ?? 16000;
   const bufferSizeMin = Math.max(256, opts?.bufferSizeMin ?? 1024);
+  const persistentStream = opts?.persistentStream ?? true;
 
   const [isRecording, setIsRecording] = useState(false);
   const [wavBlob, setWavBlob] = useState<Blob | null>(null);
@@ -49,7 +52,12 @@ export default function useWavRecorder(opts?: {
 
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const micNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const procRef = useRef<AudioWorkletNode | null>(null);
+
+  // Gate to buffer audio only while actively recording
+  const captureActiveRef = useRef(false);
+
   const chunksRef = useRef<Float32Array[]>([]);
   const totalRef = useRef(0);
   const deviceSrRef = useRef(48000);
@@ -61,35 +69,20 @@ export default function useWavRecorder(opts?: {
     clip: 0,
   });
 
-  // guard against double start (StrictMode / fast toggles)
+  // guard against double start
   const startingRef = useRef(false);
-
-  const cleanup = useCallback(async () => {
-    try { procRef.current?.port?.postMessage("flush"); } catch {}
-    try { procRef.current?.disconnect(); } catch {}
-    procRef.current = null;
-
-    if (streamRef.current) {
-      for (const t of streamRef.current.getTracks()) t.stop();
-      streamRef.current = null;
-    }
-    // Keep the shared AC; just suspend to save CPU.
-    void suspendAudio();
-    ctxRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    return () => { void cleanup(); };
-  }, [cleanup]);
 
   const concat = (arrays: Float32Array[], total: number) => {
     const out = new Float32Array(total);
     let o = 0;
-    for (const a of arrays) { out.set(a, o); o += a.length; }
+    for (const a of arrays) {
+      out.set(a, o);
+      o += a.length;
+    }
     return out;
   };
 
-  // FIR design: Hann-windowed low-pass (cutoff normalized to fs)
+  // FIR design: Hann-windowed low-pass
   const designLowpassFIR = (numTaps: number, cutoffNormFs: number) => {
     const N = numTaps | 0;
     const M = N - 1;
@@ -154,35 +147,54 @@ export default function useWavRecorder(opts?: {
     return dst;
   };
 
-  const start = useCallback(async () => {
-    if (isRecording || startingRef.current) return;
-    startingRef.current = true;
+  // Internal teardown — used only on unmount or when hard-stopping permanently.
+  const teardown = useCallback(async () => {
+    try {
+      if (procRef.current?.port) (procRef.current.port.onmessage as any) = null;
+    } catch {}
+    try {
+      procRef.current?.port?.postMessage("flush");
+    } catch {}
+    try {
+      procRef.current?.disconnect();
+    } catch {}
+    procRef.current = null;
 
     try {
-      // fresh state
-      chunksRef.current = [];
-      totalRef.current = 0;
-      metricsRef.current = { sumSq: 0, samples: 0, maxAbs: 0, clip: 0 };
-      setWavBlob(null);
-      if (wavUrl) URL.revokeObjectURL(wavUrl);
-      setWavUrl(null);
-      setDurationSec(0);
-      setEndedAtMs(null);
-      setMetrics(null);
-      setNumSamplesOut(null);
-      setPcm16k(null);
-      setResampleMethod("linear");
+      micNodeRef.current?.disconnect();
+    } catch {}
+    micNodeRef.current = null;
 
-      const ctx = getAudioContext();
-      ctxRef.current = ctx;
-      deviceSrRef.current = ctx.sampleRate || 48000;
-      setDeviceSampleRateHz(deviceSrRef.current);
-      setBaseLatencySec((ctx as any).baseLatency ?? null);
+    if (streamRef.current) {
+      for (const t of streamRef.current.getTracks()) t.stop();
+      streamRef.current = null;
+    }
+    // keep shared AC policy consistent with the rest of the app
+    void suspendAudio();
+    ctxRef.current = null;
+  }, []);
 
-      await ensureAudioWorkletLoaded(ctx);
-      await resumeAudio();
+  useEffect(() => {
+    return () => {
+      void teardown();
+    };
+  }, [teardown]);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
+  /** Ensure persistent mic + worklet are created and wired once. */
+  const ensurePipeline = useCallback(async () => {
+    if (procRef.current && micNodeRef.current && streamRef.current && ctxRef.current) return;
+
+    const ctx = getAudioContext();
+    ctxRef.current = ctx;
+    deviceSrRef.current = ctx.sampleRate || 48000;
+    setDeviceSampleRateHz(deviceSrRef.current);
+    setBaseLatencySec((ctx as any).baseLatency ?? null);
+
+    await ensureAudioWorkletLoaded(ctx);
+    await resumeAudio();
+
+    if (!streamRef.current) {
+      streamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: false,
@@ -191,10 +203,13 @@ export default function useWavRecorder(opts?: {
           sampleRate: 48000,
         },
       });
-      streamRef.current = stream;
+    }
 
-      const mic = ctx.createMediaStreamSource(stream);
+    if (!micNodeRef.current) {
+      micNodeRef.current = ctx.createMediaStreamSource(streamRef.current);
+    }
 
+    if (!procRef.current) {
       // choose buffer size similar to pitch hook
       const deviceSR = ctx.sampleRate || 48000;
       const minBuf = (deviceSR / sampleRateOut) * 256;
@@ -206,11 +221,18 @@ export default function useWavRecorder(opts?: {
       procRef.current = node;
 
       node.port.onmessage = (ev: MessageEvent) => {
+        // Gate — ignore chunks unless we're actively recording
+        if (!captureActiveRef.current) return;
+
         let data: any = ev.data;
         if (data instanceof ArrayBuffer) {
           data = new Float32Array(data);
         } else if (!(data instanceof Float32Array) && data?.buffer instanceof ArrayBuffer) {
-          data = new Float32Array(data.buffer, data.byteOffset || 0, (data.byteLength || data.buffer.byteLength) / 4);
+          data = new Float32Array(
+            data.buffer,
+            data.byteOffset || 0,
+            (data.byteLength || data.buffer.byteLength) / 4
+          );
         }
         if (!(data instanceof Float32Array) || !data.length) return;
 
@@ -236,18 +258,57 @@ export default function useWavRecorder(opts?: {
         setDurationSec(totalRef.current / sr);
       };
 
-      mic.connect(node);
-      setStartedAtMs(performance.now()); // moment audio is flowing to our node
+      micNodeRef.current.connect(node);
+    }
+  }, [bufferSizeMin, sampleRateOut]);
+
+  /** 🔥 Preflight: build the mic/worklet pipeline without starting capture. */
+  const warm = useCallback(async () => {
+    await ensurePipeline();
+  }, [ensurePipeline]);
+
+  const start = useCallback(async () => {
+    if (isRecording || startingRef.current) return;
+    startingRef.current = true;
+
+    try {
+      await ensurePipeline();
+
+      // fresh state for a new take
+      chunksRef.current = [];
+      totalRef.current = 0;
+      metricsRef.current = { sumSq: 0, samples: 0, maxAbs: 0, clip: 0 };
+      setWavBlob(null);
+      if (wavUrl) URL.revokeObjectURL(wavUrl);
+      setWavUrl(null);
+      setDurationSec(0);
+      setEndedAtMs(null);
+      setMetrics(null);
+      setNumSamplesOut(null);
+      setPcm16k(null);
+      setResampleMethod("linear");
+
+      // arm capture
+      await resumeAudio();
+      captureActiveRef.current = true;
+      setStartedAtMs(performance.now());
       setIsRecording(true);
     } finally {
       startingRef.current = false;
     }
-  }, [isRecording, wavUrl, bufferSizeMin, sampleRateOut]);
+  }, [ensurePipeline, isRecording, wavUrl]);
 
   const stop = useCallback(async (): Promise<{ blob: Blob; url: string; durationSec: number } | null> => {
     if (!isRecording) return null;
-    try { procRef.current?.port?.postMessage("flush"); } catch {}
-    await new Promise((r) => setTimeout(r, 0)); // let final postMessage arrive
+
+    // disarm capture (pipeline stays alive if persistent)
+    captureActiveRef.current = false;
+
+    // let the last postMessage land
+    try {
+      procRef.current?.port?.postMessage("flush");
+    } catch {}
+    await new Promise((r) => setTimeout(r, 0));
 
     const deviceSR = deviceSrRef.current;
     const mono = concat(chunksRef.current, totalRef.current);
@@ -286,9 +347,13 @@ export default function useWavRecorder(opts?: {
 
     setEndedAtMs(performance.now());
 
-    await cleanup(); // release devices (keeps AC suspended)
+    // IMPORTANT: do NOT teardown here if persistent
+    if (!persistentStream) {
+      await teardown();
+    }
+
     return { blob, url, durationSec: dur };
-  }, [cleanup, isRecording, sampleRateOut]);
+  }, [decimate48kTo16kFIR, isRecording, persistentStream, resampleLinear, sampleRateOut, teardown]);
 
   const clear = useCallback(() => {
     setWavBlob(null);
@@ -306,10 +371,8 @@ export default function useWavRecorder(opts?: {
   }, [wavUrl]);
 
   return {
+    // state
     isRecording,
-    start,
-    stop,
-    clear,
     wavBlob,
     wavUrl,
     durationSec,
@@ -317,7 +380,13 @@ export default function useWavRecorder(opts?: {
     startedAtMs,
     endedAtMs,
 
-    // extras for JSON v2
+    // controls
+    warm,   // ⬅️ preflight the pipeline (no capture)
+    start,
+    stop,
+    clear,
+
+    // diagnostics
     deviceSampleRateHz,
     workletBufferSize,
     baseLatencySec,
