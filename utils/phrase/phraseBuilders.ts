@@ -57,47 +57,71 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
   const lo = Math.min(lowM, highM);
   const hi = Math.max(lowM, highM);
 
+  // Base: in-range & in-scale
   let allowed: number[] = [];
   for (let m = lo; m <= hi; m++) {
     const pc = ((m % 12) + 12) % 12;
     if (isInScale(pc, tonicPc, scale)) allowed.push(m);
   }
 
-  // Degree filter (relative to tonic, across octaves/keys)
-  if (allowedDegreeIndices && allowedDegreeIndices.length) {
-    const set = new Set(allowedDegreeIndices);
-    allowed = allowed.filter((m) => {
-      const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
-      return di >= 0 && set.has(di);
-    });
-  }
-
-  // Tonic windows (with optional under/over)
+  // ---- DEGREE FILTER APPLIES **ONLY INSIDE SELECTED WINDOWS** ----
   if (tonicMidis && tonicMidis.length) {
     const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
     const windows = sorted.map((T) => [T, T + 12] as const);
     const minStart = windows[0][0];
     const maxEnd = windows[windows.length - 1][1];
     const inAnyWindow = (m: number) => windows.some(([s, e]) => m >= s && m <= e);
-    const underOk = includeUnder ? (m: number) => m < minStart : () => false;
-    const overOk = includeOver ? (m: number) => m > maxEnd : () => false;
-    const filtered = allowed.filter((m) => inAnyWindow(m) || underOk(m) || overOk(m));
-    if (filtered.length) allowed = filtered;
+
+    // Partition allowed notes
+    const inWin: number[] = [];
+    const under: number[] = [];
+    const over: number[] = [];
+    for (const m of allowed) {
+      if (inAnyWindow(m)) inWin.push(m);
+      else if (m < minStart && includeUnder) under.push(m);
+      else if (m > maxEnd && includeOver) over.push(m);
+    }
+
+    // Apply degree whitelist ONLY to in-window notes
+    let inWinFiltered = inWin;
+    if (allowedDegreeIndices && allowedDegreeIndices.length) {
+      const set = new Set(allowedDegreeIndices);
+      inWinFiltered = inWin.filter((m) => {
+        const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
+        return di >= 0 && set.has(di);
+      });
+    }
+
+    // Recombine (unique + sorted to keep stable behaviour)
+    const combined = Array.from(new Set<number>([...inWinFiltered, ...under, ...over])).sort((a, b) => a - b);
+    if (combined.length) allowed = combined;
+  } else {
+    // No windows picked → degree filter applies globally (legacy behaviour)
+    if (allowedDegreeIndices && allowedDegreeIndices.length) {
+      const set = new Set(allowedDegreeIndices);
+      const filtered = allowed.filter((m) => {
+        const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
+        return di >= 0 && set.has(di);
+      });
+      if (filtered.length) allowed = filtered;
+    }
   }
 
-  // Optional absolute whitelist (legacy)
+  // Optional absolute whitelist (still applies to the final pool)
   if (allowedMidis && allowedMidis.length) {
     const allow = new Set(allowedMidis.map((m) => Math.round(m)));
     const filtered = allowed.filter((m) => allow.has(m));
     if (filtered.length) allowed = filtered;
   }
 
+  // Fallback if nothing is available after filtering
   if (!allowed.length) {
     const mid = Math.round((lo + hi) / 2);
     const dur = rhythm.reduce((s, r) => s + noteValueToSeconds(r.value, bpm, den), 0) || 1;
     return { durationSec: dur, notes: [{ midi: mid, startSec: 0, durSec: dur }] };
   }
 
+  // ---------------- existing random-walk note selection (unchanged) ----------------
   const degCounts = new Map<number, number>();
   const rnd = makeRng(seed);
   const toDegreeIndex = (m: number) => degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
@@ -143,6 +167,7 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
 
   return { durationSec: t, notes };
 }
+
 
 export type BuildSequenceParams = {
   lowHz: number;

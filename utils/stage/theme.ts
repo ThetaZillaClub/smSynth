@@ -5,7 +5,7 @@ export const PR_COLORS = {
   bg: "#ebebeb",
   gridMinor: "rgba(15,15,15,0.08)",
   gridMajor: "rgba(15,15,15,0.18)",
-  label: "rgba(15,15,15,0.65)",
+  label: "rgba(15,15,15,1)",
 
   noteFill: "#22c55e",                // emerald-500
   noteStroke: "rgba(21,128,61,0.65)", // emerald-700 @ 65%

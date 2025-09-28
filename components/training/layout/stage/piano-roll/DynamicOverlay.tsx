@@ -32,6 +32,16 @@ type Props = {
   lyrics?: string[];
   /** Tonic pitch class 0..11; controls bottom row + heavy grid lines. */
   tonicPc?: number;
+  /** Enharmonic preference for labels (true=sharps, false=flats). */
+  useSharps?: boolean;
+
+  /** Visual toggles */
+  /** Draw note rectangles at all (ignores lyrics if false). Default: true */
+  showNoteBlocks?: boolean;
+  /** Draw a 1px border on note rectangles. Default: true */
+  showNoteBorders?: boolean;
+  /** If lyrics are present, still draw blocks behind the text. Default: false */
+  blocksWhenLyrics?: boolean;
 };
 
 type BitmapLike = ImageBitmap | HTMLCanvasElement;
@@ -54,6 +64,10 @@ export default function DynamicOverlay({
   startAtMs = null,
   lyrics,
   tonicPc = 0,
+  useSharps = false, // default to flats unless caller opts into sharps
+  showNoteBlocks = true,
+  showNoteBorders = true,
+  blocksWhenLyrics = true,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -77,6 +91,18 @@ export default function DynamicOverlay({
   // ----- Cached grid bitmap -----
   const gridBmpRef = useRef<BitmapLike | null>(null);
   const gridKeyRef = useRef<string>("");
+
+  // (1) Thorough paint reset: shadow, alpha, composite, and filter
+  const resetPaint = (ctx: CanvasRenderingContext2D) => {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = "rgba(0,0,0,0)";
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    // @ts-ignore
+    ctx.filter = "none";
+  };
 
   const disposeBitmap = (bmp: BitmapLike | null) => {
     if (!bmp) return;
@@ -104,7 +130,7 @@ export default function DynamicOverlay({
   };
 
   const rebuildGridIfNeeded = useCallback(async () => {
-    const key = `${width}x${height}:${minMidi}-${maxMidi}:pc${tonicPc}:dpr${dpr}`;
+    const key = `${width}x${height}:${minMidi}-${maxMidi}:pc${tonicPc}:shp${useSharps ? 1 : 0}:dpr${dpr}`;
     if (!width || !height) return;
     if (gridKeyRef.current === key && gridBmpRef.current) return;
 
@@ -115,6 +141,8 @@ export default function DynamicOverlay({
     const c = buildCanvas(width, height);
     const ctx = c.getContext("2d");
     if (!ctx) return;
+
+    resetPaint(ctx);
 
     // bg
     ctx.clearRect(0, 0, width, height);
@@ -140,24 +168,24 @@ export default function DynamicOverlay({
       ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      const { name, octave } = midiToNoteName(midi, { useSharps: true, octaveAnchor: "C" });
+      const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
       ctx.fillText(`${name}${octave}`, 4, centerY);
     }
 
     gridBmpRef.current = await toBitmap(c);
 
-    // 🔔 ensure one immediate paint even if we're idle
+    // draw immediately even if idle
     requestAnimationFrame(() => {
-      try { drawRef.current(performance.now()); } catch {}
+      try {
+        drawRef.current(performance.now());
+      } catch {}
     });
-  }, [width, height, minMidi, maxMidi, tonicPc, dpr]);
+  }, [width, height, minMidi, maxMidi, tonicPc, useSharps, dpr]);
 
-  // Build/refresh grid when inputs change
   useEffect(() => {
     void rebuildGridIfNeeded();
   }, [rebuildGridIfNeeded]);
 
-  // Dispose ONLY on unmount
   useEffect(() => {
     return () => {
       disposeBitmap(gridBmpRef.current);
@@ -165,21 +193,6 @@ export default function DynamicOverlay({
       gridKeyRef.current = "";
     };
   }, []);
-
-  // small text width cache (kept)
-  const width12CacheRef = useRef<Map<string, number>>(new Map());
-  const getWidth12 = useCallback(
-    (ctx: CanvasRenderingContext2D, text: string, bold = false) => {
-      const key = (bold ? "b|" : "n|") + text;
-      const cached = width12CacheRef.current.get(key);
-      if (cached != null) return cached;
-      ctx.font = `${bold ? "700 " : ""}12px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
-      const w = ctx.measureText(text).width;
-      width12CacheRef.current.set(key, w);
-      return w;
-    },
-    []
-  );
 
   const easeInOutCirc = (u: number) => {
     const x = clamp(u, 0, 1);
@@ -197,7 +210,7 @@ export default function DynamicOverlay({
       const cnv = canvasRef.current;
       if (!cnv) return;
 
-      // Backing store
+      // Backing store resolution
       const wantW = Math.round(width * dpr);
       const wantH = Math.round(height * dpr);
       if (cnv.width !== wantW) cnv.width = wantW;
@@ -205,7 +218,12 @@ export default function DynamicOverlay({
 
       const ctx = cnv.getContext("2d");
       if (!ctx) return;
+
+      // (2) Clear in device pixels with identity, then apply CSS-px transform
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, cnv.width, cnv.height);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      resetPaint(ctx); // ensure clean state for this frame
 
       // Time base
       const isLive = running && startAtMs != null;
@@ -246,8 +264,7 @@ export default function DynamicOverlay({
       const tView = tNowSec - leadInSec;
       const baseX = Math.round(anchorX - tView * pxPerSec);
 
-      // Background
-      ctx.clearRect(0, 0, width, height);
+      // Background (grid prerender if present)
       const grid = gridBmpRef.current;
       if (grid) {
         try {
@@ -264,7 +281,8 @@ export default function DynamicOverlay({
       }
 
       // Notes
-      const visLeft = -64, visRight = width + 64;
+      const visLeft = -64,
+        visRight = width + 64;
 
       for (let i = 0; i < phrase.notes.length; i++) {
         const n = phrase.notes[i];
@@ -275,31 +293,44 @@ export default function DynamicOverlay({
 
         const { y, h } = midiCellRect(n.midi, height, minMidi, maxMidi);
 
-        ctx.fillStyle = PR_COLORS.noteFill;
         const rx = rxInt;
         const ry = Math.round(y);
         const rh = Math.round(h);
 
-        ctx.fillRect(rx, ry, drawW, rh);
+        const hasLyrics = !!(lyrics && lyrics.length);
+        const wantBlocks = showNoteBlocks && (!hasLyrics || blocksWhenLyrics);
 
-        ctx.strokeStyle = PR_COLORS.noteStroke;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(rx + 0.5, ry + 0.5, drawW, rh);
+        if (wantBlocks) {
+          ctx.fillStyle = PR_COLORS.noteFill;
+          ctx.fillRect(rx, ry, drawW, rh);
+          if (showNoteBorders) {
+            ctx.strokeStyle = PR_COLORS.noteStroke;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(rx + 0.5, ry + 0.5, drawW, rh);
+          }
+        }
 
         if (drawW >= 24 && h >= 14) {
-          const { name, octave } = midiToNoteName(n.midi, { useSharps: true, octaveAnchor: "C" });
+          const { name, octave } = midiToNoteName(n.midi, { useSharps, octaveAnchor: "C" });
           const word = lyrics?.[i];
           const paddingX = 4;
           const available = Math.max(0, drawW - paddingX * 2);
           if (available >= 18) {
             const noteLabel = `${name}${octave}`;
+            // (3) Draw text with isolated state + explicit paint reset
+            ctx.save();
+            resetPaint(ctx);
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillStyle = "rgba(255,255,255,1)";
             const text = word ?? noteLabel;
             const cy = ry + rh / 2;
-            ctx.font = `${word ? "700 " : ""}${Math.min(36, Math.max(12, Math.floor(rh * 0.52)))}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
+            ctx.font = `${word ? "700 " : ""}${Math.min(
+              36,
+              Math.max(12, Math.floor(rh * 0.52))
+            )}px ui-sans-serif, system-ui, -apple-system, Segoe UI`;
             ctx.fillText(text, rx + drawW / 2, cy);
+            ctx.restore();
           }
         }
       }
@@ -348,7 +379,10 @@ export default function DynamicOverlay({
         for (let i = 0; i < phrase.notes.length; i++) {
           const s0 = phrase.notes[i].startSec;
           const s1 = phrase.notes[i + 1]?.startSec ?? Infinity;
-          if (tView >= s0 && tView < s1) { segIdx = i; break; }
+          if (tView >= s0 && tView < s1) {
+            segIdx = i;
+            break;
+          }
         }
 
         if (segIdx !== lastActiveRef.current) {
@@ -389,20 +423,29 @@ export default function DynamicOverlay({
       startAtMs,
       dpr,
       lyrics,
-      getWidth12,
       onActiveNoteChange,
+      useSharps, // relabels if enharmonics switch
+      showNoteBlocks,
+      showNoteBorders,
+      blocksWhenLyrics,
     ]
   );
 
   // keep draw stable across renders
-  useEffect(() => { drawRef.current = draw; }, [draw]);
+  useEffect(() => {
+    drawRef.current = draw;
+  }, [draw]);
 
   // RAF loop — run only when truly live
   useRafLoop({
     running: running && startAtMs != null,
     onFrame: (ts: number) => drawRef.current(ts),
-    onStart: () => { drawRef.current(performance.now()); },
-    onStop: () => { drawRef.current(performance.now()); },
+    onStart: () => {
+      drawRef.current(performance.now());
+    },
+    onStop: () => {
+      drawRef.current(performance.now());
+    },
   });
 
   // When transport is armed but not started yet, draw a static frame
@@ -412,10 +455,21 @@ export default function DynamicOverlay({
     }
   }, [running, startAtMs]);
 
-  // 🔔 NEW: also draw once on key input changes while idle
+  // Also draw once on key input changes while idle
   useEffect(() => {
     drawRef.current(performance.now());
-  }, [width, height, minMidi, maxMidi, phrase, lyrics]);
+  }, [
+    width,
+    height,
+    minMidi,
+    maxMidi,
+    phrase,
+    lyrics,
+    useSharps,
+    showNoteBlocks,
+    showNoteBorders,
+    blocksWhenLyrics,
+  ]);
 
   // Append live pitch samples only when truly "live"
   useEffect(() => {
@@ -446,7 +500,7 @@ export default function DynamicOverlay({
     leadInSec,
   ]);
 
-  // Clear pitch points when startAtMs changes (NEW take)
+  // Clear pitch points when startAtMs changes
   useEffect(() => {
     pointsRef.current = [];
   }, [startAtMs]);
@@ -455,6 +509,7 @@ export default function DynamicOverlay({
     <canvas
       ref={canvasRef}
       style={{
+        filter: "none",
         width: `${width}px`,
         height: `${height}px`,
         display: "block",

@@ -9,7 +9,6 @@ import useMeasuredWidth from "./roll/hooks/useMeasuredWidth";
 export type { Phrase };
 
 type Props = {
-  /** Fixed height in CSS pixels (wrapper provides this). */
   height: number;
   phrase: Phrase | null;
   running: boolean;
@@ -19,13 +18,15 @@ type Props = {
   confThreshold?: number;
   leadInSec?: number;
   startAtMs?: number | null;
-  /** Lyric words aligned 1:1 with phrase.notes (optional) */
   lyrics?: string[];
-  /** Shared timeline settings so it matches RhythmRoll exactly */
-  windowSec?: number;      // default 4
-  anchorRatio?: number;    // default 0.1
-  /** Key signature (e.g., "C", "G", "Bb", "F#", "Am", etc.). Determines tonic row. */
+  windowSec?: number;
+  anchorRatio?: number;
   keySig?: string | null;
+
+  /** Visual toggles (pass-through to DynamicOverlay) */
+  showNoteBlocks?: boolean;    // default true
+  showNoteBorders?: boolean;   // default true
+  blocksWhenLyrics?: boolean;  // default false (so text-only when lyrics exist)
 };
 
 export default function PianoRollCanvas({
@@ -42,6 +43,9 @@ export default function PianoRollCanvas({
   windowSec = 4,
   anchorRatio = 0.1,
   keySig = null,
+  showNoteBlocks = true,
+  showNoteBorders = true,
+  blocksWhenLyrics = true,
 }: Props) {
   const { hostRef, width } = useMeasuredWidth();
 
@@ -72,9 +76,20 @@ export default function PianoRollCanvas({
     return MAP[s] ?? 0;
   }, [keySig]);
 
+  // --- Enharmonic preference: flats-first policy ---
+  const useSharps = useMemo(() => {
+    const s = (keySig ?? "C")
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/minor|maj(or)?|min|m$/i, "")
+      .replace("♯", "#")
+      .replace("♭", "b")
+      .toUpperCase();
+    const SHARP_KEYS = new Set<string>(["G", "D", "A", "E", "B", "F#", "C#"]);
+    return SHARP_KEYS.has(s);
+  }, [keySig]);
+
   const [minMidi, maxMidi] = useMemo<[number, number]>(() => {
-    // Choose the tonic-anchored octave whose center is closest to the phrase center,
-    // BUT include a duplicate upper tonic row (top row), so span = 13.
     const fallbackCenter = 60; // middle C
     if (!phrase || !phrase.notes.length) {
       const oct = Math.floor((fallbackCenter - tonicPc) / 12);
@@ -85,16 +100,14 @@ export default function PianoRollCanvas({
     const center = Math.round((minP + maxP) / 2);
     let baseOct = Math.floor((center - tonicPc) / 12);
     let min = baseOct * 12 + tonicPc;
-    let max = min + 13; // duplicate upper tonic
+    let max = min + 13;
 
-    // If the phrase sits entirely above/below this band, nudge by an octave.
     if (minP >= max) { min += 12; max += 12; }
     if (maxP < min)  { min -= 12; max -= 12; }
 
     return [min, max];
   }, [phrase, tonicPc]);
 
-  // If no phrase, still reserve height so layout doesn’t jump
   if (!phrase || phrase.notes.length === 0) {
     return <div ref={hostRef} className="relative w-full" style={{ height }} />;
   }
@@ -120,6 +133,10 @@ export default function PianoRollCanvas({
           startAtMs={startAtMs}
           lyrics={lyrics}
           tonicPc={tonicPc}
+          useSharps={useSharps}
+          showNoteBlocks={showNoteBlocks}
+          showNoteBorders={showNoteBorders}
+          blocksWhenLyrics={blocksWhenLyrics}
         />
       ) : null}
     </div>

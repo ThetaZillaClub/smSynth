@@ -20,26 +20,23 @@ type Props = {
   confThreshold?: number;
   startAtMs?: number | null;
   lyrics?: string[];
-  /** If provided, used directly; otherwise we compute from leadBars/ts/bpm. */
   leadInSec?: number;
-  /** Blue rhythm line (independent of melody) */
   rhythm?: RhythmEvent[];
-  /** Authoritative durations for MELODY only (independent of blue rhythm line) */
   melodyRhythm?: RhythmEvent[];
   bpm?: number;
   den?: number;
   tsNum?: number;
-  /** Optionally provide bars of lead-in (preferred source). */
   leadBars?: number;
-  /** NEW: key signature name for the staves (e.g., "G", "Bb", "F#"). */
   keySig?: string | null;
   view?: "piano" | "sheet";
-  /** Optional singer range, used for octave normalization in the overlay */
   lowHz?: number | null;
   highHz?: number | null;
-
-  /** MELODY clef to force on the top staff; pass to lock clef selection. */
   clef?: "treble" | "bass" | null;
+
+  /** Visual toggles for piano-roll rectangles */
+  showNoteBlocks?: boolean;    // default true
+  showNoteBorders?: boolean;   // default true
+  blocksWhenLyrics?: boolean;  // default false → text-only when lyrics exist
 };
 
 export default function GameStage({
@@ -52,18 +49,22 @@ export default function GameStage({
   confThreshold = 0.5,
   startAtMs = null,
   lyrics,
-  leadInSec, // may be undefined
+  leadInSec,
   rhythm,
   melodyRhythm,
   bpm = 80,
   den = 4,
   tsNum = 4,
-  leadBars, // may be undefined
-  keySig = null, // NEW
+  leadBars,
+  keySig = null,
   view = "piano",
   lowHz = null,
   highHz = null,
   clef = null,
+
+  showNoteBlocks = true,
+  showNoteBorders = true,
+  blocksWhenLyrics = true,
 }: Props) {
   // 🔁 unify timeline settings so both canvases compute identical px/sec + anchor
   const WINDOW_SEC = 4;
@@ -116,19 +117,15 @@ export default function GameStage({
     return <div ref={hostRef} className="w-full h-full min-h-[260px]" />;
   }
 
-  // Resolve clef: prefer the explicit prop (stable), else fall back to phrase heuristic.
   const resolvedClef = clef ?? pickClef(phrase);
 
   const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
   const sheetReady = Boolean(systems && systems.length);
 
-  // Prefer sharps in sharp/neutral keys, flats in flat keys (fewer-accidentals policy).
   const useSharpsPref = useMemo(() => preferSharpsForKeySig(keySig || null), [keySig]);
 
-  // --------- Compute effective lead-in seconds (pass down consistently) ----------
   const leadInSecEff = useMemo(() => {
     if (typeof leadInSec === "number" && isFinite(leadInSec)) return Math.max(0, leadInSec);
-    // fallback: compute from leadBars (default 1 bar) and current transport
     const bars = typeof leadBars === "number" ? leadBars : 1;
     return beatsToSeconds(barsToBeats(bars, tsNum), bpm, den);
   }, [leadInSec, leadBars, tsNum, bpm, den]);
@@ -194,6 +191,10 @@ export default function GameStage({
             /** keep in lockstep with rhythm roll */
             windowSec={WINDOW_SEC}
             anchorRatio={ANCHOR_RATIO}
+            /** NEW: visual toggles for rectangles */
+            showNoteBlocks={showNoteBlocks}
+            showNoteBorders={showNoteBorders}
+            blocksWhenLyrics={blocksWhenLyrics}
           />
         )}
       </div>
