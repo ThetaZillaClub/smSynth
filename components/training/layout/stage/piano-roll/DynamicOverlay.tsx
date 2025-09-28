@@ -162,14 +162,17 @@ export default function DynamicOverlay({
       ctx.lineTo(width, yLine);
       ctx.stroke();
 
-      const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
-      const centerY = y + h / 2;
-      ctx.fillStyle = PR_COLORS.label;
-      ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
-      ctx.fillText(`${name}${octave}`, 4, centerY);
+     // Draw labels only for actual cells (skip top boundary row)
+     if (midi < maxMidi) {
+       const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
+       const centerY = y + h / 2;
+       ctx.fillStyle = PR_COLORS.label;
+       ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
+       ctx.textAlign = "left";
+       ctx.textBaseline = "middle";
+       const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
+       ctx.fillText(`${name}${octave}`, 4, centerY);
+     }
     }
 
     gridBmpRef.current = await toBitmap(c);
