@@ -100,31 +100,37 @@ export default function DynamicOverlay({
     ctx.shadowBlur = 0;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
-    // @ts-ignore
-    ctx.filter = "none";
+    // Guarded assign for browsers/TS lib without `filter`
+    type MaybeFilterContext = CanvasRenderingContext2D & { filter?: string };
+    (ctx as MaybeFilterContext).filter = "none";
   };
 
   const disposeBitmap = (bmp: BitmapLike | null) => {
     if (!bmp) return;
-    // @ts-ignore
-    if (typeof (bmp as any).close === "function") (bmp as any).close();
+    if ("close" in bmp && typeof (bmp as ImageBitmap).close === "function") {
+      (bmp as ImageBitmap).close();
+    }
   };
 
-  const buildCanvas = (w: number, h: number) => {
-    const c = document.createElement("canvas");
-    c.width = Math.round(w * dpr);
-    c.height = Math.round(h * dpr);
-    const ctx = c.getContext("2d");
-    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return c;
-  };
+  const buildCanvas = useCallback(
+    (w: number, h: number) => {
+      const c = document.createElement("canvas");
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      const ctx = c.getContext("2d");
+      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return c;
+    },
+    [dpr]
+  );
 
   const toBitmap = async (c: HTMLCanvasElement): Promise<BitmapLike> => {
-    // @ts-ignore
-    if (typeof createImageBitmap === "function") {
+    if (typeof window !== "undefined" && "createImageBitmap" in window) {
       try {
-        return await createImageBitmap(c);
-      } catch {}
+        return await window.createImageBitmap(c);
+      } catch {
+        // fall through to canvas fallback
+      }
     }
     return c;
   };
@@ -162,17 +168,17 @@ export default function DynamicOverlay({
       ctx.lineTo(width, yLine);
       ctx.stroke();
 
-     // Draw labels only for actual cells (skip top boundary row)
-     if (midi < maxMidi) {
-       const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
-       const centerY = y + h / 2;
-       ctx.fillStyle = PR_COLORS.label;
-       ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
-       ctx.textAlign = "left";
-       ctx.textBaseline = "middle";
-       const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
-       ctx.fillText(`${name}${octave}`, 4, centerY);
-     }
+      // Draw labels only for actual cells (skip top boundary row)
+      if (midi < maxMidi) {
+        const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
+        const centerY = y + h / 2;
+        ctx.fillStyle = PR_COLORS.label;
+        ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
+        ctx.fillText(`${name}${octave}`, 4, centerY);
+      }
     }
 
     gridBmpRef.current = await toBitmap(c);
@@ -181,9 +187,11 @@ export default function DynamicOverlay({
     requestAnimationFrame(() => {
       try {
         drawRef.current(performance.now());
-      } catch {}
+      } catch {
+        // no-op
+      }
     });
-  }, [width, height, minMidi, maxMidi, tonicPc, useSharps, dpr]);
+  }, [width, height, minMidi, maxMidi, tonicPc, useSharps, dpr, buildCanvas]);
 
   useEffect(() => {
     void rebuildGridIfNeeded();
@@ -271,7 +279,7 @@ export default function DynamicOverlay({
       const grid = gridBmpRef.current;
       if (grid) {
         try {
-          ctx.drawImage(grid as any, 0, 0, width, height);
+          ctx.drawImage(grid, 0, 0, width, height);
         } catch {
           disposeBitmap(gridBmpRef.current);
           gridBmpRef.current = null;

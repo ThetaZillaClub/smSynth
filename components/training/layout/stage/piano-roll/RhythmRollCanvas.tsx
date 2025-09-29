@@ -2,7 +2,7 @@
 "use client";
 import React, { useMemo, useRef, useEffect, useCallback } from "react";
 import { PR_COLORS } from "@/utils/stage";
-import { noteValueToSeconds, type NoteValue } from "@/utils/time/tempo";
+import { noteValueToSeconds } from "@/utils/time/tempo";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import useMeasuredWidth from "./rhythm/hooks/useMeasuredWidth";
 import useDpr from "./rhythm/hooks/useDpr";
@@ -23,7 +23,8 @@ type Props = {
   den: number;
 };
 
-type BitmapLike = ImageBitmap | HTMLCanvasElement;
+// Use the browser's CanvasImageSource union so drawImage accepts it without casts.
+type BitmapLike = CanvasImageSource;
 const MAX_RHYTHM_BITMAP_PX = 4096;
 
 export default function RhythmRollCanvas({
@@ -46,7 +47,7 @@ export default function RhythmRollCanvas({
     const out: Array<{ t0: number; t1: number; isNote: boolean }> = [];
     let t = 0;
     for (const ev of rhythm) {
-      const dur = noteValueToSeconds(ev.value as NoteValue, bpm, den);
+      const dur = noteValueToSeconds(ev.value, bpm, den);
       const t0 = t;
       const t1 = t + dur;
       out.push({ t0, t1, isNote: ev.type === "note" });
@@ -60,10 +61,13 @@ export default function RhythmRollCanvas({
   // Cached pre-render of the blue blocks in time space
   const laneBmpRef = useRef<BitmapLike | null>(null);
   const laneBmpWRef = useRef<number>(0); // CSS-px width (not device px)
+
   const disposeBitmap = (bmp: BitmapLike | null) => {
     if (!bmp) return;
-    // @ts-ignore
-    if (typeof (bmp as any).close === "function") (bmp as any).close();
+    // Only ImageBitmap has close(); HTMLCanvasElement doesn't.
+    if (typeof (bmp as { close?: () => void }).close === "function") {
+      (bmp as ImageBitmap).close();
+    }
   };
 
   const buildCanvas = (w: number, h: number) => {
@@ -74,12 +78,18 @@ export default function RhythmRollCanvas({
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS px
     return c;
   };
+
   const toBitmap = async (c: HTMLCanvasElement): Promise<BitmapLike> => {
-    // @ts-ignore
-    if (typeof createImageBitmap === "function") {
+    // Guarded access via globalThis to avoid ts-ignore and keep types strict.
+    const g = globalThis as unknown as {
+      createImageBitmap?: (source: CanvasImageSource) => Promise<ImageBitmap>;
+    };
+    if (typeof g.createImageBitmap === "function") {
       try {
-        return await createImageBitmap(c);
-      } catch {}
+        return await g.createImageBitmap(c);
+      } catch {
+        // fall through to returning the canvas
+      }
     }
     return c; // fallback: use canvas directly
   };
@@ -167,12 +177,12 @@ export default function RhythmRollCanvas({
       ctx.fillStyle = PR_COLORS.bg;
       ctx.fillRect(0, 0, width, height);
 
-      // pre-rendered lane (blit with translation) — IMPORTANT: draw with DEST width/height in CSS px
+      // pre-rendered lane (blit with translation)
       const bmp = laneBmpRef.current;
       const bmpW = laneBmpWRef.current; // CSS px width we baked for
       const offsetX = Math.round(anchorX - tView * pxPerSec);
       if (bmp && bmpW > 0) {
-        ctx.drawImage(bmp as any, offsetX, 0, bmpW, height);
+        ctx.drawImage(bmp, offsetX, 0, bmpW, height);
       } else {
         // fallback: draw on the fly (matching rounding path)
         drawAll({

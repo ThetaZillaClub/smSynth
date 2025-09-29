@@ -5,7 +5,8 @@ import DynamicOverlay from "./DynamicOverlay";
 import { getMidiRange, type Phrase } from "@/utils/stage";
 import useMeasuredWidth from "./roll/hooks/useMeasuredWidth";
 
-import { useSharpsForKey } from "@/utils/pitch/enharmonics";
+// Alias the helper so eslint doesn't think it's a React Hook
+import { useSharpsForKey as preferSharpsForKey } from "@/utils/pitch/enharmonics";
 import type { ScaleName } from "@/utils/phrase/scales";
 
 /** Re-export so upstream can import { type Phrase } from this file */
@@ -57,7 +58,8 @@ function parseKeySig(rawIn: string | null | undefined): { tonicPc: number; scale
 
   // Extract the root note from the beginning: letter + optional accidental
   const m = raw.match(/^([A-Ga-g])\s*(#|b)?/);
-  const root = (m ? (m[1].toUpperCase() + (m[2] ?? "")) : "C") as string;
+  // Uppercase the whole token (letter + accidental) so flats hit NOTE_TO_PC (e.g., "Db" -> "DB")
+  const root = (m ? `${m[1]}${m[2] ?? ""}`.toUpperCase() : "C");
   const tonicPc = NOTE_TO_PC[root] ?? 0;
 
   // The rest (mode/scale words)
@@ -111,7 +113,8 @@ export default function PianoRollCanvas({
   const { tonicPc, scale } = useMemo(() => parseKeySig(keySig), [keySig]);
 
   // --- Enharmonic preference via your util (uses relative-major logic per scale) ---
-  const useSharps = useMemo(() => useSharpsForKey(tonicPc, scale), [tonicPc, scale]);
+  // Name is aliased so eslint doesn't treat it as a Hook
+  const preferSharps = useMemo(() => preferSharpsForKey(tonicPc, scale), [tonicPc, scale]);
 
   // --- One-octave window anchored to tonic, with phrase-aware octave shift ---
   const [minMidi, maxMidi] = useMemo<[number, number]>(() => {
@@ -125,7 +128,7 @@ export default function PianoRollCanvas({
     const { minMidi: minP, maxMidi: maxP } = getMidiRange(phrase, 2);
     const center = Math.round((minP + maxP) / 2);
 
-    let baseOct = Math.floor((center - tonicPc) / 12);
+    const baseOct = Math.floor((center - tonicPc) / 12);
     let min = baseOct * 12 + tonicPc;
     let max = min + 13; // keep *exactly* one octave
 
@@ -161,7 +164,7 @@ export default function PianoRollCanvas({
           startAtMs={startAtMs}
           lyrics={lyrics}
           tonicPc={tonicPc}
-          useSharps={useSharps}
+          useSharps={preferSharps}
           showNoteBlocks={showNoteBlocks}
           showNoteBorders={showNoteBorders}
           blocksWhenLyrics={blocksWhenLyrics}

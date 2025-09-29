@@ -1,5 +1,3 @@
-import { PR_COLORS } from "@/utils/stage";
-
 export function ensureCanvas2d(
   cnv: HTMLCanvasElement,
   width: number,
