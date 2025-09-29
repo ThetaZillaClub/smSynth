@@ -48,7 +48,7 @@ type Options = {
   centsOk?: number;
   onsetGraceMs?: number; // ignored time at the head of each note for eval/coverage
   maxAlignMs?: number;
-  goodAlignMs?: number;  // reserved for future shaping
+  goodAlignMs?: number;  // full credit inside this band; smooth falloff to maxAlignMs
 };
 
 /* ---------------- main ---------------- */
@@ -130,11 +130,13 @@ export function computeTakeScore({
     maxAlignMs,
   });
 
-  // (B) Blue-line rhythm (gesture events vs. onsets) — unchanged logic
+  // (B) Blue-line rhythm (gesture events vs. onsets) — soft grace + 1:1 pairing
   const line = evalHandLineRhythm({
     onsets: rhythmLineOnsetsSec,
     events: gestureEventsSec,
     maxAlignMs,
+    goodAlignMs,
+    unique: true,
   });
 
   const tracks = [mel, line].filter((t) => t.evaluated);
@@ -287,41 +289,91 @@ function evalMelodyCoverageRhythm({
   return { pct, hitRate, meanAbs, evaluated: true };
 }
 
-/** Hand/blue-line rhythm: nearest-event alignment to expected onsets (unchanged). */
+/**
+ * Hand/blue-line rhythm:
+ * - one-to-one greedy pairing (each event matches at most one onset)
+ * - full credit inside goodAlignMs; smooth 1.5-power falloff to maxAlignMs
+ */
 function evalHandLineRhythm({
   onsets,
   events,
   maxAlignMs,
+  goodAlignMs = 0,
+  unique = true,
 }: {
   onsets?: number[];
   events: number[];
   maxAlignMs: number;
+  goodAlignMs?: number;
+  unique?: boolean;
 }): RhythmEval {
   if (!onsets?.length) return { pct: 0, hitRate: 0, meanAbs: 0, evaluated: false };
 
+  const exp = onsets.slice().sort((a, b) => a - b);
   const ev = events.slice().sort((a, b) => a - b);
+
   let hits = 0;
-  const absErr: number[] = [];
+  const absErrMs: number[] = [];
   const scores: number[] = [];
 
-  for (const tExp of onsets) {
-    const tNear = nearest(ev, tExp);
-    const err = tNear == null ? Infinity : Math.abs((tNear - tExp) * 1000);
-    if (err <= maxAlignMs) {
-      hits++;
-      absErr.push(err);
-      const x = Math.min(1, err / maxAlignMs);
-      const shaped = 1 - Math.pow(x, 1.5);
-      scores.push(shaped);
-    } else {
-      scores.push(0);
+  const safeGood = Math.max(0, goodAlignMs);
+  const width = Math.max(1, maxAlignMs - safeGood); // avoid /0
+
+  if (unique) {
+    // Greedy one-to-one: consume each event at most once
+    let j = 0;
+    for (let i = 0; i < exp.length; i++) {
+      const tExp = exp[i];
+      if (j >= ev.length) { scores.push(0); continue; }
+
+      // advance while next event is closer to this onset
+      while (j + 1 < ev.length &&
+             Math.abs(ev[j + 1] - tExp) <= Math.abs(ev[j] - tExp)) {
+        j++;
+      }
+
+      const tNear = ev[j];
+      const errMs = Math.abs((tNear - tExp) * 1000);
+
+      let score = 0;
+      if (errMs <= safeGood) {
+        score = 1;
+      } else if (errMs <= maxAlignMs) {
+        const x = Math.min(1, (errMs - safeGood) / width);
+        score = 1 - Math.pow(x, 1.5);
+      } else {
+        score = 0;
+      }
+
+      if (errMs <= maxAlignMs) {
+        hits++;
+        absErrMs.push(errMs);
+      }
+      scores.push(score);
+      j++; // consume this event
+    }
+  } else {
+    // Legacy nearest-with-reuse
+    for (const tExp of exp) {
+      const tNear = nearest(ev, tExp);
+      const errMs = tNear == null ? Infinity : Math.abs((tNear - tExp) * 1000);
+      let score = 0;
+      if (errMs <= safeGood) {
+        score = 1;
+      } else if (errMs <= maxAlignMs) {
+        const x = Math.min(1, (errMs - safeGood) / width);
+        score = 1 - Math.pow(x, 1.5);
+      } else {
+        score = 0;
+      }
+      if (errMs <= maxAlignMs) { hits++; absErrMs.push(errMs); }
+      scores.push(score);
     }
   }
 
   const pct = (scores.reduce((a, b) => a + b, 0) / (scores.length || 1)) * 100;
-  const hitRate = onsets.length ? hits / onsets.length : 0;
-  const meanAbs = absErr.length ? mean(absErr) : maxAlignMs;
-
+  const hitRate = exp.length ? hits / exp.length : 0;
+  const meanAbs = absErrMs.length ? mean(absErrMs) : maxAlignMs;
   return { pct, hitRate, meanAbs, evaluated: true };
 }
 

@@ -1,342 +1,273 @@
 // hooks/vision/useHandBeat.ts
-"use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+import {
+  HandLandmarker,
+  HandLandmarkerResult,
+} from "@mediapipe/tasks-vision";
 
 /**
- * Gameplay detector (two-stage + velocity gate):
- * - EARLY when cumulative upward >= fireUpEps AND instantaneous upVel >= minUpVel → capture tFirst (latency-compensated)
- * - CONFIRM when cumulative upward >= confirmUpEps → commit using tFirst
- * - Cooldown then re-arm on downRearmEps
- * - Fingertip-only; every frame; tiny deadband
+ * Runtime paths (served from /public).
+ * Make sure these files exist in your app:
+ *  - /public/models/mediapie/wasm/vision_wasm_internal.{js,wasm}
+ *  - /public/models/mediapie/models/hand_landmarker_v0.4.0.task
  */
-type Opts = {
+const WASM_BASE = "/models/mediapie/wasm";
+const WASM_LOADER = `${WASM_BASE}/vision_wasm_internal.js`;
+const WASM_BINARY = `${WASM_BASE}/vision_wasm_internal.wasm`;
+const HAND_MODEL = "/models/mediapie/models/hand_landmarker_v0.4.0.task";
+
+export type UseHandBeatOptions = {
+  /** Compensate end-to-end gesture latency (ms). Subtracted from event timestamps. */
   latencyMs?: number;
-  fireUpEps?: number;     // default 0.004
-  confirmUpEps?: number;  // default 0.012 (> fireUpEps)
-  downRearmEps?: number;  // default 0.006
-  refractoryMs?: number;  // default 90
-  noiseEps?: number;      // default 0.0015
-  minUpVel?: number;      // default 0.35 (norm units / sec)
+  /** Ignore per-frame jitter smaller than this |dy| (normalized units). */
+  noiseEps?: number;
+  /** Minimum upward speed (normalized units/sec). */
+  minUpVel?: number;
+  /** Upward travel needed to arm a strike. */
+  fireUpEps?: number;
+  /** Extra upward travel needed (>= fireUpEps) before we confirm at reversal. */
+  confirmUpEps?: number;
+  /** Downward travel required after a strike to re-arm. */
+  downRearmEps?: number;
+  /** Ignore extra strikes for this long after one fires. */
+  refractoryMs?: number;
+  /** How many hands to track (1 for perf). */
+  numHands?: number;
+  /** Optional callback on each detected beat (ms, perf.now clock, latency-compensated). */
+  onBeat?: (tMs: number) => void;
 };
 
-export default function useHandBeat(opts: Opts = {}) {
-  const {
-    latencyMs = 90,
-    fireUpEps = 0.004,
-    confirmUpEps = 0.012,
-    downRearmEps = 0.006,
-    refractoryMs = 90,
-    noiseEps = 0.0015,
-    minUpVel = 0.35,
-  } = opts;
+type UseHandBeatReturn = {
+  /** Load the model (idempotent). */
+  preload: () => Promise<void>;
+  /** Start camera + loop; optional anchor (ms) for time zero. */
+  start: (anchorMs?: number) => Promise<void>;
+  /** Stop camera + loop. */
+  stop: () => void;
+  /** Clear state and set new anchor (defaults to now). */
+  reset: (anchorMs?: number) => void;
+  /** Return gesture onsets (seconds) relative to last anchor. */
+  snapshotEvents: () => number[];
+  isReady: boolean;
+  isRunning: boolean;
+  error: string | null;
+};
 
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasCamera, setHasCamera] = useState(false);
-
-  const lmRef = useRef<HandLandmarker | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+export default function useHandBeat({
+  latencyMs = 90,
+  noiseEps = 0.0015,
+  minUpVel = 0.35,
+  fireUpEps = 0.004,
+  confirmUpEps = 0.012,
+  downRearmEps = 0.006,
+  refractoryMs = 90,
+  numHands = 1,
+  onBeat,
+}: UseHandBeatOptions = {}): UseHandBeatReturn {
+  const landmarkerRef = useRef<HandLandmarker | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const vfcIdRef = useRef<number | null>(null);
-  const rafIdRef = useRef<number | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | null>(null);
 
-  const anchorMsRef = useRef<number | null>(null);
-  const eventsSecRef = useRef<number[]>([]);
-
-  // fingertip state
+  // Motion state
   const lastYRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
-  const cumUpRef = useRef(0);
-  const cumDownRef = useRef(0);
-  const armedRef = useRef(true);
-  const lastFireMsRef = useRef<number | null>(null);
-  const pendingFirstMsRef = useRef<number | null>(null); // EARLY timestamp
+  const lastVyRef = useRef<number>(0); // units/sec
+  const upAccumRef = useRef<number>(0);
+  const downAccumRef = useRef<number>(0);
+  const armedRef = useRef<boolean>(true);
+  const primedRef = useRef<boolean>(false);
+  const lastBeatAtRef = useRef<number>(-1e9);
 
-  const cancelFrameCallbacks = () => {
-    try {
-      const v = videoRef.current as any;
-      if (v && typeof v.cancelVideoFrameCallback === "function" && vfcIdRef.current != null) {
-        v.cancelVideoFrameCallback(vfcIdRef.current);
-      }
-    } catch {}
-    if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
-    vfcIdRef.current = null; // ✅ correct: mutate .current, don’t reassign the ref
-    rafIdRef.current = null; // ✅
+  // Timing & events
+  const anchorMsRef = useRef<number>(performance.now());
+  const eventsMsRef = useRef<number[]>([]);
+
+  // UI state
+  const [isReady, setIsReady] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const ensureVideo = () => {
+    if (!videoRef.current) {
+      const v = document.createElement("video");
+      v.playsInline = true;
+      v.muted = true;
+      v.autoplay = false;
+      videoRef.current = v;
+    }
+    return videoRef.current!;
   };
 
-  // Reset internal timing/counters WITHOUT touching the camera
+  const preload = useCallback(async () => {
+    if (landmarkerRef.current) return;
+
+    try {
+      // Use the new WasmFileset signature (matches the types you’re seeing).
+      const lm = await HandLandmarker.createFromOptions(
+        { wasmLoaderPath: WASM_LOADER, wasmBinaryPath: WASM_BINARY },
+        {
+          baseOptions: { modelAssetPath: HAND_MODEL, delegate: "GPU" },
+          runningMode: "VIDEO",
+          numHands,
+        }
+      );
+      landmarkerRef.current = lm;
+      setIsReady(true);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      throw e;
+    }
+  }, [numHands]);
+
   const reset = useCallback((anchorMs?: number) => {
-    anchorMsRef.current = typeof anchorMs === "number" ? anchorMs : performance.now();
-    eventsSecRef.current = [];
+    anchorMsRef.current = anchorMs ?? performance.now();
     lastYRef.current = null;
     lastTsRef.current = null;
-    cumUpRef.current = 0;
-    cumDownRef.current = 0;
+    lastVyRef.current = 0;
+    upAccumRef.current = 0;
+    downAccumRef.current = 0;
     armedRef.current = true;
-    lastFireMsRef.current = null;
-    pendingFirstMsRef.current = null;
+    primedRef.current = false;
+    eventsMsRef.current = [];
   }, []);
-
-  const stopCamera = useCallback(() => {
-    cancelFrameCallbacks();
-    if (videoRef.current) {
-      try { (videoRef.current as HTMLVideoElement).srcObject = null; } catch {}
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setHasCamera(false);
-    setReady(false);
-  }, []);
-
-  // Pause detection loop but keep the stream alive
-  const pause = useCallback(() => {
-    cancelFrameCallbacks();
-    // keep hasCamera/ready as-is so UI doesn’t flicker
-  }, []);
-
-  const muffleTfLiteInfoOnce = () => {
-    const original = console.error;
-    let restored = false;
-    const isNoisy = (s: unknown) =>
-      typeof s === "string" &&
-      /^INFO:\s+Created TensorFlow Lite .* delegate|^INFO:\s+Metal delegate|^INFO:\s+WebNN delegate/i.test(s);
-    console.error = (...args: any[]) => {
-      if (isNoisy(args[0])) return;
-      return (original as any)(...args);
-    };
-    const restore = () => { if (!restored) { console.error = original; restored = true; } };
-    setTimeout(restore, 3500);
-    return restore;
-  };
-
-  const ensureLandmarker = useCallback(async () => {
-    if (lmRef.current) return;
-    let restoreConsole: (() => void) | null = null;
-    try {
-      restoreConsole = muffleTfLiteInfoOnce();
-      const fileset = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-      );
-      lmRef.current = await HandLandmarker.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
-        },
-        runningMode: "VIDEO",
-        numHands: 1,
-        minTrackingConfidence: 0.25,
-        minHandPresenceConfidence: 0.25,
-      });
-    } catch (e) {
-      setError((e as any)?.message || String(e));
-    } finally {
-      try { restoreConsole?.(); } catch {}
-    }
-  }, []);
-
-  const waitForVideoReady = async (video: HTMLVideoElement) => {
-    if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
-      await new Promise<void>((res) =>
-        video.addEventListener("loadedmetadata", () => res(), { once: true })
-      );
-    }
-    const t0 = performance.now();
-    while ((!video.videoWidth || !video.videoHeight) && performance.now() - t0 < 5000) {
-      await new Promise((r) => requestAnimationFrame(() => r(null)));
-    }
-    if (!video.videoWidth || !video.videoHeight) {
-      throw new Error("Camera stream has zero dimensions.");
-    }
-  };
-
-  const start = useCallback(
-    async (anchorMs?: number) => {
-      setError(null);
-      await ensureLandmarker();
-      if (!lmRef.current) return;
-
-      // ensure hidden <video> exists
-      if (!videoRef.current) {
-        const v = document.createElement("video");
-        v.playsInline = true;
-        v.muted = true;
-        v.autoplay = true;
-        v.width = 320;
-        v.height = 240;
-        v.style.position = "fixed";
-        v.style.left = "-9999px";
-        v.style.top = "-9999px";
-        v.setAttribute("data-usehandbeat", "camera");
-        document.body.appendChild(v);
-        videoRef.current = v;
-      }
-
-      // Idempotent: reuse existing stream if we have one; otherwise request it
-      if (!streamRef.current) {
-        try {
-          streamRef.current = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
-            audio: false,
-          });
-          const v = videoRef.current!;
-          v.srcObject = streamRef.current;
-          await v.play();
-          await waitForVideoReady(v);
-          setHasCamera(true);
-          setReady(true);
-          const [track] = streamRef.current.getVideoTracks();
-          track.onended = () => {
-            setError("Camera track ended.");
-            stopCamera();
-          };
-        } catch (e) {
-          setError((e as any)?.message || String(e));
-          setHasCamera(false);
-          return;
-        }
-      } else {
-        const v = videoRef.current!;
-        if (v.srcObject !== streamRef.current) v.srcObject = streamRef.current;
-        try { await v.play(); } catch {}
-        setHasCamera(true);
-        setReady(true);
-      }
-
-      // Optional anchor reset on (re)start
-      if (typeof anchorMs === "number") reset(anchorMs);
-
-      // (Re)start the detection loop fresh
-      const v = videoRef.current!;
-      const lm = lmRef.current!;
-      cancelFrameCallbacks();
-
-      let canceled = false;
-
-      const runOnce = () => {
-        if (canceled) return;
-        const w = v.videoWidth | 0;
-        const h = v.videoHeight | 0;
-        if (!w || !h) return;
-
-        try {
-          const ts = performance.now();
-          const res = lm.detectForVideo(v, ts);
-          const landmarks = res?.landmarks?.[0];
-
-          if (landmarks && landmarks.length >= 9) {
-            const tip = landmarks[8]!;
-            const y = tip.y;
-            const prevY = lastYRef.current;
-            const prevTs = lastTsRef.current;
-
-            if (prevY == null || prevTs == null) {
-              lastYRef.current = y;
-              lastTsRef.current = ts;
-            } else {
-              let dy = prevY - y; // >0 up, <0 down
-              if (Math.abs(dy) < noiseEps) dy = 0;
-
-              const dtSec = Math.min(0.1, Math.max(1 / 240, (ts - prevTs) / 1000));
-              const upVel = dy > 0 ? dy / dtSec : 0;
-
-              const lastFire = lastFireMsRef.current;
-              const cooling = lastFire != null && ts - lastFire < refractoryMs;
-
-              if (dy > 0) {
-                cumUpRef.current += dy;
-                cumDownRef.current = 0;
-
-                if (armedRef.current && !cooling) {
-                  // EARLY must be both distance and velocity
-                  if (pendingFirstMsRef.current == null && cumUpRef.current >= fireUpEps && upVel >= minUpVel) {
-                    pendingFirstMsRef.current = ts; // early timestamp
-                  }
-                  // CONFIRM on distance
-                  if (pendingFirstMsRef.current != null && cumUpRef.current >= confirmUpEps) {
-                    const tFirstMs = pendingFirstMsRef.current;
-                    pendingFirstMsRef.current = null;
-                    lastFireMsRef.current = ts;
-                    armedRef.current = false;
-
-                    const base = anchorMsRef.current ?? performance.now();
-                    const tSec = Math.max(0, (tFirstMs - base - latencyMs) / 1000);
-                    eventsSecRef.current.push(tSec);
-
-                    cumUpRef.current = 0;
-                    cumDownRef.current = 0;
-                  }
-                }
-              } else if (dy < 0) {
-                cumDownRef.current += -dy;
-                cumUpRef.current = 0;
-                pendingFirstMsRef.current = null;
-
-                if (!armedRef.current && !cooling && cumDownRef.current >= downRearmEps) {
-                  armedRef.current = true;
-                  cumDownRef.current = 0;
-                }
-              }
-
-              lastYRef.current = y;
-              lastTsRef.current = ts;
-            }
-          }
-        } catch {}
-      };
-
-      const hasVFC = typeof (v as any).requestVideoFrameCallback === "function";
-      if (hasVFC) {
-        const tickVFC = () => {
-          runOnce();
-          (v as any).requestVideoFrameCallback &&
-            (vfcIdRef.current = (v as any).requestVideoFrameCallback(tickVFC));
-        };
-        vfcIdRef.current = (v as any).requestVideoFrameCallback(tickVFC);
-      } else {
-        const tickRAF = () => {
-          runOnce();
-          rafIdRef.current = requestAnimationFrame(tickRAF);
-        };
-        rafIdRef.current = requestAnimationFrame(tickRAF);
-      }
-
-      return () => { canceled = true; };
-    },
-    [ensureLandmarker, latencyMs, fireUpEps, confirmUpEps, downRearmEps, refractoryMs, noiseEps, minUpVel, stopCamera, reset]
-  );
 
   const stop = useCallback(() => {
-    stopCamera();
-  }, [stopCamera]);
+    setIsRunning(false);
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
 
-  const snapshotEvents = useCallback(() => {
-    return eventsSecRef.current.slice();
+  const loop = useCallback(() => {
+    rafRef.current = requestAnimationFrame(loop);
+    const landmarker = landmarkerRef.current;
+    const video = videoRef.current;
+    if (!landmarker || !video || !video.videoWidth || !video.videoHeight) return;
+
+    try {
+      const tsNow = performance.now();
+      const res = landmarker.detectForVideo(video, tsNow) as HandLandmarkerResult;
+      const first = res?.landmarks?.[0];
+      if (!first?.length) return;
+
+      const y = first[0].y; // wrist landmark (index 0)
+      const lastY = lastYRef.current;
+      const lastTs = lastTsRef.current;
+
+      if (lastY == null || lastTs == null) {
+        lastYRef.current = y;
+        lastTsRef.current = tsNow;
+        lastVyRef.current = 0;
+        return;
+      }
+
+      const dt = Math.max(1e-6, Math.min(0.2, (tsNow - lastTs) / 1000)); // clamp [~120fps..5fps]
+      let dy = y - lastY;                   // +down, -up
+      let vy = dy / dt;                     // units/sec
+
+      // noise gate
+      if (Math.abs(dy) < noiseEps) dy = 0;
+
+      // accumulators
+      if (dy < 0) {                         // moving up
+        upAccumRef.current += -dy;
+        downAccumRef.current = 0;
+      } else if (dy > 0) {                  // moving down
+        downAccumRef.current += dy;
+      }
+
+      // detect reversal
+      const prevVy = lastVyRef.current;
+      const reversed = prevVy < 0 && vy >= 0;   // up -> non-up
+      const gated = tsNow - lastBeatAtRef.current >= refractoryMs;
+
+      if (armedRef.current) {
+        const fastEnough = -vy >= minUpVel;
+        if (!primedRef.current && upAccumRef.current >= fireUpEps && fastEnough) {
+          primedRef.current = true;
+        }
+        const confirmOK = upAccumRef.current >= confirmUpEps;
+
+        if (primedRef.current && confirmOK && reversed && gated) {
+          const tMs = tsNow - latencyMs;
+          lastBeatAtRef.current = tMs;
+          eventsMsRef.current.push(tMs);
+          onBeat?.(tMs);
+
+          armedRef.current = false;
+          primedRef.current = false;
+          upAccumRef.current = 0;
+          downAccumRef.current = 0;
+        }
+      } else {
+        if (downAccumRef.current >= downRearmEps) {
+          armedRef.current = true;
+          primedRef.current = false;
+          upAccumRef.current = 0;
+          downAccumRef.current = 0;
+        }
+      }
+
+      lastYRef.current = y;
+      lastTsRef.current = tsNow;
+      lastVyRef.current = vy;
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }, [latencyMs, noiseEps, minUpVel, fireUpEps, confirmUpEps, downRearmEps, refractoryMs, onBeat]);
+
+  const start = useCallback(async (anchorMs?: number) => {
+    await preload();
+    if (typeof anchorMs === "number") anchorMsRef.current = anchorMs;
+
+    const video = ensureVideo();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      streamRef.current = stream;
+      video.srcObject = stream;
+      await video.play();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      throw e;
+    }
+
+    setIsRunning(true);
+    rafRef.current = requestAnimationFrame(loop);
+  }, [preload, loop]);
+
+  const snapshotEvents = useCallback((): number[] => {
+    const anchor = anchorMsRef.current;
+    return eventsMsRef.current
+      .map((t) => (t - anchor) / 1000)
+      .filter((s) => Number.isFinite(s));
   }, []);
 
   useEffect(() => {
     return () => {
-      stopCamera();
-      if (videoRef.current) {
-        try { videoRef.current.remove(); } catch {}
+      try {
+        stop();
+      } finally {
+        landmarkerRef.current?.close();
+        landmarkerRef.current = null;
       }
-      if (lmRef.current) {
-        try { lmRef.current.close(); } catch {}
-      }
-      lmRef.current = null;
     };
-  }, [stopCamera]);
+  }, [stop]);
 
   return {
-    ready,
-    error,
-    hasCamera,
-    start,       // boots model+camera if needed; restarts loop
-    pause,       // stop loop, keep camera alive
-    stop,        // full teardown (end of session/unmount)
-    reset,       // per-take re-anchor & clear events
+    preload,
+    start,
+    stop,
+    reset,
     snapshotEvents,
+    isReady,
+    isRunning,
+    error,
   };
 }

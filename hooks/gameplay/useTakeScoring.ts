@@ -2,20 +2,29 @@
 "use client";
 import { useCallback, useState } from "react";
 import { computeTakeScore, type PitchSample, type TakeScore } from "@/utils/scoring/score";
+import type { Phrase } from "@/utils/stage";
+import type { ScoringAlignmentOptions } from "@/hooks/gameplay/useScoringAlignment";
 
 type AlignFn = (
   samplesRaw: PitchSample[] | null | undefined,
   beatsRaw: number[] | null | undefined,
   leadInSec: number | null | undefined,
-  opts?: { clipBelowSec?: number; pitchLagSec?: number; gestureLagSec?: number }
+  opts?: ScoringAlignmentOptions
 ) => { samples: PitchSample[]; beats: number[] };
 
 export default function useTakeScoring() {
   const [lastScore, setLastScore] = useState<TakeScore | null>(null);
   const [sessionScores, setSessionScores] = useState<TakeScore[]>([]);
 
+  const phraseWindowSec = (phrase: Phrase): number => {
+    if (!phrase?.notes?.length) return phrase?.durationSec ?? 0;
+    let end = 0;
+    for (const n of phrase.notes) end = Math.max(end, n.startSec + n.durSec);
+    return end;
+  };
+
   const scoreTake = useCallback((args: {
-    phrase: any;
+    phrase: Phrase;
     bpm: number;
     den: number;
     leadInSec: number;
@@ -31,7 +40,18 @@ export default function useTakeScoring() {
       args.snapshotSamples(),
       args.snapshotBeats(),
       args.leadInSec,
-      { clipBelowSec: 0.5, pitchLagSec: args.pitchLagSec, gestureLagSec: args.gestureLagSec }
+      {
+        // ⬇️ keep a little grace before t=0 and clamp to the actual phrase window
+        keepPreRollSec: 0.5,
+        phraseLengthSec: phraseWindowSec(args.phrase),
+        tailGuardSec: 0.25,
+        // per-pipeline lags
+        pitchLagSec: args.pitchLagSec,
+        gestureLagSec: args.gestureLagSec,
+        // helpful during dev
+        devAssert: process.env.NODE_ENV !== "production",
+        consolePrefix: "score-align",
+      }
     );
 
     const score = computeTakeScore({
@@ -43,7 +63,6 @@ export default function useTakeScoring() {
       melodyOnsetsSec: args.melodyOnsetsSec,
       rhythmLineOnsetsSec: args.rhythmOnsetsSec ?? undefined,
       options: {
-        // 👇 no extra conf gate; cents/latency knobs unchanged
         confMin: 0,
         centsOk: 50,
         onsetGraceMs: 120,

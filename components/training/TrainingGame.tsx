@@ -113,7 +113,8 @@ export default function TrainingGame({
   const lastEndSec = phrase?.notes?.length
     ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
     : phraseSec;
-  const recordWindowSec = Math.ceil(lastEndSec / Math.max(1e-9, ts.num * secPerBeat)) * (ts.num * secPerBeat);
+  const recordWindowSec =
+    Math.ceil(lastEndSec / Math.max(1e-9, ts.num * secPerBeat)) * (ts.num * secPerBeat);
 
   // ---- Audio player + pretest ----
   const {
@@ -149,6 +150,7 @@ export default function TrainingGame({
   const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
   const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
+
   // ---- Recorder (persistent pipeline; gated capture) ----
   const {
     isRecording,
@@ -190,7 +192,7 @@ export default function TrainingGame({
     pretest.start();
   };
 
-  // ---- Recorder auto-sync: no start/stop during lead-in anymore (just during record)
+  // ---- Recorder auto-sync
   const shouldRecord = (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
   useRecorderAutoSync({
     enabled: step === "play",
@@ -200,7 +202,7 @@ export default function TrainingGame({
     stopRec,
   });
 
-  // ---- Lead-in metronome (scheduling only; AC already warm)
+  // ---- Lead-in metronome (scheduling only)
   useLeadInMetronome({
     enabled: exerciseUnlocked,
     metronome,
@@ -211,7 +213,7 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // ---- Hand-gesture detection (keep running for the whole session)
+  // ---- Hand-gesture detection (simplified)
   const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
   useEffect(() => {
     try {
@@ -238,10 +240,7 @@ export default function TrainingGame({
   const samplerAnchor: number | null = !pretestActive ? loop.anchorMs ?? null : null;
   const sampler = usePitchSampler({ active: samplerActive, anchorMs: samplerAnchor, hz: liveHz, confidence, fps: 60 });
 
-  // 🔥 ONE-TIME PREFLIGHTS (do all heavy work *before* the exercise)
-  const preflightDoneRef = useRef(false);
-
-  // 1) Audio engine/player & recorder pipeline: right away on mount
+  // 🔥 Warm audio pieces once (simple)
   useEffect(() => {
     (async () => {
       try { await warmPlayer(); } catch {}
@@ -249,32 +248,30 @@ export default function TrainingGame({
     })();
   }, [warmPlayer, warmRecorder]);
 
-  // 2) Camera/model (hand-beat) — start/stop based on rhythm settings
-  //    We only need vision when rhythm line is enabled AND detection is enabled AND the exercise is unlocked.
+  // 🟦 Preload hand model when vision becomes relevant
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        if (needVision) {
-          await hand.start(performance.now());
-        } else {
-          hand.stop();
-        }
-      } catch {}
-    })();
-    return () => { if (!cancelled) {/* noop; useHandBeat cleans up on stop/unmount */} };
-  }, [needVision, hand]);
+    if (!needVision || pretestActive) return;
+    hand.preload().catch(() => {});
+  }, [needVision, pretestActive, hand]);
 
-  // Phase-driven *reset only* (no start/stop/pause while loop is playing)
+  // 🟦 Start hand detection exactly at lead-in; reset anchor; stop when not needed
   useEffect(() => {
-    if (pretestActive) return;
-    if (needVision && (loop.loopPhase === "lead-in" || loop.loopPhase === "record")) {
-      hand.reset(loop.anchorMs ?? performance.now());
-      sampler.reset();
+    if (!needVision || pretestActive) { hand.stop(); return; }
+
+    if (loop.loopPhase === "lead-in" && loop.anchorMs != null) {
+      (async () => {
+        try {
+          if (!hand.isRunning) await hand.start(loop.anchorMs!);
+          hand.reset(loop.anchorMs!);
+          sampler.reset();
+        } catch {}
+      })();
     }
-    // keep detection running during rest/idle for a flat CPU profile
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pretestActive, loop.loopPhase, loop.anchorMs, needVision]);
+
+    return () => {
+      if (!needVision || pretestActive) hand.stop();
+    };
+  }, [needVision, pretestActive, loop.loopPhase, loop.anchorMs, hand, sampler]);
 
   // ---- Review + scoring
   const haveRhythm: boolean =
@@ -302,7 +299,8 @@ export default function TrainingGame({
 
     if (!pretestActive && phrase && prev === "record" && curr === "rest") {
       const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
-      const gestureLagSec = Math.max(0, (gestureLatencyMsEff ?? 0) / 1000);
+      // Events from useHandBeat are already latency-compensated; do NOT subtract again.
+      const gestureLagSec = 0;
 
       void scoreTake({
         phrase,
@@ -327,7 +325,6 @@ export default function TrainingGame({
     bpm,
     ts.den,
     leadInSec,
-    gestureLatencyMsEff,
     loopingMode,
     alignForScoring,
     sampler,

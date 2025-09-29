@@ -37,7 +37,10 @@ export default function TakeReview({
   const timeOnPitch = score?.pitch?.timeOnPitchRatio ?? 0;
   const centsMae = score?.pitch?.centsMae ?? 0;
 
-  const rhythmPct = score?.rhythm?.combinedPercent ?? score?.rhythm?.melodyPercent ?? 0;
+  // ⬇️ Show rhythm tracks separately (no combined score)
+  const melodyRhythmPct = score?.rhythm?.melodyPercent ?? 0;
+  const lineEvaluated = !!score?.rhythm?.lineEvaluated;
+  const lineRhythmPct = lineEvaluated ? score?.rhythm?.linePercent ?? 0 : null;
 
   const intervals = score?.intervals ?? null;
 
@@ -62,7 +65,7 @@ export default function TakeReview({
           {haveRhythm && (
             <button
               onClick={onPlayRhythm}
-              className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f7f7f7] hover:bg:white"
+              className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f7f7f7] hover:bg-white"
               title="Play rhythm line"
             >
               ▶︎ Rhythm
@@ -71,7 +74,7 @@ export default function TakeReview({
           {haveRhythm && (
             <button
               onClick={onPlayBoth}
-              className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f7f7f7] hover:bg:white"
+              className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f7f7f7] hover:bg-white"
               title="Play both"
             >
               ▶︎ Both
@@ -88,17 +91,24 @@ export default function TakeReview({
       </div>
 
       {/* Breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
         <ScoreChip
           label="Pitch"
           primary={`${pitchPct.toFixed(1)}%`}
           secondary={`On pitch: ${(timeOnPitch * 100).toFixed(0)}% • Cents MAE: ${centsMae}`}
         />
         <ScoreChip
-          label="Rhythm"
-          primary={`${(rhythmPct || 0).toFixed(1)}%`}
-          secondary={`${haveRhythm ? "Includes blue rhythm line" : "Melody only"}`}
+          label="Melody Rhythm"
+          primary={`${melodyRhythmPct.toFixed(1)}%`}
+          secondary="Voiced coverage in note windows"
         />
+        {haveRhythm && (
+          <ScoreChip
+            label="Rhythm Line"
+            primary={lineRhythmPct != null ? `${lineRhythmPct.toFixed(1)}%` : "—"}
+            secondary={lineEvaluated ? "Hand taps vs. blue line" : "Not evaluated"}
+          />
+        )}
         <ScoreChip
           label="Intervals"
           primary={
