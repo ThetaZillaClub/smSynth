@@ -5,30 +5,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { type FileError, type FileRejection, useDropzone } from 'react-dropzone'
 
 interface FileWithPreview extends File {
-  preview?: string
-  errors: readonly FileError[]
+  preview: string;                    // ← required now
+  errors: readonly FileError[];
 }
 
 type UseSupabaseUploadOptions = {
-  /** Name of bucket to upload files to in your Supabase project */
   bucketName: string
-  /** Optional folder path inside the bucket (e.g. "avatars") */
   path?: string
-  /** Allowed MIME types (supports wildcards like "image/*") */
   allowedMimeTypes?: string[]
-  /** Max size per file (bytes) */
   maxFileSize?: number
-  /** Max number of files per upload */
   maxFiles?: number
-  /** Cache-Control seconds (default 3600) */
   cacheControl?: number
-  /** Overwrite if exists (default false) */
   upsert?: boolean
 }
 
 type UseSupabaseUploadReturn = ReturnType<typeof useSupabaseUpload>
 
-/** Internal result from each upload attempt */
 type UploadResult = { name: string; message?: string }
 
 const useSupabaseUpload = (options: UseSupabaseUploadOptions) => {
@@ -46,7 +38,6 @@ const useSupabaseUpload = (options: UseSupabaseUploadOptions) => {
 
   const [files, setFiles] = useState<FileWithPreview[]>([])
   const [loading, setLoading] = useState<boolean>(false)
-  // For errors we store only failed items, with a definite `message: string`
   const [errors, setErrors] = useState<{ name: string; message: string }[]>([])
   const [successes, setSuccesses] = useState<string[]>([])
 
@@ -61,13 +52,13 @@ const useSupabaseUpload = (options: UseSupabaseUploadOptions) => {
       const validFiles = acceptedFiles
         .filter((file) => !files.find((x) => x.name === file.name))
         .map((file) => {
-          ;(file as FileWithPreview).preview = URL.createObjectURL(file)
-          ;(file as FileWithPreview).errors = []
+          (file as FileWithPreview).preview = URL.createObjectURL(file)
+          ;(file as FileWithPreview).errors = [] as readonly FileError[]
           return file as FileWithPreview
         })
 
       const invalidFiles = fileRejections.map(({ file, errors }) => {
-        ;(file as FileWithPreview).preview = URL.createObjectURL(file)
+        (file as FileWithPreview).preview = URL.createObjectURL(file)
         ;(file as FileWithPreview).errors = errors
         return file as FileWithPreview
       })
@@ -92,7 +83,6 @@ const useSupabaseUpload = (options: UseSupabaseUploadOptions) => {
   const onUpload = useCallback(async () => {
     setLoading(true)
 
-    // Partial retry: reattempt files that failed previously, and any not yet uploaded
     const filesWithErrors = new Set(errors.map((x) => x.name))
     const uploaded = new Set(successes)
     const filesToUpload =
@@ -112,13 +102,11 @@ const useSupabaseUpload = (options: UseSupabaseUploadOptions) => {
       })
     )
 
-    // Narrow to errors (message is a string)
     const responseErrors = responses.filter(
       (x): x is { name: string; message: string } => typeof x.message === 'string'
     )
     setErrors(responseErrors)
 
-    // Narrow to successes (no message)
     const responseSuccesses = responses.filter((x) => !x.message)
     const newSuccesses = Array.from(
       new Set([...successes, ...responseSuccesses.map((x) => x.name)])
@@ -131,7 +119,6 @@ const useSupabaseUpload = (options: UseSupabaseUploadOptions) => {
   useEffect(() => {
     if (files.length === 0) setErrors([])
 
-    // If file count is within maxFiles, drop "too-many-files" errors from items
     if (files.length <= maxFiles) {
       let changed = false
       const newFiles = files.map((file) => {

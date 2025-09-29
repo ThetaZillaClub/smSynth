@@ -1,7 +1,7 @@
 // app/model/[id]/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import PrivateHeader from '@/components/header/PrivateHeader';
@@ -46,9 +46,10 @@ export default function ModelDetailPage() {
         if (!res.ok) throw new Error(body?.error || `Failed to load (status ${res.status})`);
         if (cancelled) return;
         setM((body ?? null) as ModelRow | null);
-      } catch (e: any) {
+      } catch (e) {
         if (cancelled) return;
-        setErr(e?.message ?? 'Failed to load model.');
+        const message = e instanceof Error ? e.message : 'Failed to load model.';
+        setErr(message);
         setM(null);
       } finally {
         if (!cancelled) setLoading(false);

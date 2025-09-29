@@ -1,25 +1,25 @@
 // lib/supabase/middleware.ts
-import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest, type NextFetchEvent } from "next/server";
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse, type NextRequest } from 'next/server';
 
 const SKIP_PREFIXES = [
-  "/api",
-  "/_next",
-  "/favicon.ico",
-  "/robots.txt",
-  "/sitemap.xml",
-  "/opengraph-image",
-  "/icon",
+  '/api',
+  '/_next',
+  '/favicon.ico',
+  '/robots.txt',
+  '/sitemap.xml',
+  '/opengraph-image',
+  '/icon',
 ];
 
 // Best effort: reproduce Supabase auth cookie attributes when re-setting on a new response.
 function applySupabaseCookieDefaults(
   _name: string,
-  request: NextRequest,
-): { path: string; httpOnly: boolean; sameSite: "lax"; secure: boolean } {
-  const xfProto = request.headers.get("x-forwarded-proto");
-  const isHttps = request.nextUrl.protocol === "https:" || xfProto === "https";
-  return { path: "/", httpOnly: true, sameSite: "lax", secure: !!isHttps };
+  request: NextRequest
+): { path: string; httpOnly: boolean; sameSite: 'lax'; secure: boolean } {
+  const xfProto = request.headers.get('x-forwarded-proto');
+  const isHttps = request.nextUrl.protocol === 'https:' || xfProto === 'https';
+  return { path: '/', httpOnly: true, sameSite: 'lax', secure: !!isHttps };
 }
 
 // Copy cookies from one NextResponse to another (used for redirects)
@@ -30,16 +30,16 @@ function copyCookies(from: NextResponse, to: NextResponse, req: NextRequest) {
   }
 }
 
-export async function updateSession(request: NextRequest, _ev?: NextFetchEvent) {
+export async function updateSession(request: NextRequest) {
   // Narrow WHEN the middleware does any auth work:
   // - Only handle top-level navigations (HTML documents)
   // - Skip prefetch/HEAD/background fetches
-  const dest = request.headers.get("sec-fetch-dest") || "";
-  const isDoc = dest === "document";
-  const isHead = request.method === "HEAD";
+  const dest = request.headers.get('sec-fetch-dest') || '';
+  const isDoc = dest === 'document';
+  const isHead = request.method === 'HEAD';
   const isPrefetch =
-    request.headers.get("purpose") === "prefetch" ||
-    request.headers.get("next-router-prefetch") === "1";
+    request.headers.get('purpose') === 'prefetch' ||
+    request.headers.get('next-router-prefetch') === '1';
 
   const { pathname, search } = request.nextUrl;
 
@@ -78,20 +78,19 @@ export async function updateSession(request: NextRequest, _ev?: NextFetchEvent) 
   );
 
   // IMPORTANT: no code between client creation and getClaims()
-  // (Using getClaims() avoids the /auth/v1/user fetch in most cases.)
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
   // Public routes
-  const isAuthRoute = pathname.startsWith("/auth") || pathname.startsWith("/login");
-  const isPublic = pathname === "/" || isAuthRoute;
+  const isAuthRoute = pathname.startsWith('/auth') || pathname.startsWith('/login');
+  const isPublic = pathname === '/' || isAuthRoute;
 
   // Enforce auth
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
-    url.pathname = "/auth/login";
-    const next = pathname + (search || "");
-    if (next && next !== "/") url.searchParams.set("next", next);
+    url.pathname = '/auth/login';
+    const next = pathname + (search || '');
+    if (next && next !== '/') url.searchParams.set('next', next);
 
     // Preserve any Set-Cookie from Supabase
     const res = NextResponse.redirect(url);
@@ -102,15 +101,6 @@ export async function updateSession(request: NextRequest, _ev?: NextFetchEvent) 
   // Return the SAME response that carried any cookie updates
   return supabaseResponse;
 }
- // IMPORTANT: You *must* return the supabaseResponse object as it is.
-  // If you're creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
+
+// NOTE: When creating a new response, pass the request and copy cookies
+// as documented in the comment block from your original file.

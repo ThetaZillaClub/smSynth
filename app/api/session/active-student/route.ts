@@ -1,50 +1,74 @@
-// app/api/session/active-student/route.ts
+// app/api/students/current/range/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-/**
- * Sets an httpOnly cookie with the active student id.
- * Toggle verification with env:
- *   PTP_VERIFY_ACTIVE_STUDENT=0  → SKIP DB verify (RLS protects reads)
- *   (unset or any other value)   → VERIFY model exists before setting cookie
- */
-export async function POST(req: Request) {
+type RangePatchBody = {
+  low?: unknown;
+  high?: unknown;
+};
+
+export async function GET() {
   const supabase = await createClient();
-  const body = await req.json().catch(() => ({} as any));
-  const modelId = typeof body?.id === "string" ? body.id : "";
 
-  if (!modelId) {
-    return NextResponse.json({ error: "missing id" }, { status: 400 });
-  }
+  // Auth via server-side user
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
-  // Auth via JWT in cookies (no network round-trip)
-  const { data: claims } = await supabase.auth.getClaims();
-  const sub = claims?.claims?.sub as string | undefined;
-  if (!sub) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  const { data: row, error } = await supabase
+    .from("models")
+    .select("range_low, range_high")
+    .eq("uid", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  const requireVerify = process.env.PTP_VERIFY_ACTIVE_STUDENT !== "0";
-  if (requireVerify) {
-    const { data, error } = await supabase
-      .from("models")
-      .select("id,uid")
-      .eq("id", modelId)
-      .maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    if (error || !data) {
-      return NextResponse.json({ error: error?.message ?? "not found" }, { status: 404 });
-    }
-    // Optional stricter ownership gate:
-    // if (data.uid !== sub) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  const res = NextResponse.json({ ok: true });
-  const isHttps = process.env.NODE_ENV !== "development";
-  res.cookies.set("ptp_active_student", modelId, {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: isHttps,
-    maxAge: 60 * 60 * 2, // 2h
+  return NextResponse.json(row ?? null, {
+    headers: {
+      "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+      Vary: "Cookie",
+    },
   });
-  return res;
+}
+
+export async function PATCH(req: Request) {
+  const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+
+  const raw = (await req.json().catch(() => null)) as unknown;
+  const body: RangePatchBody | null =
+    raw && typeof raw === "object" ? (raw as RangePatchBody) : null;
+
+  const low = typeof body?.low === "string" ? body.low : undefined;
+  const high = typeof body?.high === "string" ? body.high : undefined;
+
+  const { data: latest, error: findErr } = await supabase
+    .from("models")
+    .select("id")
+    .eq("uid", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (findErr) return NextResponse.json({ error: findErr.message }, { status: 500 });
+  if (!latest?.id) return NextResponse.json({ error: "no model row" }, { status: 400 });
+
+  const payload: { range_low?: string; range_high?: string } = {};
+  if (low) payload.range_low = low;
+  if (high) payload.range_high = high;
+
+  if (!payload.range_low && !payload.range_high) {
+    return NextResponse.json({ error: "no valid fields" }, { status: 400 });
+  }
+
+  const { error: updateErr } = await supabase
+    .from("models")
+    .update(payload)
+    .eq("id", latest.id);
+
+  if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }

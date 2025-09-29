@@ -1,4 +1,4 @@
-// components/hero/Hero.tsx
+// components/landing/Hero.tsx
 'use client';
 
 import { useLayoutEffect, useRef } from 'react';
@@ -13,7 +13,10 @@ export default function Hero() {
 
   useLayoutEffect(() => {
     // Respect reduced motion
-    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
       return;
     }
 
@@ -44,7 +47,8 @@ export default function Hero() {
       </h1>
 
       <p ref={copyRef} className="text-xl md:text-2xl mb-8 max-w-2xl">
-        Train custom AI Powered vocal models, transform raw audio into stunning vocals with prompts. Join the world's largest singing model hub today.
+        Train custom AI Powered vocal models, transform raw audio into stunning vocals with prompts.
+        Join the world&rsquo;s largest singing model hub today.
       </p>
 
       <div ref={ctaRef}>

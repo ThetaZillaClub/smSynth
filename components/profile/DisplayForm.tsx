@@ -1,62 +1,66 @@
 // components/profile/DisplayForm.tsx
-"use client"
+'use client';
 
-import { createClient } from "@/lib/supabase/client"
-import { Input } from "@/components/auth/input"
-import { Label } from "@/components/auth/label"
-import { useEffect, useMemo, useState } from "react"
+import { createClient } from '@/lib/supabase/client';
+import { Input } from '@/components/auth/input';
+import { Label } from '@/components/auth/label';
+import { useEffect, useMemo, useState } from 'react';
 
 type Props = {
-  initialDisplayName: string   // <-- required now
-  onSuccess: (newName: string) => void
-}
+  initialDisplayName: string;
+  onSuccess: (newName: string) => void;
+};
 
 export default function DisplayForm({ initialDisplayName, onSuccess }: Props) {
-  const supabase = useMemo(() => createClient(), [])
-  const [displayName, setDisplayName] = useState<string>(initialDisplayName ?? "")
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
+  const supabase = useMemo(() => createClient(), []);
+  const [displayName, setDisplayName] = useState<string>(initialDisplayName ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // keep input in sync if parent passes a fresh name after save
   useEffect(() => {
-    setDisplayName(initialDisplayName ?? "")
-  }, [initialDisplayName])
+    setDisplayName(initialDisplayName ?? '');
+  }, [initialDisplayName]);
 
   const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const next = displayName.trim()
-    if (!next) return setError("Display name can’t be empty.")
-    if (next === (initialDisplayName ?? "").trim()) return setError("That’s already your display name.")
+    e.preventDefault();
+    const next = displayName.trim();
+    if (!next) return setError('Display name can’t be empty.');
+    if (next === (initialDisplayName ?? '').trim())
+      return setError('That’s already your display name.');
 
-    setIsLoading(true)
-    setError(null)
-    setSuccess(false)
+    setIsLoading(true);
+    setError(null);
+    setSuccess(false);
 
     try {
-      const { data, error } = await supabase.auth.updateUser({ data: { display_name: next } })
-      if (error) throw error
-      const saved = ((data?.user?.user_metadata as any)?.display_name as string | undefined) ?? next
-      setSuccess(true)
-      onSuccess(saved)
+      const { data, error } = await supabase.auth.updateUser({ data: { display_name: next } });
+      if (error) throw error;
+
+      const meta = (data?.user?.user_metadata ?? {}) as Record<string, unknown>;
+      const saved = typeof meta.display_name === 'string' ? meta.display_name : next;
+
+      setSuccess(true);
+      onSuccess(saved);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred.")
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const disabled =
-    isLoading ||
-    !displayName.trim() ||
-    displayName.trim() === (initialDisplayName ?? "").trim()
+    isLoading || !displayName.trim() || displayName.trim() === (initialDisplayName ?? '').trim();
 
   return (
     <form onSubmit={handleUpdate} className="flex flex-col gap-6">
       <h1 className="text-3xl font-bold mb-6 text-[#0f0f0f]">Update Display Name</h1>
 
       <div className="grid gap-2">
-        <Label htmlFor="displayName" className="text-[#0f0f0f] font-medium">New Display Name</Label>
+        <Label htmlFor="displayName" className="text-[#0f0f0f] font-medium">
+          New Display Name
+        </Label>
         <Input
           id="displayName"
           type="text"
@@ -76,8 +80,8 @@ export default function DisplayForm({ initialDisplayName, onSuccess }: Props) {
         disabled={disabled}
         className="w-full h-10 rounded-md bg-[#d7d7d7] text-[#0f0f0f] font-medium transition duration-200 hover:bg-[#d2d2d2] active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none"
       >
-        {isLoading ? "Updating..." : "Save Changes"}
+        {isLoading ? 'Updating...' : 'Save Changes'}
       </button>
     </form>
-  )
+  );
 }

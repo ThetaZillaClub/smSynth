@@ -6,17 +6,16 @@
  *
  * This function intentionally does not await network calls.
  */
-export function primeActiveStudent(modelId: string) {
-  if (!modelId) return;
+export function primeActiveStudent(studentId: string) {
+  if (!studentId) return;
 
   // 1) Set cookie on the server (non-blocking)
   try {
-    const payload = JSON.stringify({ id: modelId });
+    const payload = JSON.stringify({ studentId });
 
     // Prefer sendBeacon when available (fires during nav reliably)
     if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
       const blob = new Blob([payload], { type: "application/json" });
-      // Note: some runtimes require absolute path to same-origin endpoint; relative is fine in Next.
       navigator.sendBeacon("/api/session/active-student", blob);
     } else {
       // Fallback: keepalive fetch (doesn't block unload)
@@ -26,7 +25,6 @@ export function primeActiveStudent(modelId: string) {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: payload,
-        // keepalive lets the request continue during navigation
         keepalive: true,
       }).catch(() => {});
     }
@@ -34,7 +32,7 @@ export function primeActiveStudent(modelId: string) {
 
   // 2) Warm relevant reads (non-blocking)
   try {
-    fetch(`/api/students/${encodeURIComponent(modelId)}`, {
+    fetch(`/api/students/${encodeURIComponent(studentId)}`, {
       credentials: "include",
       keepalive: true,
     }).catch(() => {});

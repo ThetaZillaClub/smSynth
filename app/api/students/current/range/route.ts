@@ -2,16 +2,22 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+type RangePatchBody = {
+  low?: unknown;
+  high?: unknown;
+};
+
 export async function GET() {
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const sub = data?.claims?.sub as string | undefined;
-  if (!sub) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+
+  // Auth via server-side user
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
   const { data: row, error } = await supabase
     .from("models")
     .select("range_low, range_high")
-    .eq("uid", sub)
+    .eq("uid", user.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -28,18 +34,21 @@ export async function GET() {
 
 export async function PATCH(req: Request) {
   const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const sub = data?.claims?.sub as string | undefined;
-  if (!sub) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
-  const body = await req.json().catch(() => ({} as any));
-  const low = typeof body.low === "string" ? body.low : undefined;
-  const high = typeof body.high === "string" ? body.high : undefined;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+
+  const raw = (await req.json().catch(() => null)) as unknown;
+  const body: RangePatchBody | null =
+    raw && typeof raw === "object" ? (raw as RangePatchBody) : null;
+
+  const low = typeof body?.low === "string" ? body.low : undefined;
+  const high = typeof body?.high === "string" ? body.high : undefined;
 
   const { data: latest, error: findErr } = await supabase
     .from("models")
     .select("id")
-    .eq("uid", sub)
+    .eq("uid", user.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -47,10 +56,11 @@ export async function PATCH(req: Request) {
   if (findErr) return NextResponse.json({ error: findErr.message }, { status: 500 });
   if (!latest?.id) return NextResponse.json({ error: "no model row" }, { status: 400 });
 
-  const payload: Record<string, string> = {};
+  const payload: { range_low?: string; range_high?: string } = {};
   if (low) payload.range_low = low;
   if (high) payload.range_high = high;
-  if (!Object.keys(payload).length) {
+
+  if (!payload.range_low && !payload.range_high) {
     return NextResponse.json({ error: "no valid fields" }, { status: 400 });
   }
 

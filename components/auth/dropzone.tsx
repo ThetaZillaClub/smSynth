@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { type UseSupabaseUploadReturn } from '@/hooks/setup/use-supabase-upload'
 import { Button } from '@/components/auth/button'
 import { CheckCircle, File, Loader2, Upload, X } from 'lucide-react'
+import Image from 'next/image'
 import { createContext, type PropsWithChildren, useCallback, useContext } from 'react'
 
 export const formatBytes = (
@@ -61,6 +62,7 @@ const Dropzone = ({
     </DropzoneContext.Provider>
   )
 }
+
 const DropzoneContent = ({ className }: { className?: string }) => {
   const {
     files,
@@ -107,7 +109,14 @@ const DropzoneContent = ({ className }: { className?: string }) => {
           >
             {file.type.startsWith('image/') ? (
               <div className="h-10 w-10 rounded border overflow-hidden shrink-0 bg-muted flex items-center justify-center">
-                <img src={file.preview} alt={file.name} className="object-cover" />
+                <Image
+                  src={file.preview}           // ← guaranteed string by hook
+                  alt={file.name}
+                  width={40}
+                  height={40}
+                  unoptimized                 // allow blob: URLs
+                  className="h-full w-full object-cover"
+                />
               </div>
             ) : (
               <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
@@ -184,9 +193,7 @@ const DropzoneContent = ({ className }: { className?: string }) => {
 const DropzoneEmptyState = ({ className }: { className?: string }) => {
   const { maxFiles, maxFileSize, inputRef, isSuccess } = useDropzoneContext()
 
-  if (isSuccess) {
-    return null
-  }
+  if (isSuccess) return null
 
   return (
     <div className={cn('flex flex-col items-center gap-y-2', className)}>
@@ -218,11 +225,9 @@ const DropzoneEmptyState = ({ className }: { className?: string }) => {
 
 const useDropzoneContext = () => {
   const context = useContext(DropzoneContext)
-
   if (!context) {
     throw new Error('useDropzoneContext must be used within a Dropzone')
   }
-
   return context
 }
 
