@@ -1,26 +1,30 @@
-// components/training/layout/sheet/vexscore/makeTickables/melody.ts
+// components/training/layout/stage/sheet/vexscore/makeTickables/melody.ts
 import {
-  StaveNote, Accidental, Dot, Tuplet, Annotation,
+  StaveNote,
+  Accidental,
+  Dot,
+  Tuplet,
+  Annotation,
   AnnotationHorizontalJustify as AHJ,
   AnnotationVerticalJustify as AVJ,
 } from "vexflow";
+import type { Tickable } from "vexflow";
 import type { Phrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/generator";
-import type { NoteValue } from "@/utils/time/tempo";
 import { noteValueInQuarterUnits } from "@/utils/time/tempo";
 import { midiToVexKey, type Tok } from "../builders";
 
 // 🔧 Use alias path so TS reliably resolves this module
 import {
-  PPQ, ticksToSeconds, tokToTicks, ticksToToks, noteValueToTicks,
+  PPQ,
+  ticksToSeconds,
+  tokToTicks,
+  ticksToToks,
+  noteValueToTicks,
 } from "@/components/training/layout/stage/sheet/vexscore/makeTickables/time";
 
-import {
-  makeGhost, makeManualRest, makeInvisibleTripletRest,
-} from "./draw";
-import {
-  TripletSlot, tripletBaseForQ, buildTupletFromSlots,
-} from "./tuplets";
+import { makeGhost, makeManualRest, makeInvisibleTripletRest } from "./draw";
+import { TripletSlot, tripletBaseForQ, buildTupletFromSlots } from "./tuplets";
 
 export function buildMelodyTickables(params: {
   phrase: Phrase;
@@ -37,14 +41,23 @@ export function buildMelodyTickables(params: {
   keyAccidentals?: Record<"A" | "B" | "C" | "D" | "E" | "F" | "G", "" | "#" | "b"> | null;
 }) {
   const {
-    phrase, clef, useSharps, leadInSec, secPerWholeNote,
-    secPerBar, tsNum, den, lyrics, rhythm, keyAccidentals: keyMap,
+    phrase,
+    clef,
+    useSharps,
+    leadInSec,
+    secPerWholeNote,
+    secPerBar,
+    tsNum,
+    den,
+    lyrics,
+    rhythm,
+    keyAccidentals: keyMap,
   } = params;
 
   const secPerQuarter = secPerWholeNote / 4;
   const BAR_TICKS = Math.max(1, Math.round(tsNum * (4 / Math.max(1, den)) * PPQ));
 
-  const ticksOut: any[] = [];
+  const ticksOut: Tickable[] = [];
   const startsSec: number[] = [];
   const barIndex: number[] = [];
   const manualRests: Array<{ note: StaveNote; start: number; barIndex: number }> = [];
@@ -54,7 +67,7 @@ export function buildMelodyTickables(params: {
   const pushManualRest = (note: StaveNote, start: number, bidx: number) => {
     manualRests.push({ note, start, barIndex: bidx });
   };
-  const appendTickable = (n: any, start: number, bidx: number) => {
+  const appendTickable = (n: Tickable, start: number, bidx: number) => {
     ticksOut.push(n);
     startsSec.push(start);
     barIndex.push(bidx);
@@ -65,7 +78,7 @@ export function buildMelodyTickables(params: {
       const start = ticksToSeconds(tTicks, secPerQuarter);
       const bidx = Math.floor(tTicks / BAR_TICKS);
       const g = makeGhost(tok);
-      appendTickable(g as any, start, bidx);
+      appendTickable(g, start, bidx);
       tTicks += tokToTicks(tok);
       if (visible) {
         const r = makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, clef);
@@ -93,7 +106,8 @@ export function buildMelodyTickables(params: {
     const fullBars = Math.floor(leadBarsFloat + 1e-9);
     const remSec = leadInSec - fullBars * secPerBar;
     for (let i = 0; i < fullBars; i++) emitMeasureRestBar();
-    if (remSec > 1e-9) emitRestToks(ticksToToks(Math.round((remSec / secPerQuarter) * PPQ)), { visible: true });
+    if (remSec > 1e-9)
+      emitRestToks(ticksToToks(Math.round((remSec / secPerQuarter) * PPQ)), { visible: true });
   }
 
   // -------- Rhythm-driven path
@@ -133,7 +147,7 @@ export function buildMelodyTickables(params: {
           for (const tok of toks) {
             const s = ticksToSeconds(tTicks, secPerQuarter);
             const bi = Math.floor(tTicks / BAR_TICKS);
-            appendTickable(makeGhost(tok) as any, s, bi);
+            appendTickable(makeGhost(tok), s, bi);
             tTicks += tokToTicks(tok);
             pushManualRest(makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, clef), s, bi);
           }
@@ -157,13 +171,13 @@ export function buildMelodyTickables(params: {
 
       const sn = new StaveNote({
         keys: [key],
-        duration: headTok.dur as any,
+        duration: headTok.dur as string,
         clef,
         autoStem: false,
         stemDirection: 1,
       });
       if (accidental) sn.addModifier(new Accidental(accidental), 0);
-      if (headTok.dots) Dot.buildAndAttach([sn as any], { all: true });
+      if (headTok.dots) Dot.buildAndAttach([sn], { all: true });
 
       if (lyrics && lyrics[lyricIndex]) {
         const ann = new Annotation(lyrics[lyricIndex])
@@ -186,11 +200,10 @@ export function buildMelodyTickables(params: {
         const tailTicks = Math.max(0, durTicks - headTicks);
         if (tailTicks) {
           const tailToks = ticksToToks(tailTicks);
-          // 🔧 annotate params to satisfy noImplicitAny
           tailToks.forEach((tok: Tok) => {
             const s2 = ticksToSeconds(tTicks, secPerQuarter);
             const bi2 = Math.floor(tTicks / BAR_TICKS);
-            appendTickable(makeGhost(tok) as any, s2, bi2);
+            appendTickable(makeGhost(tok), s2, bi2);
             tTicks += tokToTicks(tok);
           });
         }
@@ -236,13 +249,13 @@ export function buildMelodyTickables(params: {
           const { key, accidental } = midiToVexKey(n.midi, useSharps, keyMap || undefined);
           const sn = new StaveNote({
             keys: [key],
-            duration: tok.dur as any,
+            duration: tok.dur as string,
             clef,
             autoStem: false,
             stemDirection: 1,
           });
           if (accidental) sn.addModifier(new Accidental(accidental), 0);
-          if (tok.dots) Dot.buildAndAttach([sn as any], { all: true });
+          if (tok.dots) Dot.buildAndAttach([sn], { all: true });
 
           if (lyrics && lyrics[lyricIndex]) {
             const ann = new Annotation(lyrics[lyricIndex])
@@ -254,7 +267,7 @@ export function buildMelodyTickables(params: {
 
           appendTickable(sn, start, bidx);
         } else {
-          appendTickable(makeGhost(tok) as any, start, bidx);
+          appendTickable(makeGhost(tok), start, bidx);
         }
 
         tTicks += tokToTicks(tok);
@@ -267,4 +280,3 @@ export function buildMelodyTickables(params: {
   padToNextBarTicks();
   return { ticks: ticksOut, starts: startsSec, barIndex, tuplets, manualRests };
 }
-

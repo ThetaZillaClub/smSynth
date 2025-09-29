@@ -1,8 +1,8 @@
-// components/training/layout/sheet/SheetOverlay.tsx
+// components/training/layout/stage/sheet/SheetOverlay.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { PR_COLORS, getMidiRange, type Phrase } from "@/utils/stage";
+import { PR_COLORS, type Phrase } from "@/utils/stage";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { SystemLayout } from "./vexscore/types";
 
@@ -61,10 +61,15 @@ function yFromStep(step: number, bandTop: number, bandBottom: number): number {
 
 /** Prefer exact melody-staff bounds from layout; otherwise fall back to a padded half. */
 function topStaffBand(sys: SystemLayout): Band {
-  const any: any = sys as any;
-  if (Number.isFinite(any.melY0) && Number.isFinite(any.melY1)) {
-    const y0 = Math.min(any.melY0 as number, any.melY1 as number);
-    const y1 = Math.max(any.melY0 as number, any.melY1 as number);
+  const hasExact =
+    typeof sys.melY0 === "number" &&
+    Number.isFinite(sys.melY0) &&
+    typeof sys.melY1 === "number" &&
+    Number.isFinite(sys.melY1);
+
+  if (hasExact) {
+    const y0 = Math.min(sys.melY0 as number, sys.melY1 as number);
+    const y1 = Math.max(sys.melY0 as number, sys.melY1 as number);
     return { yTop: y0, yBottom: y1 };
   }
 
@@ -139,12 +144,6 @@ export default function SheetOverlay({
     () => (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1),
     []
   );
-
-  const { minMidi, maxMidi } = useMemo(() => {
-    if (!phrase?.notes?.length) return { minMidi: 54, maxMidi: 66 };
-    const r = getMidiRange(phrase, 2);
-    return { minMidi: r.minMidi, maxMidi: r.maxMidi };
-  }, [phrase]);
 
   const totalSec = useMemo(() => {
     if (Array.isArray(systems) && systems.length) {
@@ -287,11 +286,7 @@ export default function SheetOverlay({
       startAtMs,
       totalSec,
       livePitchHz,
-      confidence,
-      confThreshold,
       a4Hz,
-      minMidi,
-      maxMidi,
       staffStartX,
       staffEndX,
       systems,

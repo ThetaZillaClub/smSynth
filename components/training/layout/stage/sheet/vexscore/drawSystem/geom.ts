@@ -1,16 +1,22 @@
+// components/training/layout/stage/sheet/vexscore/drawSystem/geom.ts
 import type { Stave } from "vexflow";
 
 export type Segment = { startSec: number; endSec: number; x0: number; x1: number };
 
+/** Some VexFlow builds expose these helpers on Stave; they’re not always in the types. */
+type StaveNoteBand = {
+  getNoteStartX?: () => number;
+  getNoteEndX?: () => number;
+};
+
 export function bandX(melStave: Stave) {
+  const s = melStave as unknown as Stave & StaveNoteBand;
+
   const noteStartX =
-    typeof (melStave as any).getNoteStartX === "function"
-      ? (melStave as any).getNoteStartX()
-      : melStave.getX() + 48;
+    typeof s.getNoteStartX === "function" ? s.getNoteStartX() : s.getX() + 48;
+
   const noteEndX =
-    typeof (melStave as any).getNoteEndX === "function"
-      ? (melStave as any).getNoteEndX()
-      : melStave.getX() + melStave.getWidth() - 12;
+    typeof s.getNoteEndX === "function" ? s.getNoteEndX() : s.getX() + s.getWidth() - 12;
 
   const bandW = Math.max(1, noteEndX - noteStartX);
   return { noteStartX, noteEndX, bandW };

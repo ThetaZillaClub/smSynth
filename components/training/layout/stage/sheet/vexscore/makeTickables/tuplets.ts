@@ -1,5 +1,6 @@
-// components/training/layout/sheet/vexscore/makeTickables/tuplets.ts
-import { Tuplet, StaveNote } from "vexflow";
+// components/training/layout/stage/sheet/vexscore/makeTickables/tuplets.ts
+import { Tuplet } from "vexflow";
+import type { StemmableNote } from "vexflow";
 
 /** Triplet-able base durations. (No whole or 32nd here.) */
 export type TripletDurBase = "h" | "q" | "8" | "16";
@@ -16,7 +17,7 @@ export function tripletBaseForQ(q: number): TripletDurBase | null {
 export type TripletSlot = {
   base: TripletDurBase; // h/q/8/16
   /** the actual tickable in the voice for this slot (note or transparent rest) */
-  node: StaveNote;
+  node: StemmableNote;
   /** absolute time (sec) and bar index of this slot — for bookkeeping only */
   start: number;
   barIdx: number;
@@ -26,6 +27,6 @@ export function buildTupletFromSlots(slots: TripletSlot[], tuplets: Tuplet[]) {
   if (slots.length !== 3) return;
   const b = slots[0].base;
   if (!(slots[1].base === b && slots[2].base === b)) return;
-  const nodes = slots.map((s) => s.node);
-  tuplets.push(new Tuplet(nodes as any, { bracketed: true, ratioed: false, numNotes: 3 }));
+  const nodes = slots.map((s) => s.node); // StemmableNote[]
+  tuplets.push(new Tuplet(nodes, { bracketed: true, ratioed: false, numNotes: 3 }));
 }

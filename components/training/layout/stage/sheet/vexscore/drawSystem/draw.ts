@@ -1,64 +1,125 @@
+// components/training/layout/stage/sheet/vexscore/drawSystem/draw.ts
 import { Voice, Formatter, TickContext } from "vexflow";
-import type { Stave } from "vexflow";
+import type { Stave, RenderContext, Tickable, Tuplet } from "vexflow";
 import { buildBeams } from "../builders";
 import type { Selected, TickPack } from "./types";
 import { isRestish } from "./selection";
 
-export function createVoices(tsNum: number, den: number, melSel: Selected, rhySel?: Selected | null) {
+/* ---------------------------------------
+ * Minimal structural types we need
+ * -------------------------------------*/
+
+type TickLike = Tickable & {
+  // Methods that might exist on various VexFlow tickables:
+  getTickContext?: () => TickContext | undefined;
+  setPreFormatted?: (v: boolean) => void;
+  setStave?: (stave: Stave) => void;
+  setContext?: (ctx: RenderContext) => void;
+  draw?: () => void;
+
+  // Optional helpers some notes expose:
+  getBoundingBox?: () => { getX: () => number } | null;
+  getMetrics?: () => { noteHeadWidth?: number } | undefined;
+  getAbsoluteX?: () => number;
+  getNoteHeadBeginX?: () => number;
+
+  // Rare, non-typed flags some glyphs use:
+  preFormatted?: boolean;
+};
+
+type MutableTickContext = TickContext & {
+  preFormatted?: boolean;
+  postFormatted?: boolean;
+  setXShift?: (x: number) => void; // some builds expose this
+  getX?: () => number;             // not always typed
+  setX?: (x: number) => void;      // base method is present but type-safety helper
+};
+
+type ManualRestTick = TickLike & {
+  // Rest alignment / ignore-ticks knobs (not always present on type defs)
+  setCenterAlignment?: (v: boolean) => void;
+  setCenterAligned?: (v: boolean) => void;
+  center_alignment?: boolean;
+
+  setIgnoreTicks?: (v: boolean) => void;
+  ignore_ticks?: boolean;
+
+  setTickContext?: (tc: TickContext) => void;
+};
+
+function toTickables(arr: Selected["t"]): TickLike[] {
+  return arr as unknown as TickLike[];
+}
+
+export function createVoices(
+  tsNum: number,
+  den: number,
+  melSel: Selected,
+  rhySel?: Selected | null
+) {
   const melVoice = new Voice({ numBeats: tsNum, beatValue: den }).setStrict(false);
-  melVoice.addTickables(melSel.t as any);
+  melVoice.addTickables(toTickables(melSel.t));
+
   const melFmt = new Formatter();
   melFmt.joinVoices([melVoice]);
-  (melFmt as any).createTickContexts([melVoice]);
+  // Some builds of VexFlow expose this, some don’t — guard it.
+  (melFmt as Formatter & { createTickContexts?: (v: Voice[]) => void }).createTickContexts?.([melVoice]);
   melFmt.preFormat();
 
   let rhyVoice: Voice | null = null;
   if (rhySel) {
     rhyVoice = new Voice({ numBeats: tsNum, beatValue: den }).setStrict(false);
-    rhyVoice.addTickables(rhySel.t as any);
+    rhyVoice.addTickables(toTickables(rhySel.t));
     const rhyFmt = new Formatter();
     rhyFmt.joinVoices([rhyVoice]);
-    (rhyFmt as any).createTickContexts([rhyVoice]);
+    (rhyFmt as Formatter & { createTickContexts?: (v: Voice[]) => void }).createTickContexts?.([rhyVoice]);
     rhyFmt.preFormat();
   }
   return { melVoice, rhyVoice };
 }
 
 export function placeTicks(
-  ticks: any[],
+  ticks: TickLike[],
   starts: number[],
   stave: Stave,
   xAt: (t0: number) => number,
-  ctx: any,
+  ctx: RenderContext,
   startSec: number
 ) {
   for (let i = 0; i < ticks.length; i++) {
-    const n = ticks[i] as any;
+    const n = ticks[i];
     const tc = n.getTickContext?.();
     const x = xAt(starts[i] ?? startSec);
     if (tc?.setX) {
       tc.setX(x);
-      tc.setXShift?.(0);
-      (tc as any).preFormatted = true;
-      (tc as any).postFormatted = true;
+      (tc as MutableTickContext).setXShift?.(0); // optional but important if available
+      const mtc = tc as MutableTickContext;
+      mtc.preFormatted = true;
+      mtc.postFormatted = true;
     }
     if (typeof n.setPreFormatted === "function") n.setPreFormatted(true);
-    else (n as any).preFormatted = true;
+    else (n as TickLike).preFormatted = true;
+
     if (typeof n.setStave === "function") n.setStave(stave);
     if (typeof n.setContext === "function") n.setContext(ctx);
   }
 }
 
-function leftMostX(n: any): number {
+function leftMostX(n: TickLike): number {
   try {
     if (!isRestish(n) && typeof n.getNoteHeadBeginX === "function") return n.getNoteHeadBeginX();
     const bb = typeof n.getBoundingBox === "function" ? n.getBoundingBox() : null;
     if (bb) return bb.getX();
     const m = n.getMetrics?.();
-    const w = (m?.noteHeadWidth && m.noteHeadWidth > 0) ? m.noteHeadWidth : 10;
-    const ax = typeof n.getAbsoluteX === "function" ? n.getAbsoluteX() : (n.getTickContext?.().getX?.() ?? 0);
+    const w = m?.noteHeadWidth && m.noteHeadWidth > 0 ? m.noteHeadWidth : 10;
+    const ax =
+      typeof n.getAbsoluteX === "function"
+        ? n.getAbsoluteX()
+        : n.getTickContext?.()?.getX?.() ?? 0; // NOTE the extra ?. after the call
     return ax - w * 0.5;
-  } catch { return 0; }
+  } catch {
+    return 0;
+  }
 }
 
 export function computeBarShiftX(args: {
@@ -92,17 +153,23 @@ export function computeBarShiftX(args: {
     for (let i = 0; i < melSel.t.length; i++) {
       if (relBarAt(mel, i) !== b) continue;
       const t0 = melSel.s[i];
-      if (Math.abs(t0 - seg.startSec) <= downbeatEps) { idx = i; break; }
+      if (Math.abs(t0 - seg.startSec) <= downbeatEps) {
+        idx = i;
+        break;
+      }
     }
-    if (idx >= 0 && isRestish(melSel.t[idx])) {
+    if (idx >= 0 && isRestish(melSel.t[idx] as unknown as TickLike)) {
       for (let j = idx; j < melSel.t.length; j++) {
         if (relBarAt(mel, j) !== b) break;
-        if (!isRestish(melSel.t[j])) { idx = j; break; }
+        if (!isRestish(melSel.t[j] as unknown as TickLike)) {
+          idx = j;
+          break;
+        }
       }
     }
 
-    if (idx >= 0 && !isRestish(melSel.t[idx])) {
-      const curLeft = leftMostX(melSel.t[idx]);
+    if (idx >= 0 && !isRestish(melSel.t[idx] as unknown as TickLike)) {
+      const curLeft = leftMostX(melSel.t[idx] as unknown as TickLike);
       const targetLeft = seg.x0 + gapPx16;
       barShiftX[b] = targetLeft - curLeft;
     } else {
@@ -120,22 +187,30 @@ export function applyBarShift(
   xAt: (t0: number) => number
 ) {
   for (let i = 0; i < sel.t.length; i++) {
-    const n = sel.t[i] as any;
+    const n = sel.t[i] as unknown as TickLike;
     const bRel = relBarAt(pack, i);
     const dx = barShiftX[bRel] || 0;
     if (!dx) continue;
     const tc = n.getTickContext?.();
     if (tc?.setX) tc.setX((tc.getX?.() ?? xAt(sel.s[i])) + dx);
-    if (tc) { (tc as any).preFormatted = true; (tc as any).postFormatted = true; }
+    if (tc) {
+      const mtc = tc as MutableTickContext;
+      mtc.preFormatted = true;
+      mtc.postFormatted = true;
+    }
   }
 }
 
-export function buildBeamsFor(sel: Selected, pack: TickPack, relBarAt: (pack: TickPack, selIdx: number) => number) {
+export function buildBeamsFor(
+  sel: Selected,
+  pack: TickPack,
+  relBarAt: (pack: TickPack, selIdx: number) => number
+) {
   const groupKeys = sel.i.map((_, k) => relBarAt(pack, k));
-  return buildBeams(sel.t, { groupKeys, allowMixed: true, sameStemOnly: true });
+  return buildBeams(toTickables(sel.t), { groupKeys, allowMixed: true, sameStemOnly: true });
 }
 
-export function drawTickables(ticks: any[], stave: Stave, ctx: any) {
+export function drawTickables(ticks: TickLike[], stave: Stave, ctx: RenderContext) {
   for (const t of ticks) {
     if (typeof t.setStave === "function") t.setStave(stave);
     if (typeof t.setContext === "function") t.setContext(ctx);
@@ -143,19 +218,26 @@ export function drawTickables(ticks: any[], stave: Stave, ctx: any) {
   }
 }
 
-export function drawTuplets(tuplets: any[] | undefined, pool: any[], ctx: any) {
+export function drawTuplets(tuplets: Tuplet[] | undefined, pool: TickLike[], ctx: RenderContext) {
   if (!tuplets?.length) return;
-  const inside = (tp: any) => {
-    const notes = typeof tp.getNotes === "function" ? tp.getNotes() : [];
-    return notes.length > 0 && notes.every((n: any) => pool.includes(n));
+  const inside = (tp: Tuplet) => {
+    const notes =
+      typeof (tp as unknown as { getNotes?: () => TickLike[] }).getNotes === "function"
+        ? (tp as unknown as { getNotes: () => TickLike[] }).getNotes()
+        : [];
+    return notes.length > 0 && notes.every((n) => pool.includes(n));
   };
-  tuplets.filter(inside).forEach((t: any) => t.setContext(ctx).draw());
+  tuplets
+    .filter(inside)
+    .forEach((t) =>
+      (t as unknown as { setContext: (c: RenderContext) => Tuplet }).setContext(ctx).draw()
+    );
 }
 
 export function drawManualRests(
-  list: Array<{ note: any; start: number; barIndex?: number }> | undefined,
+  list: Array<{ note: ManualRestTick; start: number; barIndex?: number }> | undefined,
   args: {
-    ctx: any;
+    ctx: RenderContext;
     stave: Stave;
     inWindow: (t0: number) => boolean;
     voiceSel: Selected;
@@ -176,19 +258,22 @@ export function drawManualRests(
     // Hide manual rest if a non-rest/ghost tickable occurs at the same start.
     let suppress = false;
     for (let i = 0; i < voiceSel.t.length; i++) {
-      if (Math.abs(voiceSel.s[i] - start) <= dupEps && !isRestish(voiceSel.t[i])) { suppress = true; break; }
+      if (Math.abs(voiceSel.s[i] - start) <= dupEps && !isRestish(voiceSel.t[i] as unknown as TickLike)) {
+        suppress = true;
+        break;
+      }
     }
     if (suppress) continue;
 
-    const absBar = (typeof barIndex === "number") ? barIndex : systemStartBar + barIndexOfTime(start);
+    const absBar = typeof barIndex === "number" ? barIndex : systemStartBar + barIndexOfTime(start);
     const bRel = Math.max(0, Math.min(barsPerRow - 1, absBar - systemStartBar));
     const x = xAt(start) + (barShiftX[bRel] || 0);
 
     note.setCenterAlignment?.(false);
     note.setCenterAligned?.(false);
-    (note as any).center_alignment = false;
+    note.center_alignment = false;
     note.setIgnoreTicks?.(true);
-    (note as any).ignore_ticks = true;
+    note.ignore_ticks = true;
 
     if (typeof note.setStave === "function") note.setStave(stave);
     if (typeof note.setContext === "function") note.setContext(ctx);
@@ -200,14 +285,14 @@ export function drawManualRests(
     note.setTickContext?.(tc);
 
     if (typeof note.setPreFormatted === "function") note.setPreFormatted(true);
-    else (note as any).preFormatted = true;
+    else (note as TickLike).preFormatted = true;
 
     if (typeof note.draw === "function") note.draw();
   }
 }
 
 export function drawBarlines(args: {
-  ctx: any;
+  ctx: RenderContext;
   topStave: Stave;
   bottomStave: Stave;
   noteStartX: number;

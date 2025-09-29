@@ -29,7 +29,8 @@ export default function ScoreView({
 }: VexScoreProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const hasDrawnOnceRef = useRef<boolean>(false);
-  const dims = useResizeObserver(hostRef as any, 120, heightPx);
+  // Upcast ref type (HTMLDivElement -> HTMLElement) without using `any`
+  const dims = useResizeObserver(hostRef as unknown as React.RefObject<HTMLElement>, 120, heightPx);
 
   const clef = clefProp ?? pickClef(phrase);
 
@@ -61,18 +62,31 @@ export default function ScoreView({
     if (!hasDrawnOnceRef.current) el.style.visibility = "hidden";
 
     const ensureVexFonts = async () => {
-      if (typeof document !== "undefined" && (document as any).fonts) {
-        try {
-          await Promise.race([
-            (document as any).fonts.ready,
-            Promise.allSettled([
-              (document as any).fonts.load('12px "Bravura"'),
-              (document as any).fonts.load('12px "Gonville"'),
-              (document as any).fonts.load('12px "Petaluma"'),
-              (document as any).fonts.load('12px "Arial"'),
-            ]),
-          ]);
-        } catch { /* noop */ }
+      if (typeof document === "undefined") return;
+
+      // Narrow typing for CSS Font Loading without using `any`
+      type FontFaceSetLike = {
+        ready: Promise<unknown>;
+        load: (font: string) => Promise<unknown>;
+      };
+      type DocumentWithFonts = Document & { fonts?: FontFaceSetLike };
+
+      const doc = document as DocumentWithFonts;
+      const fonts = doc.fonts;
+      if (!fonts) return;
+
+      try {
+        await Promise.race([
+          fonts.ready,
+          Promise.allSettled([
+            fonts.load('12px "Bravura"'),
+            fonts.load('12px "Gonville"'),
+            fonts.load('12px "Petaluma"'),
+            fonts.load('12px "Arial"'),
+          ]),
+        ]);
+      } catch {
+        /* noop */
       }
     };
 

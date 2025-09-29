@@ -1,8 +1,10 @@
+// components/training/layout/stage/sheet/vexscore/drawSystem/staves.ts
 import { Stave, StaveConnector, Barline } from "vexflow";
+import type { RenderContext } from "vexflow";
 import { STAFF_GAP_Y } from "../layout";
 
 export function createStaves(args: {
-  ctx: any;
+  ctx: RenderContext;
   padding: { left: number; right: number };
   currentY: number;
   staffWidth: number;

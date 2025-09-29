@@ -1,17 +1,21 @@
-// components/training/layout/sheet/vexscore/makeTickables/rhythm.ts
+// components/training/layout/stage/sheet/vexscore/makeTickables/rhythm.ts
 import { StaveNote, Dot, Tuplet } from "vexflow";
+import type { Tickable } from "vexflow";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import { noteValueInQuarterUnits } from "@/utils/time/tempo";
 import { type Tok } from "../builders";
+
+// 🔧 Use alias path so TS reliably resolves this module (matches melody.ts)
 import {
-  PPQ, ticksToSeconds, tokToTicks, ticksToToks, noteValueToTicks,
-} from "./time";
-import {
-  makeGhost, makeManualRest, makeInvisibleTripletRest,
-} from "./draw";
-import {
-  TripletSlot, tripletBaseForQ, buildTupletFromSlots,
-} from "./tuplets";
+  PPQ,
+  ticksToSeconds,
+  tokToTicks,
+  ticksToToks,
+  noteValueToTicks,
+} from "@/components/training/layout/stage/sheet/vexscore/makeTickables/time";
+
+import { makeGhost, makeManualRest, makeInvisibleTripletRest } from "./draw";
+import { TripletSlot, tripletBaseForQ, buildTupletFromSlots } from "./tuplets";
 
 export function buildRhythmTickables(params: {
   rhythm?: RhythmEvent[];
@@ -26,7 +30,7 @@ export function buildRhythmTickables(params: {
   const secPerQuarter = secPerWholeNote / 4;
   const BAR_TICKS = Math.max(1, Math.round(tsNum * (4 / Math.max(1, den)) * PPQ));
 
-  const ticksOut: any[] = [];
+  const ticksOut: Tickable[] = [];
   const startsSec: number[] = [];
   const barIndex: number[] = [];
   const manualRests: Array<{ note: StaveNote; start: number; barIndex: number }> = [];
@@ -36,7 +40,7 @@ export function buildRhythmTickables(params: {
   const pushManualRest = (note: StaveNote, start: number, bidx: number) => {
     manualRests.push({ note, start, barIndex: bidx });
   };
-  const appendTickable = (n: any, start: number, bidx: number) => {
+  const appendTickable = (n: Tickable, start: number, bidx: number) => {
     ticksOut.push(n);
     startsSec.push(start);
     barIndex.push(bidx);
@@ -46,16 +50,20 @@ export function buildRhythmTickables(params: {
     for (const tok of toks) {
       const start = ticksToSeconds(tTicks, secPerQuarter);
       const bidx = Math.floor(tTicks / BAR_TICKS);
-      appendTickable(makeGhost(tok) as any, start, bidx);
+      appendTickable(makeGhost(tok), start, bidx);
       tTicks += tokToTicks(tok);
-      if (visible) pushManualRest(makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, "bass"), start, bidx);
+      if (visible) {
+        pushManualRest(makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, "bass"), start, bidx);
+      }
     }
   };
 
   const emitMeasureRestBar = () => {
     const start = ticksToSeconds(tTicks, secPerQuarter);
     const bidx = Math.floor(tTicks / BAR_TICKS);
-    emitRestToks(ticksToToks(BAR_TICKS), { visible: false }); // timing only
+    // timing ghost(s) only
+    emitRestToks(ticksToToks(BAR_TICKS), { visible: false });
+    // centered whole-bar rest glyph
     pushManualRest(makeManualRest("wr", 0, "bass", { center: true }), start, bidx);
   };
 
@@ -70,7 +78,9 @@ export function buildRhythmTickables(params: {
     const fullBars = Math.floor(leadBarsFloat + 1e-9);
     const remSec = leadInSec - fullBars * secPerBar;
     for (let i = 0; i < fullBars; i++) emitMeasureRestBar();
-    if (remSec > 1e-9) emitRestToks(ticksToToks(Math.round((remSec / secPerQuarter) * PPQ)), { visible: true });
+    if (remSec > 1e-9) {
+      emitRestToks(ticksToToks(Math.round((remSec / secPerQuarter) * PPQ)), { visible: true });
+    }
   }
 
   if (!Array.isArray(rhythm) || rhythm.length === 0) {
@@ -108,7 +118,7 @@ export function buildRhythmTickables(params: {
         for (const tok of ticksToToks(durTicks)) {
           const s = ticksToSeconds(tTicks, secPerQuarter);
           const bi = Math.floor(tTicks / BAR_TICKS);
-          appendTickable(makeGhost(tok) as any, s, bi);
+          appendTickable(makeGhost(tok), s, bi);
           tTicks += tokToTicks(tok);
           pushManualRest(makeManualRest(tok.dur, tok.dots as 0 | 1 | 2, "bass"), s, bi);
         }
@@ -128,11 +138,11 @@ export function buildRhythmTickables(params: {
 
     const sn = new StaveNote({
       keys: ["d/3"],
-      duration: headTok.dur as any,
+      duration: headTok.dur as string,
       clef: "bass",
       autoStem: true,
     });
-    if (headTok.dots) Dot.buildAndAttach([sn as any], { all: true });
+    if (headTok.dots) Dot.buildAndAttach([sn], { all: true });
 
     appendTickable(sn, start, bidx);
 
@@ -143,12 +153,13 @@ export function buildRhythmTickables(params: {
     } else {
       const headTicks = tokToTicks(headTok);
       tTicks += headTicks;
+
       const tailTicks = Math.max(0, durTicks - headTicks);
       if (tailTicks) {
         for (const tok of ticksToToks(tailTicks)) {
           const s2 = ticksToSeconds(tTicks, secPerQuarter);
           const bi2 = Math.floor(tTicks / BAR_TICKS);
-          appendTickable(makeGhost(tok) as any, s2, bi2);
+          appendTickable(makeGhost(tok), s2, bi2);
           tTicks += tokToTicks(tok);
         }
       }
