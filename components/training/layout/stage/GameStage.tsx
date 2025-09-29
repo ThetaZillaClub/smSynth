@@ -1,4 +1,4 @@
-// components/training/layout/piano-roll/GameStage.tsx
+// components/training/layout/stage/GameStage.tsx
 "use client";
 import React, { useCallback, useLayoutEffect, useRef, useState, useMemo } from "react";
 import PianoRollCanvas, { type Phrase } from "@/components/training/layout/stage/piano-roll/PianoRollCanvas";
@@ -92,6 +92,7 @@ export default function GameStage({
   const sheetHostRef = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
+    // Hook is called unconditionally; branch inside the effect is fine.
     if (view !== "sheet") return;
     const el = sheetHostRef.current;
     if (!el) return;
@@ -113,15 +114,8 @@ export default function GameStage({
   const rhythmH = 72;
   const mainH = Math.max(200, fillH - (view !== "sheet" && showRhythm ? rhythmH + 8 : 0));
 
-  if (!phrase || !Array.isArray(phrase.notes) || phrase.notes.length === 0) {
-    return <div ref={hostRef} className="w-full h-full min-h-[260px]" />;
-  }
-
-  const resolvedClef = clef ?? pickClef(phrase);
-
-  const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
-  const sheetReady = Boolean(systems && systems.length);
-
+  // ✅ Hooks that were previously *after* an early return are moved up here,
+  // so no hooks are ever called conditionally.
   const useSharpsPref = useMemo(() => preferSharpsForKeySig(keySig || null), [keySig]);
 
   const leadInSecEff = useMemo(() => {
@@ -129,6 +123,16 @@ export default function GameStage({
     const bars = typeof leadBars === "number" ? leadBars : 1;
     return beatsToSeconds(barsToBeats(bars, tsNum), bpm, den);
   }, [leadInSec, leadBars, tsNum, bpm, den]);
+
+  // We can still early-return for type safety (e.g., VexScore requires a Phrase),
+  // because all hooks are already called above.
+  if (!phrase || !Array.isArray(phrase.notes) || phrase.notes.length === 0) {
+    return <div ref={hostRef} className="w-full h-full min-h-[260px]" />;
+  }
+
+  const resolvedClef = clef ?? pickClef(phrase);
+  const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
+  const sheetReady = Boolean(systems && systems.length);
 
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
