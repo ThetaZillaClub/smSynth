@@ -213,7 +213,7 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // ---- Hand-gesture detection (simplified)
+  // ---- Hand-gesture detection (hot idle; re-anchor at lead-in) ----
   const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
   useEffect(() => {
     try {
@@ -248,30 +248,32 @@ export default function TrainingGame({
     })();
   }, [warmPlayer, warmRecorder]);
 
-  // 🟦 Preload hand model when vision becomes relevant
-  useEffect(() => {
-    if (!needVision || pretestActive) return;
-    hand.preload().catch(() => {});
-  }, [needVision, pretestActive, hand]);
-
-  // 🟦 Start hand detection exactly at lead-in; reset anchor; stop when not needed
+  // 🟦 Start camera/graph once when vision becomes relevant (hot idle).
   useEffect(() => {
     if (!needVision || pretestActive) { hand.stop(); return; }
 
-    if (loop.loopPhase === "lead-in" && loop.anchorMs != null) {
-      (async () => {
-        try {
-          if (!hand.isRunning) await hand.start(loop.anchorMs!);
-          hand.reset(loop.anchorMs!);
-          sampler.reset();
-        } catch {}
-      })();
-    }
+    (async () => {
+      try {
+        await hand.preload();
+        if (!hand.isRunning) await hand.start(performance.now());
+      } catch {}
+    })();
 
     return () => {
       if (!needVision || pretestActive) hand.stop();
     };
-  }, [needVision, pretestActive, loop.loopPhase, loop.anchorMs, hand, sampler]);
+  }, [needVision, pretestActive, hand]);
+
+  // 🟦 On each take, only re-anchor at the start of LEAD-IN (no start/stop here).
+  useEffect(() => {
+    if (pretestActive || !needVision) return;
+
+    if (loop.loopPhase === "lead-in") {
+      const a = loop.anchorMs ?? performance.now();
+      hand.reset(a);
+      sampler.reset();
+    }
+  }, [pretestActive, needVision, loop.loopPhase, loop.anchorMs, hand, sampler]);
 
   // ---- Review + scoring
   const haveRhythm: boolean =
@@ -299,8 +301,7 @@ export default function TrainingGame({
 
     if (!pretestActive && phrase && prev === "record" && curr === "rest") {
       const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
-      // Events from useHandBeat are already latency-compensated; do NOT subtract again.
-      const gestureLagSec = 0;
+      const gestureLagSec = 0; // already latency-compensated in useHandBeat
 
       void scoreTake({
         phrase,
