@@ -21,6 +21,20 @@ type NavItem = {
 const BRAND = 'PitchTune.Pro';
 const STORAGE_KEY = 'sidebar:collapsed';
 
+// ── PRIME DEDUPE (avoid POST storm on every nav) ─────────────────────────────
+let LAST_PRIMED_ID: string | null = null;
+let LAST_PRIMED_AT = 0;
+const PRIME_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function maybePrimeActiveStudent(studentId: string) {
+  if (!studentId) return;
+  const now = Date.now();
+  if (LAST_PRIMED_ID === studentId && now - LAST_PRIMED_AT < PRIME_TTL_MS) return;
+  LAST_PRIMED_ID = studentId;
+  LAST_PRIMED_AT = now;
+  try { primeActiveStudent(studentId); } catch {}
+}
+
 // Helper: derive a friendly display name from the session user
 function pickDisplayName(user: { user_metadata?: any; email?: string | null }): string {
   const dn = user?.user_metadata?.display_name;
@@ -42,18 +56,12 @@ export default function Sidebar() {
 
   // Root-only setter for CSS var (prevents hydration mismatch).
   const setSidebarWidth = React.useCallback((w: '0px' | '64px' | '240px') => {
-    try {
-      document.documentElement.style.setProperty('--sidebar-w', w);
-    } catch {}
+    try { document.documentElement.style.setProperty('--sidebar-w', w); } catch {}
   }, []);
 
   // Read persisted collapsed state once.
   React.useEffect(() => {
-    try {
-      setCollapsed(localStorage.getItem(STORAGE_KEY) === '1');
-    } catch {
-      setCollapsed(false);
-    }
+    try { setCollapsed(localStorage.getItem(STORAGE_KEY) === '1'); } catch { setCollapsed(false); }
   }, []);
 
   // Keep CSS var in sync with route + collapsed state.
@@ -69,7 +77,7 @@ export default function Sidebar() {
     });
   }, []);
 
-  // Auth + current student image priming
+  // Auth + current student image priming (minimize GETs)
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -85,39 +93,57 @@ export default function Sidebar() {
       const user = session!.user;
       setDisplayName(pickDisplayName(user));
 
-      try {
-        const res = await fetch('/api/students/current', { credentials: 'include' });
-        const curr = await res.json().catch(() => null);
-        const id = (curr?.id as string | undefined) ?? null;
-        if (!cancelled) setCurrentStudentId(id);
+      // 1) Hints from localStorage (no network)
+      let hintedId: string | null = null;
+      let hintedImgPath: string | null = null;
+      try { hintedId = localStorage.getItem('ptp:activeStudentId'); } catch {}
+      try { hintedImgPath = localStorage.getItem('ptp:studentImagePath'); } catch {}
 
-        if (id) {
-          const rowRes = await fetch(`/api/students/${encodeURIComponent(id)}`, { credentials: 'include' });
-          const row = await rowRes.json().catch(() => null);
-          const imagePath = row?.image_path as string | null | undefined;
+      if (hintedId && !cancelled) setCurrentStudentId(hintedId);
+      if (hintedImgPath) {
+        try {
+          const url = await getImageUrlCached(supabase, hintedImgPath);
+          if (!cancelled) setStudentImgUrl(url ?? null);
+        } catch {}
+      }
 
-          if (imagePath) {
-            await ensureSessionReady(supabase, 2500);
-            const url = await getImageUrlCached(supabase, imagePath);
-            if (!cancelled) setStudentImgUrl(url ?? null);
-          } else {
-            if (!cancelled) setStudentImgUrl(null);
+      // 2) If either is missing, do ONE cached request to /api/students/current
+      if (!hintedId || !hintedImgPath) {
+        try {
+          const res = await fetch('/api/students/current', { credentials: 'include' });
+          if (!res.ok) throw new Error('current-student fetch failed');
+          const row = await res.json().catch(() => null);
+
+          const id = (row?.id as string | undefined) ?? null;
+          if (!cancelled) setCurrentStudentId(id);
+          if (id) { try { localStorage.setItem('ptp:activeStudentId', id); } catch {} }
+
+          // If we still don't have an image path, fetch the single row (cached, short TTL)
+          if ((!hintedImgPath) && id) {
+            try {
+              const res2 = await fetch(`/api/students/${encodeURIComponent(id)}`, { credentials: 'include' });
+              if (res2.ok) {
+                const full = await res2.json().catch(() => null);
+                const imagePath = (full?.image_path as string | undefined) ?? null;
+                if (imagePath) {
+                  try { localStorage.setItem('ptp:studentImagePath', imagePath); } catch {}
+                  const url = await getImageUrlCached(supabase, imagePath);
+                  if (!cancelled) setStudentImgUrl(url ?? null);
+                }
+              }
+            } catch {}
           }
-        } else {
-          if (!cancelled) setStudentImgUrl(null);
+        } catch {
+          if (!cancelled) setStudentImgUrl((prev) => prev ?? null);
         }
-      } catch {
-        if (!cancelled) { setStudentImgUrl(null); setCurrentStudentId(null); }
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // Priming-aware navigation
+  // Priming-aware navigation (ONLY when needed)
   const smartNavigate = React.useCallback((href: string) => {
-    if (currentStudentId) {
-      try { primeActiveStudent(currentStudentId); } catch {}
-    }
+    if (currentStudentId) maybePrimeActiveStudent(currentStudentId);
     router.push(href);
   }, [router, currentStudentId]);
 
@@ -144,7 +170,7 @@ export default function Sidebar() {
       label: 'Setup',
       icon: (
         <svg viewBox="0 0 24 24" className="w-6 h-6" aria-hidden>
-          <path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 3a7.948 7.948 0 00-.46-1.11l2.12-2.12-2.12-2.12-2.12 2.12c-.35-.2-.72-.37-1.11-.5L16 2h-4l-.35 3.16c-.39.12-.76.29-1.11.5L8.42 3.54 6.3 5.66l2.12 2.12c-.2.35-.37.72-.5 1.11L5 8v4l3.16.35c.12.39.29.76.5 1.11L6.3 15.58l2.12 2.12 2.12-2.12c.35.2.72.37 1.11.5L12 21h4l.35-3.16c.39-.12.76-.29 1.11-.5l2.12 2.12 2.12-2.12-2.12-2.12c.2-.35.37-.72.5-1.11L23 12v-1z" fill="currentColor"/>
+          <path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 3a7.948 7.948 0 00-.46-1.11l2.12-2.12-2.12-2.12-2.12 2.12c-.35-.2-.72-.37-1.11-.5L16 2h-4l-.35 3.16c-.39.12-.76.29-1.11.5L8.42 3.54 6.3 5.66l2.12 2.12c-.2.35-.37.72-.5 1.11L5 8v4l3.16.35c.12.39.29.76.5 1.11L6.3 15.58l2.12 2.12 2.12-2.12c.35.2.72.37 1.11.5L12 21h4l.35-3.16c.39-.12.76-.29 1.11-.5l2.12 2.12 2.12-2.12-2.12-2.12c-.2-.35.37-.72.5-1.11L23 12v-1z" fill="currentColor"/>
         </svg>
       ),
       match: (p) => p === '/setup' || p.startsWith('/setup/'),
@@ -164,19 +190,17 @@ export default function Sidebar() {
   ];
 
   // ── ROW + COLUMN CLASSES ───────────────────────────────────────
-  // Keep vertical spacing at the row level so icons remain centered horizontally
-  // and rows retain their original height.
+  // Vertical spacing on the row; fixed 64px icon gutter for stable horizontal centering.
   const baseRow = [
     'flex items-stretch w-full select-none transition',
     'hover:bg-[#e8e8e8] active:bg-[#e0e0e0]',
     'text-[#0f0f0f]',
-    'py-3', // vertical spacing restored here
+    'py-3',
   ].join(' ');
 
   // Fixed 64px icon gutter so icons stay centered at the same x-position
   // in both collapsed (64px) and expanded (240px) states.
-  const col1 =
-    'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
+  const col1 = 'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
 
   // Label column gets horizontal padding only; vertical padding comes from baseRow.
   const col2 = 'flex-1 flex items-center px-3 text-base font-medium';
@@ -271,7 +295,7 @@ export default function Sidebar() {
             type="button"
             className={baseRow}
             onClick={() => {
-              if (currentStudentId) { try { primeActiveStudent(currentStudentId); } catch {} }
+              if (currentStudentId) maybePrimeActiveStudent(currentStudentId);
               router.push('/settings');
             }}
             title="Settings"

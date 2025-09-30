@@ -2,7 +2,7 @@
 "use client";
 import React, { useRef, useState, useEffect } from "react";
 import GameLayout from "./layout/GameLayout";
-import { SessionPanel, PretestPanel } from "./session";
+import { PretestPanel } from "./session"; // ⬅️ removed SessionPanel import
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
@@ -366,6 +366,27 @@ export default function TrainingGame({
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
   const onToggleExercise = () => { if (exerciseUnlocked) loop.toggle(); };
 
+  // 👉 Footer session panel props (BPM, Time, Round)
+  const showFooterSessionPanel = !!phrase && !pretestActive && !reviewVisible;
+
+  // Try to derive a 0-based current take index from the loop; fall back to 0.
+  const rawTakeIdx =
+    (loop as any).takeIndex ??
+    (loop as any).takeIdx ??
+    (loop as any).take ??
+    (loop as any).takesDone ??
+    0;
+
+  const roundCurrent = Math.max(1, Math.min(MAX_TAKES, Number(rawTakeIdx) + 1));
+  const footerSessionPanel = showFooterSessionPanel
+    ? {
+        bpm,
+        ts,
+        roundCurrent,
+        roundTotal: MAX_TAKES,
+      }
+    : undefined;
+
   return (
     <GameLayout
       title={title}
@@ -393,6 +414,7 @@ export default function TrainingGame({
       clef={melodyClef}
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
+      sessionPanel={footerSessionPanel}  // ⬅️ only BPM / Time / Round
     >
       {pretestActive ? (
         <PretestPanel
@@ -414,23 +436,7 @@ export default function TrainingGame({
           score={lastScore || undefined}
           sessionScores={sessionScores}
         />
-      ) : (
-        phrase && (
-          <SessionPanel
-            statusText={statusText}
-            isRecording={isRecording}
-            startedAtMs={startAtMs}
-            recordSec={leadInSec + recordWindowSec}
-            restSec={restSec}
-            maxTakes={MAX_TAKES}
-            maxSessionSec={MAX_SESSION_SEC}
-            bpm={bpm}
-            ts={ts}
-            leadBars={leadBars}
-            restBars={restBars}
-          />
-        )
-      )}
+      ) : null}
     </GameLayout>
   );
 }
