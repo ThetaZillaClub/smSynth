@@ -1,74 +1,87 @@
-// app/api/students/current/range/route.ts
+// app/api/session/active-student/route.ts
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 
-type RangePatchBody = {
-  low?: unknown;
-  high?: unknown;
-};
+const ACTIVE_STUDENT_COOKIE = "ptp_active_student";
 
-export async function GET() {
+/**
+ * POST /api/session/active-student
+ * Body: { studentId: string }
+ * - Verifies the caller is authenticated
+ * - (Best practice) Verifies the student row belongs to the user
+ * - Sets an httpOnly cookie so subsequent SSR/Route handlers can read it
+ */
+export async function POST(req: Request) {
   const supabase = await createClient();
 
-  // Auth via server-side user
+  // Ensure caller is authenticated
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-
-  const { data: row, error } = await supabase
-    .from("models")
-    .select("range_low, range_high")
-    .eq("uid", user.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json(row ?? null, {
-    headers: {
-      "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
-      Vary: "Cookie",
-    },
-  });
-}
-
-export async function PATCH(req: Request) {
-  const supabase = await createClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-
-  const raw = (await req.json().catch(() => null)) as unknown;
-  const body: RangePatchBody | null =
-    raw && typeof raw === "object" ? (raw as RangePatchBody) : null;
-
-  const low = typeof body?.low === "string" ? body.low : undefined;
-  const high = typeof body?.high === "string" ? body.high : undefined;
-
-  const { data: latest, error: findErr } = await supabase
-    .from("models")
-    .select("id")
-    .eq("uid", user.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (findErr) return NextResponse.json({ error: findErr.message }, { status: 500 });
-  if (!latest?.id) return NextResponse.json({ error: "no model row" }, { status: 400 });
-
-  const payload: { range_low?: string; range_high?: string } = {};
-  if (low) payload.range_low = low;
-  if (high) payload.range_high = high;
-
-  if (!payload.range_low && !payload.range_high) {
-    return NextResponse.json({ error: "no valid fields" }, { status: 400 });
+  if (!user) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
-  const { error: updateErr } = await supabase
-    .from("models")
-    .update(payload)
-    .eq("id", latest.id);
+  // Parse body
+  let studentId: string | null = null;
+  try {
+    const raw = await req.json();
+    studentId = typeof raw?.studentId === "string" ? raw.studentId.trim() : null;
+  } catch {
+    // ignore parse errors; handled below
+  }
+  if (!studentId) {
+    return NextResponse.json({ error: "missing studentId" }, { status: 400 });
+  }
 
-  if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  // (Optional but recommended) – verify the model belongs to this user
+  const { data: row, error } = await supabase
+    .from("models")
+    .select("id, uid")
+    .eq("id", studentId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!row) {
+    return NextResponse.json({ error: "student not found" }, { status: 404 });
+  }
+  if (row.uid !== user.id) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  // Set cookie with secure defaults
+  const url = new URL(req.url);
+  const xfProto = req.headers.get("x-forwarded-proto");
+  const secure = url.protocol === "https:" || xfProto === "https";
+
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set({
+    name: ACTIVE_STUDENT_COOKIE,
+    value: studentId,
+    httpOnly: true,
+    sameSite: "lax",
+    secure,
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+  });
+
+  // This endpoint mutates cookies — don't cache the response
+  res.headers.set("Cache-Control", "private, no-store");
+  return res;
+}
+
+/**
+ * GET /api/session/active-student
+ * Returns the currently set active student id from the cookie
+ * (handy for debugging or lightweight reads).
+ */
+export async function GET() {
+  const jar = await cookies();
+  const id = jar.get(ACTIVE_STUDENT_COOKIE)?.value ?? null;
+  const res = NextResponse.json({ studentId: id });
+  res.headers.set("Cache-Control", "private, max-age=0, must-revalidate");
+  res.headers.set("Vary", "Cookie");
+  return res;
 }

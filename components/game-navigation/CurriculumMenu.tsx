@@ -3,7 +3,6 @@
 
 import React from 'react';
 import type { ExerciseId } from './hooks/useAppMode';
-import PrivateHeader from '@/components/header/PrivateHeader';
 
 type Props = {
   studentId?: string | null;
@@ -27,7 +26,7 @@ const ITEMS: readonly CurriculumItem[] = [
   { id: 'training-game', title: 'Training', subtitle: 'Warm-ups • phrasing', emoji: '🎯', enabled: true,  gradient: 'from-emerald-400 via-emerald-500 to-emerald-600' },
   { id: 'range-setup',   title: 'Range Setup', subtitle: 'One-time voice range capture', emoji: '📏', enabled: true,  gradient: 'from-sky-400 via-sky-500 to-sky-600' },
   { id: 'vision-setup',  title: 'Vision Setup', subtitle: 'Camera + hand-beat calibration', emoji: '👁️', enabled: true, gradient: 'from-cyan-400 via-cyan-500 to-cyan-600' },
-    // Insert these three items near the top of ITEMS:
+  // Insert these three items near the top of ITEMS:
   { id: 'pitch-tune',     title: 'Pitch Tune',     subtitle: 'Single-pitch call & response', emoji: '🎵', enabled: true, gradient: 'from-emerald-400 via-emerald-500 to-emerald-600' },
   { id: 'key-signature',  title: 'Key Signature',  subtitle: 'A440 → sing the tonic',        emoji: '🔑', enabled: true, gradient: 'from-amber-400 via-amber-500 to-amber-600' },
   { id: 'pitch-time',     title: 'Pitch Time',     subtitle: 'Guided arpeggio by ear',       emoji: '⏱️', enabled: true, gradient: 'from-violet-400 via-violet-500 to-violet-600' },
@@ -44,10 +43,7 @@ const ITEMS: readonly CurriculumItem[] = [
 export default function CurriculumMenu({ studentName, onStart }: Props) {
   return (
     <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
-      {/* Private route → header seeded as authed to avoid client getSession() */}
-      <PrivateHeader />
-
-      <header className="w-full px-6 pt-24 pb-6">
+      <header className="w-full px-6 pt-8 pb-6">
         <div className="mx-auto w-full max-w-7xl flex items-baseline gap-3">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
             {studentName ? `Welcome, ${studentName}` : 'Welcome'}

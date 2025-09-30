@@ -43,17 +43,31 @@ const Dropzone = ({
     (restProps.errors.length > 0 && !restProps.isSuccess) ||
     restProps.files.some((file) => file.errors.length !== 0)
 
+  const triggerFile = () => {
+    try { restProps.inputRef.current?.click() } catch {}
+  }
+
   return (
     <DropzoneContext.Provider value={{ ...restProps }}>
       <div
         {...getRootProps({
           className: cn(
-            'border-2 border-gray-300 rounded-lg p-6 text-center bg-card transition-colors duration-300 text-foreground',
+            'border-2 border-gray-300 rounded-lg p-6 text-center bg-card transition-colors duration-300 text-foreground cursor-pointer select-none',
             className,
             isSuccess ? 'border-solid' : 'border-dashed',
             isActive && 'border-primary bg-primary/10',
             isInvalid && 'border-destructive bg-destructive/10'
           ),
+          role: 'button',
+          tabIndex: 0,
+          onClick: triggerFile,
+          onKeyDown: (e: any) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              triggerFile()
+            }
+          },
+          'aria-label': 'Upload file',
         })}
       >
         <input {...getInputProps()} />
@@ -110,11 +124,11 @@ const DropzoneContent = ({ className }: { className?: string }) => {
             {file.type.startsWith('image/') ? (
               <div className="h-10 w-10 rounded border overflow-hidden shrink-0 bg-muted flex items-center justify-center">
                 <Image
-                  src={file.preview}           // ← guaranteed string by hook
+                  src={file.preview}
                   alt={file.name}
                   width={40}
                   height={40}
-                  unoptimized                 // allow blob: URLs
+                  unoptimized
                   className="h-full w-full object-cover"
                 />
               </div>
@@ -190,35 +204,19 @@ const DropzoneContent = ({ className }: { className?: string }) => {
   )
 }
 
+/** Simplified empty state for avatar: big “?” with full-square click */
 const DropzoneEmptyState = ({ className }: { className?: string }) => {
-  const { maxFiles, maxFileSize, inputRef, isSuccess } = useDropzoneContext()
-
+  const { isSuccess } = useDropzoneContext()
   if (isSuccess) return null
 
   return (
-    <div className={cn('flex flex-col items-center gap-y-2', className)}>
-      <Upload size={20} className="text-muted-foreground" />
-      <p className="text-sm">
-        Upload{!!maxFiles && maxFiles > 1 ? ` ${maxFiles}` : ''} file
-        {!maxFiles || maxFiles > 1 ? 's' : ''}
-      </p>
-      <div className="flex flex-col items-center gap-y-1">
-        <p className="text-xs text-muted-foreground">
-          Drag and drop or{' '}
-          <a
-            onClick={() => inputRef.current?.click()}
-            className="underline cursor-pointer transition hover:text-foreground"
-          >
-            select {maxFiles === 1 ? `file` : 'files'}
-          </a>{' '}
-          to upload
-        </p>
-        {maxFileSize !== Number.POSITIVE_INFINITY && (
-          <p className="text-xs text-muted-foreground">
-            Maximum file size: {formatBytes(maxFileSize, 2)}
-          </p>
-        )}
-      </div>
+    <div
+      className={cn(
+        'w-full h-full flex items-center justify-center',
+        className
+      )}
+    >
+      <span className="text-4xl font-bold text-[#6b6b6b] leading-none select-none">?</span>
     </div>
   )
 }

@@ -13,12 +13,12 @@ import {
   type SessionConfig,
 } from "@/components/training/session/types";
 import useStudentRow from "@/hooks/students/useStudentRow";
-import PitchTuneGame from "@/components/games/pitch-tune/PitchTuneGame";          
-import KeySignatureGame from "@/components/games/key-signature/KeySignatureGame";  
-import PitchTimeGame from "@/components/games/pitch-time/PitchTimeGame";           
+import PitchTuneGame from "@/components/games/pitch-tune/PitchTuneGame";
+import KeySignatureGame from "@/components/games/key-signature/KeySignatureGame";
+import PitchTimeGame from "@/components/games/pitch-time/PitchTimeGame";
 
 export default function CurriculumRouter({ studentId = null }: { studentId?: string | null }) {
-  const { view, current, startExercise, openMenu } = useAppMode();
+  const { view, current, startExercise } = useAppMode();
 
   // Fetch ONCE here and reuse across subviews (prevents re-fetch on Back)
   const {
@@ -44,26 +44,26 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
   const content = useMemo(() => {
     switch (current as ExerciseId) {
       case "pitch-tune":
-  return (
-    <PitchTuneGame
-      studentId={studentId ?? null}
-      studentRowId={studentRowId}
-      studentName={studentName}
-      rangeLowLabel={rangeLowLabel}
-      rangeHighLabel={rangeHighLabel}
-    />
-  );
+        return (
+          <PitchTuneGame
+            studentId={studentId ?? null}
+            studentRowId={studentRowId}
+            studentName={studentName}
+            rangeLowLabel={rangeLowLabel}
+            rangeHighLabel={rangeHighLabel}
+          />
+        );
 
-case "key-signature":
-  return (
-    <KeySignatureGame
-      studentId={studentId ?? null}
-      studentRowId={studentRowId}
-      studentName={studentName}
-      rangeLowLabel={rangeLowLabel}
-      rangeHighLabel={rangeHighLabel}
-    />
-  );
+      case "key-signature":
+        return (
+          <KeySignatureGame
+            studentId={studentId ?? null}
+            studentRowId={studentRowId}
+            studentName={studentName}
+            rangeLowLabel={rangeLowLabel}
+            rangeHighLabel={rangeHighLabel}
+          />
+        );
 
       case "pitch-time":
         return (
@@ -75,6 +75,7 @@ case "key-signature":
             rangeHighLabel={rangeHighLabel}
           />
         );
+
       case "training-game":
         return subview === "curriculum" ? (
           <TrainingCurriculum
@@ -105,6 +106,7 @@ case "key-signature":
 
       case "vision-setup":
         return <VisionSetup />;
+
       default:
         return null;
     }
@@ -133,17 +135,6 @@ case "key-signature":
 
   return (
     <div className="relative min-h-dvh h-dvh bg-[#f0f0f0]">
-      <div className="fixed left-4 top-4 z-50">
-        <button
-          type="button"
-          onClick={openMenu}
-          className="px-4 py-2 rounded-md border border-[#d2d2d2] bg-[#f0f0f0] text-[#0f0f0f] text-sm hover:bg-white transition shadow-sm"
-          title="Back to menu"
-          aria-label="Back to menu"
-        >
-          ← Back to Menu
-        </button>
-      </div>
       <div className="h-full">{content}</div>
     </div>
   );

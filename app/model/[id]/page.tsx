@@ -4,7 +4,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import PrivateHeader from '@/components/header/PrivateHeader';
 import type { ModelRow } from '@/lib/client-cache';
 import { getImageUrlCached, ensureSessionReady } from '@/lib/client-cache';
 import StudentCard from '@/components/student-home/StudentCard';
@@ -95,8 +94,7 @@ export default function ModelDetailPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
-      <PrivateHeader />
-      <div id="top" className="max-w-5xl mx-auto pt-28 p-6 w-full">
+      <div id="top" className="max-w-5xl mx-auto p-6 pt-8 w-full">
         {loading ? null : err ? (
           <p className="text-red-600 text-center">{err}</p>
         ) : !m ? (
