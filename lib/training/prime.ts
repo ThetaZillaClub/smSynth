@@ -1,19 +1,25 @@
 // lib/training/prime.ts
-export async function primeTrainingSession(studentId: string) {
-  // 1) Ask server to set the httpOnly cookie
-  await fetch("/api/session/active-student", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ studentId }),
-  }).catch(() => { /* swallow; not fatal */ });
+async function fetchJsonNoStore<T = any>(url: string, init?: RequestInit): Promise<T | null> {
+  try {
+    const res = await fetch(url, { credentials: "include", cache: "no-store", ...init });
+    if (!res.ok) return null;
+    return (await res.json().catch(() => null)) as T | null;
+  } catch {
+    return null;
+  }
+}
 
-  // 2) Warm the browser cache with the student row (private, max-age=30)
-  await fetch(`/api/students/${encodeURIComponent(studentId)}`, {
-    credentials: "include",
-    // default caching behavior will store the response with Cache-Control headers
-  }).catch(() => { /* swallow; still OK */ });
+/**
+ * Warm the data needed for training. If `studentId` is omitted, derive it
+ * from /api/students/current (single-student model). All requests are no-store.
+ */
+export async function primeTrainingSession(studentId?: string) {
+  if (!studentId) {
+    const row = await fetchJsonNoStore<{ id?: string }>("/api/students/current");
+    studentId = row?.id ?? undefined;
+  }
+  if (!studentId) return;
 
-  // 3) (Optional) also warm "current" if your training screen sometimes calls it
-  await fetch(`/api/students/current`, { credentials: "include" }).catch(() => {});
+  await fetchJsonNoStore(`/api/students/${encodeURIComponent(studentId)}`).catch(() => {});
+  await fetchJsonNoStore(`/api/students/current`).catch(() => {});
 }

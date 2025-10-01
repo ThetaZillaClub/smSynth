@@ -3,7 +3,12 @@
 
 import * as React from "react";
 import ProfileLayout from "./profile/profile-layout";
-
+type Bootstrap = {
+  uid: string;
+  displayName: string;
+  avatarPath: string | null;
+  studentImagePath: string | null;
+};
 type RowKey =
   | "profile"
   | "audio"
@@ -83,8 +88,8 @@ const ROWS: Row[] = [
   },
 ];
 
-export default function SettingsShell() {
-  const [active, setActive] = React.useState<RowKey>("profile");
+export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
+  const [active, setActive] = React.useState<"profile"|"audio"|"vision"|"gameplay"|"account"|"membership">("profile");
 
   // mimic main sidebar
   const baseRow = [
@@ -129,7 +134,7 @@ export default function SettingsShell() {
         <section className={active === "profile" ? "p-6 min-h-[420px]" : "bg-white p-6 min-h-[420px]"}>
           <div className="max-w-2xl">
             {active === "profile" ? (
-              <ProfileLayout />
+              <ProfileLayout bootstrap={bootstrap} />
             ) : (
               <>
                 <h2 className="text-2xl font-semibold text-[#0f0f0f]">

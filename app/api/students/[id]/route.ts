@@ -1,7 +1,6 @@
 // app/api/students/[id]/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import crypto from "node:crypto";
 
 type StudentRow = {
   id: string;
@@ -15,12 +14,10 @@ type StudentRow = {
   updated_at?: string;
 };
 
-function makeETag(payload: unknown) {
-  const h = crypto.createHash("sha1").update(JSON.stringify(payload)).digest("base64");
-  return `"${h}"`;
-}
-
-export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+/**
+ * Never emit 304s here either; return a body with `no-store`.
+ */
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
 
   const supabase = await createClient();
@@ -30,27 +27,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     .eq("id", id)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
-
-  const body = data as StudentRow;
-  const etag = makeETag(body);
-  const inm = req.headers.get("if-none-match");
-  if (inm && inm === etag) {
-    return new Response(null, {
-      status: 304,
-      headers: {
-        ETag: etag,
-        "Cache-Control": "private, max-age=600, stale-while-revalidate=1200",
-        Vary: "Cookie",
-      },
-    });
+  if (error) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 404, headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } }
+    );
   }
 
-  return NextResponse.json(body, {
-    headers: {
-      ETag: etag,
-      "Cache-Control": "private, max-age=600, stale-while-revalidate=1200",
-      Vary: "Cookie",
-    },
+  return NextResponse.json(data as StudentRow, {
+    headers: { "Cache-Control": "private, no-store", Vary: "Cookie" },
   });
 }

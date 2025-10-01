@@ -3,38 +3,66 @@
 
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { getImageUrlCached } from '@/lib/client-cache';
 import AvatarRow from './avatar/AvatarRow';
 import DisplayNameRow from './display-name/DisplayNameRow';
 
-export default function ProfileLayout() {
-  const supabase = React.useMemo(() => createClient(), []);
-  const [displayName, setDisplayName] = React.useState<string>('You');
+type Bootstrap = {
+  uid: string;
+  displayName: string;
+  avatarPath: string | null;
+  studentImagePath: string | null;
+};
 
+export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
+  const supabase = React.useMemo(() => createClient(), []);
+  const [uid, setUid] = React.useState<string | null>(bootstrap.uid);
+  const [displayName, setDisplayName] = React.useState<string>(bootstrap.displayName);
+  const [avatarPath, setAvatarPath] = React.useState<string | null>(bootstrap.avatarPath);
+  const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
+
+  // Resolve a URL for either avatarPath or studentImagePath (no extra GETs)
   React.useEffect(() => {
     let cancel = false;
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (cancel) return;
-      const user = session?.user;
-      const dn =
-        (user?.user_metadata?.display_name as string | undefined)?.trim() ||
-        user?.email?.split('@')?.[0] ||
-        'You';
-      setDisplayName(dn);
+      try {
+        if (bootstrap.avatarPath) {
+          const { data, error } = await supabase.storage.from('avatars').createSignedUrl(bootstrap.avatarPath, 600);
+          if (!cancel) setAvatarUrl(error ? null : (data?.signedUrl ?? null));
+          return;
+        }
+        if (bootstrap.studentImagePath) {
+          const url = await getImageUrlCached(supabase, bootstrap.studentImagePath);
+          if (!cancel) setAvatarUrl(url ?? null);
+          // Hint Sidebar for future routes so it won’t fetch:
+          try { localStorage.setItem('ptp:studentImagePath', bootstrap.studentImagePath); } catch {}
+        } else {
+          if (!cancel) setAvatarUrl(null);
+        }
+      } catch {
+        if (!cancel) setAvatarUrl(null);
+      }
     })();
     return () => { cancel = true; };
-  }, [supabase]);
+  }, [supabase, bootstrap.avatarPath, bootstrap.studentImagePath]);
+
+  React.useEffect(() => { setUid(bootstrap.uid); }, [bootstrap.uid]);
+  React.useEffect(() => { setDisplayName(bootstrap.displayName); }, [bootstrap.displayName]);
+  React.useEffect(() => { setAvatarPath(bootstrap.avatarPath); }, [bootstrap.avatarPath]);
 
   return (
     <div className="space-y-8">
-      {/* Row 1: Avatar + Display Name (on shell background, not a card) */}
-      <AvatarRow name={displayName} />
-
-      {/* Row 2: Display Name field + Update flow */}
-      <DisplayNameRow
-        initialName={displayName}
-        onChanged={(next) => setDisplayName(next)}
+      <AvatarRow
+        name={displayName}
+        uid={uid}
+        initialAvatarPath={avatarPath}
+        initialAvatarUrl={avatarUrl}
+        onAvatarChanged={(url, path) => {
+          setAvatarUrl(url);
+          setAvatarPath(path);
+        }}
       />
+      <DisplayNameRow initialName={displayName} onChanged={setDisplayName} />
     </div>
   );
 }

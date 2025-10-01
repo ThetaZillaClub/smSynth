@@ -1,4 +1,4 @@
-// components/shell/AuthAwareShell.tsx
+// components/sidebar/AuthAwareShell.tsx
 'use client';
 
 import * as React from 'react';
