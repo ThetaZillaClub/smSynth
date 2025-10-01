@@ -13,7 +13,14 @@ type Props = {
   beatsRequired?: number;
   centsWindow?: number;
   a4Hz?: number;
-  onConfirm: (capturedHz: number) => void;
+
+  // NEW: let the parent (stage/footer) own actions & flow
+  showActions?: boolean;                  // default true; stage will pass false
+  resetKey?: number;                      // when this changes, hard reset internals
+  onCompleted?: (capturedHz: number) => void;
+  onVisual?: (visualSec: number, targetSec: number) => void;
+
+  onConfirm?: (capturedHz: number) => void; // kept for backward compat (unused by stage)
 };
 
 export default function RangeCapture({
@@ -25,10 +32,17 @@ export default function RangeCapture({
   beatsRequired = 1,
   centsWindow = 75,
   a4Hz = 440,
+  showActions = true,
+  resetKey,
+  onCompleted,
+  onVisual,
   onConfirm,
 }: Props) {
   const targetSec = useMemo(
-    () => (typeof holdSec === "number" && isFinite(holdSec) && holdSec > 0 ? holdSec : (60 / bpm) * beatsRequired),
+    () =>
+      typeof holdSec === "number" && isFinite(holdSec) && holdSec > 0
+        ? holdSec
+        : (60 / bpm) * beatsRequired,
     [holdSec, bpm, beatsRequired]
   );
 
@@ -97,6 +111,9 @@ export default function RangeCapture({
     capturedForRef.current = null;
   };
 
+  // Reset when step (mode) changes or parent bumps resetKey
+  useEffect(() => { hardReset(); }, [mode, resetKey]);
+
   const moveTowards = (cur: number, tgt: number, maxDelta: number) => {
     const diff = tgt - cur;
     if (Math.abs(diff) <= maxDelta) return tgt;
@@ -114,12 +131,8 @@ export default function RangeCapture({
     if (sameModeComplete) next = latestTargetSec.current;
     visualSecRef.current = next;
     setVisualSec(next);
+    try { onVisual?.(next, latestTargetSec.current); } catch {}
   };
-
-  useEffect(() => {
-    hardReset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
 
   const tick = (ts: number) => {
     const last = lastTsRef.current ?? ts;
@@ -175,8 +188,7 @@ export default function RangeCapture({
     }
     insideRef.current = inWarmup ? true : isInside;
 
-    const rate =
-      inWarmup ? FOLLOW_HZ_WARMUP : (insideRef.current ? FOLLOW_HZ_INSIDE : CHASE_HZ_OUTSIDE);
+    const rate = inWarmup ? FOLLOW_HZ_WARMUP : (insideRef.current ? FOLLOW_HZ_INSIDE : CHASE_HZ_OUTSIDE);
     baseHzRef.current = moveTowards(baseHzRef.current as number, hz, rate * dt);
 
     if (!sameModeComplete) {
@@ -225,24 +237,23 @@ export default function RangeCapture({
       holdSecRef.current = latestTargetSec.current;
       visualSecRef.current = latestTargetSec.current;
       setVisualSec(latestTargetSec.current);
+
+      try { onCompleted?.(med); } catch {}
     }
   };
 
   useEffect(() => {
     lastTsRef.current = null;
-
     if (!active) {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
       return;
     }
-
     const step = (ts: number) => {
       tick(ts);
       rafRef.current = requestAnimationFrame(step);
     };
     rafRef.current = requestAnimationFrame(step);
-
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -260,10 +271,8 @@ export default function RangeCapture({
       : `Hold it steadily for ${beatsRequired} beat${beatsRequired === 1 ? "" : "s"} (≈${targetSec.toFixed(1)} second${targetSec === 1 ? "" : "s"}).`;
 
   const progressPct = Math.max(0, Math.min(100, (visualSec / targetSec) * 100));
-
   const effectiveCapturedHz = capturedFor === mode ? capturedHz : null;
 
-  // Show the snapped (equal-tempered) Hz that matches what we save to DB
   const display =
     effectiveCapturedHz != null
       ? (() => {
@@ -275,16 +284,16 @@ export default function RangeCapture({
       : "—";
 
   return (
-    <div className="w-full max-w-5xl rounded-md border border-[#d2d2d2] bg-[#ebebeb] p-6">
+    <div className="w-full max-w-5xl rounded-2xl border border-[#d2d2d2] bg-[#ebebeb] p-6 shadow-[0_6px_24px_rgba(0,0,0,0.12)]">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-[#0f0f0f]">{title}</h2>
-          <p className="text-sm text-[#2d2d2d]">{sub}</p>
         </div>
         <div className="text-sm text-[#2d2d2d]">
           Target: <span className="font-mono">{targetSec.toFixed(1)}s</span>
         </div>
       </div>
+      <p className="text-sm text-[#2d2d2d] mt-1">{sub}</p>
 
       <div className="mt-4">
         <div className="h-2 w-full bg-[#dcdcdc] rounded overflow-hidden">
@@ -302,24 +311,45 @@ export default function RangeCapture({
           <div className="text-xl font-mono text-[#0f0f0f]">{display}</div>
         </div>
 
-        <div className="flex items-center sm:justify-end gap-2">
-          <button
-            type="button"
-            onClick={hardReset}
-            className="px-4 h-11 rounded-md bg-[#ebebeb] border border-[#d2d2d2] text-[#0f0f0f] hover:opacity-90 active:scale-[0.98]"
-          >
-            Try Again
-          </button>
-          {completed && capturedFor === mode && (
+        {showActions && (
+          <div className="flex items-center sm:justify-end gap-2">
             <button
               type="button"
-              onClick={() => effectiveCapturedHz != null && onConfirm(effectiveCapturedHz)}
-              className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] font-medium transition duration-200 hover:opacity-90 active:scale-[0.98]"
+              onClick={() => {
+                // local reset
+                baseHzRef.current = null;
+                anchorAgeSecRef.current = 0;
+                bufRef.current = [];
+                holdSecRef.current = 0;
+                insideRef.current = false;
+                unvoicedGapSecRef.current = 0;
+                outsideGapSecRef.current = 0;
+                visualSecRef.current = 0;
+                setVisualSec(0);
+                setCapturedHz(null);
+                setCompleted(false);
+                setCapturedFor(null);
+                completedRef.current = false;
+                capturedForRef.current = null;
+              }}
+              className="px-4 h-11 rounded-md bg-[#ebebeb] border border-[#d2d2d2] text-[#0f0f0f] hover:opacity-90 active:scale-[0.98]"
             >
-              {mode === "low" ? "Confirm Low Note" : "Confirm High Note"}
+              Try Again
             </button>
-          )}
-        </div>
+            {completed && capturedFor === mode && (
+              <button
+                type="button"
+                onClick={() => {
+                  const v = effectiveCapturedHz;
+                  if (v != null) onConfirm?.(v);
+                }}
+                className="px-4 h-11 rounded-md bg-[#0f0f0f] text-[#f0f0f0] font-medium transition duration-200 hover:opacity-90 active:scale-[0.98]"
+              >
+                {mode === "low" ? "Confirm Low Note" : "Confirm High Note"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

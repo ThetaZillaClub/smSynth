@@ -118,9 +118,7 @@ export default function VisionStage() {
   const { playLeadInTicks } = usePhrasePlayer();
 
   useEffect(() => {
-    return () => {
-      try { clearSkeleton(); } catch {}
-    };
+    return () => { try { clearSkeleton(); } catch {} };
   }, [clearSkeleton]);
 
   const startCalibration = useCallback(async () => {
@@ -182,12 +180,15 @@ export default function VisionStage() {
         const filtered = iqrFilter(deltasMs.filter((d) => Number.isFinite(d)));
         const medAbs = median(filtered.map((d) => Math.abs(d)));
 
-        // No hard 40ms floor — report what we measured (fallback to 90ms if bad)
-        const latency = Math.round(Number.isFinite(medAbs) ? medAbs : 90);
+        // 🔧 No fallback — if not finite, we report null (UI already shows "No reliable matches").
+        const latency: number | null = Number.isFinite(medAbs) ? Math.round(medAbs) : null;
 
         setMatched(deltasMs.length);
         setResultMs(latency);
-        try { localStorage.setItem(KEY, String(latency)); } catch {}
+        try {
+          if (latency != null) localStorage.setItem(KEY, String(latency));
+          else localStorage.removeItem(KEY);
+        } catch {}
       }, Math.ceil(leadMs + runMs) + 30);
     } catch (e) {
       setError((e as Error)?.message ?? "Audio error");

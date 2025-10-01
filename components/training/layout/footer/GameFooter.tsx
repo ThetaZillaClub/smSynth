@@ -49,7 +49,7 @@ export default function GameFooter({
       {/* 90% width container, centered */}
       <div className="w-[90%] mx-auto">
         {/* rounded + outer shadow; no border */}
-        <div className="rounded-2xl shadow-[0_6px_24px_rgba(0,0,0,0.12)] px-3 md:px-4 py-2 bg-transparent">
+        <div className="rounded-2xl shadow-[0_6px_24px_rgba(0,0,0,0.12)] px-3 md:px-4 py-2 bg-[#f4f4f4]">
           <div className="grid grid-cols-[1fr_auto_minmax(0,1fr)] items-center gap-4">
             {/* left spacer (keeps center truly centered) */}
             <div aria-hidden />

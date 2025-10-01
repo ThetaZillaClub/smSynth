@@ -1,13 +1,19 @@
-'use client';
+// app/setup/range/page.tsx
+"use client";
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
+import RangeSetup from "@/components/range/RangeSetup";
+import { primeAudioOnce } from "@/lib/training/primeAudio";
 
-export default function RangeSetupRedirect() {
-  const router = useRouter();
+export default function RangeSetupPage() {
+  const sp = useSearchParams();
+  const studentId = sp?.get("student_id") ?? null;
+
+  // Kick off audio/worklet as the setup page opens
   useEffect(() => {
-    try { localStorage.setItem('appmode:v2', JSON.stringify({ view: 'exercise', current: 'range-setup' })); } catch {}
-    router.replace('/training');
-  }, [router]);
-  return null;
+    void primeAudioOnce();
+  }, []);
+
+  return <RangeSetup studentId={studentId} />;
 }
