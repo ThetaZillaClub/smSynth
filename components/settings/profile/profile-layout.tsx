@@ -10,8 +10,8 @@ import DisplayNameRow from './display-name/DisplayNameRow';
 type Bootstrap = {
   uid: string;
   displayName: string;
-  avatarPath: string | null;
-  studentImagePath: string | null;
+  avatarPath: string | null;       // may be null (we're avoiding /auth/v1/user on server)
+  studentImagePath: string | null; // models.image_path (server-fetched)
 };
 
 export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
@@ -21,20 +21,36 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
   const [avatarPath, setAvatarPath] = React.useState<string | null>(bootstrap.avatarPath);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
 
-  // Resolve a URL for either avatarPath or studentImagePath (no extra GETs)
+  // Resolve URL from either avatarPath or studentImagePath (no extra GET endpoints; Storage signing only)
   React.useEffect(() => {
     let cancel = false;
     (async () => {
       try {
+        // Prefer explicit avatar (auth user_metadata) if we already have it
         if (bootstrap.avatarPath) {
           const { data, error } = await supabase.storage.from('avatars').createSignedUrl(bootstrap.avatarPath, 600);
           if (!cancel) setAvatarUrl(error ? null : (data?.signedUrl ?? null));
           return;
         }
+
+        // If server didn’t pass avatarPath (to avoid /auth/v1/user), try client session (no network)
+        const { data: sess } = await supabase.auth.getSession();
+        const metaAvatar = (sess.session?.user?.user_metadata?.avatar_path as string | undefined) ?? null;
+        if (metaAvatar) {
+          const { data, error } = await supabase.storage.from('avatars').createSignedUrl(metaAvatar, 600);
+          if (!cancel) {
+            if (!error) {
+              setAvatarPath(metaAvatar);
+              setAvatarUrl(data?.signedUrl ?? null);
+              return;
+            }
+          }
+        }
+
+        // Fallback: student image from models.image_path
         if (bootstrap.studentImagePath) {
           const url = await getImageUrlCached(supabase, bootstrap.studentImagePath);
           if (!cancel) setAvatarUrl(url ?? null);
-          // Hint Sidebar for future routes so it won’t fetch:
           try { localStorage.setItem('ptp:studentImagePath', bootstrap.studentImagePath); } catch {}
         } else {
           if (!cancel) setAvatarUrl(null);
