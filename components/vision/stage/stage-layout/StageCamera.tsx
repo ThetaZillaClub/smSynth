@@ -18,7 +18,7 @@ const StageCamera = forwardRef<HTMLVideoElement, Props>(function StageCamera(
       playsInline
       muted
       autoPlay
-      className={className ?? "absolute inset-0 w-full h-full object-contain bg-black"}
+      className={className ?? "absolute inset-0 w-full h-full object-contain bg-[#f4f4f4]"}
       {...rest}
     />
   );

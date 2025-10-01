@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { getImageUrlCached } from '@/lib/client-cache';
 import AvatarRow from './avatar/AvatarRow';
 import DisplayNameRow from './display-name/DisplayNameRow';
+import SignOutRow from './signout/SignOutRow';
 
 type Bootstrap = {
   uid: string;
@@ -75,6 +76,8 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
       />
       {/* onChanged updates our local state immediately after update succeeds */}
       <DisplayNameRow initialName={displayName} onChanged={setDisplayName} />
+      {/* Sign out action */}
+      <SignOutRow />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 "use client";
 import React, { useCallback, useRef, useState, useEffect, useMemo } from "react";
 import { HandLandmarker } from "@mediapipe/tasks-vision";
-import { StageCamera, StageCanvas, StageCenterUI, StageFooter } from "./stage-layout";
+import { StageCamera, StageCanvas, StageFooter } from "./stage-layout";
 import useCameraStream from "./hooks/useCameraStream";
 import useHandLandmarker from "./hooks/useHandLandmarker";
 import useCanvasSizer from "./hooks/useCanvasSizer";
@@ -26,7 +26,7 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
 ];
 
 export default function VisionStage() {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const stageAreaRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -38,13 +38,11 @@ export default function VisionStage() {
 
   const [camReady, setCamReady] = useState(false);
 
-  // Tempo
   const bpm = 80;
   const secPerBeat = 60 / bpm;
   const leadBeats = 4;
   const runBeats = 16;
 
-  // Camera (stable constraints)
   const videoConstraints = useMemo<MediaStreamConstraints["video"]>(
     () => ({ facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }),
     []
@@ -52,7 +50,6 @@ export default function VisionStage() {
 
   useCameraStream({ videoRef, onError: setError, constraints: videoConstraints });
 
-  // Video ready?
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -70,16 +67,13 @@ export default function VisionStage() {
     };
   }, []);
 
-  // Hand landmarker
   const { landmarkerRef, ready: lmReady } = useHandLandmarker(setError) as {
     landmarkerRef: React.RefObject<HandLandmarker | null>;
     ready: boolean;
   };
 
-  // Canvas sizing
-  useCanvasSizer(wrapRef, canvasRef, { maxDpr: 2 });
+  useCanvasSizer(stageAreaRef, canvasRef, { maxDpr: 2 });
 
-  // Skeleton overlay
   const { draw: drawSkeleton, clear: clearSkeleton, pulse } = useSkeletonDrawer(canvasRef, videoRef, {
     connections: HAND_CONNECTIONS,
     drawEveryN: 1,
@@ -88,23 +82,21 @@ export default function VisionStage() {
     pulseMs: 140,
   } as any);
 
-  // Two-stage + velocity-gated config
   const detectionConfig: DetectionConfig = useMemo(
     () => ({
-      fireUpEps: 0.004,     // EARLY: ~0.4% frame height upward
-      confirmUpEps: 0.012,  // CONFIRM: ~1.2% upward (guarded)
-      downRearmEps: 0.006,  // re-arm after ~0.6% downward travel
+      fireUpEps: 0.004,
+      confirmUpEps: 0.012,
+      downRearmEps: 0.006,
       refractoryMs: 90,
       noiseEps: 0.0015,
-      minUpVel: 0.35,       // minimal instantaneous upward speed to allow EARLY
+      minUpVel: 0.35,
     }),
     []
   );
 
-  // Enable detection only when camera + model are ready
   const detEnabled = camReady && lmReady;
   const drawEnabled = detEnabled && phase === "idle";
-  const recording  = phase === "run";
+  const recording = phase === "run";
 
   const { eventsSecRef, resetEvents } = useDetectionLoop({
     videoRef,
@@ -115,20 +107,16 @@ export default function VisionStage() {
     config: detectionConfig,
     onError: setError,
     recording,
-    detectEveryN: 1,  // every frame
+    detectEveryN: 1,
     maxEvents: 128,
     drawEnabled,
     enabled: detEnabled,
-    onBeat: () => { if (drawEnabled) pulse(); }, // pulse on CONFIRM, but score uses EARLY time
+    onBeat: () => { if (drawEnabled) pulse(); },
   });
 
-  // UI beat counter
   const uiBeat = useUiBeatCounter(phase, anchorMs, secPerBeat, leadBeats, runBeats);
-
-  // Audio ticks
   const { playLeadInTicks } = usePhrasePlayer();
 
-  // Cleanup
   useEffect(() => {
     return () => {
       try { clearSkeleton(); } catch {}
@@ -144,19 +132,17 @@ export default function VisionStage() {
       resetEvents();
       setError(null);
 
-      // Perf-time anchor ~550ms ahead
       const startPerfMs = performance.now() + 550;
-
       setAnchorMs(startPerfMs);
       setPhase("lead");
 
-      // Schedule ticks
+      // schedule ticks relative to the same perf anchor
       playLeadInTicks(leadBeats, secPerBeat, startPerfMs);
       const runStartMs = startPerfMs + leadBeats * secPerBeat * 1000;
       playLeadInTicks(runBeats, secPerBeat, runStartMs);
 
       const leadMs = leadBeats * secPerBeat * 1000;
-      const runMs  = runBeats  * secPerBeat * 1000;
+      const runMs = runBeats * secPerBeat * 1000;
 
       // into RUN
       window.setTimeout(() => setPhase("run"), Math.ceil(leadMs) + 12);
@@ -164,14 +150,20 @@ export default function VisionStage() {
       // finish → compute result
       window.setTimeout(() => {
         setPhase("done");
+
+        // expected beat times in SECONDS since anchor
         const expected: number[] = Array.from(
           { length: runBeats },
           (_, i) => leadBeats * secPerBeat + i * secPerBeat
         );
+
+        // detected tSec values (SECONDS since anchor)
         const detected = eventsSecRef.current.slice();
+
+        // greedy 1-1 match with 400ms bound
         const maxMs = 400;
         const used = new Set<number>();
-        const deltas: number[] = [];
+        const deltasMs: number[] = []; // (detected - expected) in ms (signed)
 
         for (const tExp of expected) {
           let bestJ = -1, bestErr = Infinity;
@@ -182,58 +174,54 @@ export default function VisionStage() {
           }
           if (bestJ >= 0 && bestErr <= maxMs) {
             used.add(bestJ);
-            deltas.push((detected[bestJ] - tExp) * 1000);
+            deltasMs.push((detected[bestJ] - tExp) * 1000);
           }
         }
 
-        const filtered = iqrFilter(deltas.filter((d) => isFinite(d)));
-        const med = median(filtered);
-        const latency = Math.max(40, Math.round(isFinite(med) ? med : 90));
-        setMatched(deltas.length);
+        // Robust center: IQR filter, then median ABS error
+        const filtered = iqrFilter(deltasMs.filter((d) => Number.isFinite(d)));
+        const medAbs = median(filtered.map((d) => Math.abs(d)));
+
+        // No hard 40ms floor — report what we measured (fallback to 90ms if bad)
+        const latency = Math.round(Number.isFinite(medAbs) ? medAbs : 90);
+
+        setMatched(deltasMs.length);
         setResultMs(latency);
         try { localStorage.setItem(KEY, String(latency)); } catch {}
       }, Math.ceil(leadMs + runMs) + 30);
     } catch (e) {
       setError((e as Error)?.message ?? "Audio error");
     }
-  }, [
-    phase,
-    resetEvents,
-    secPerBeat,
-    leadBeats,
-    runBeats,
-    playLeadInTicks,
-    eventsSecRef,
-  ]);
+  }, [phase, resetEvents, secPerBeat, leadBeats, runBeats, playLeadInTicks, eventsSecRef]);
 
   return (
-    <div
-      ref={wrapRef}
-      className="relative w-full h-full bg-black"
-      onClick={() => { if (phase === "idle") startCalibration(); }}
-      style={{ cursor: phase === "idle" ? "pointer" : "default" }}
-      title={phase === "idle" ? "Click anywhere to start calibration" : undefined}
-    >
-      <StageCamera
-        ref={videoRef}
-        aria-label="Camera preview"
-        className="absolute inset-0 w-full h-full object-contain bg-black"
-      />
-      <StageCanvas
-        ref={canvasRef}
-        aria-hidden
-        className={[
-          "absolute inset-0 w-full h-full pointer-events-none transition-opacity",
-          drawEnabled ? "opacity-100" : "opacity-0",
-        ].join(" ")}
-      />
-      <StageCenterUI phase={phase} uiBeat={uiBeat} onStart={startCalibration} />
+    <div className="w-full h-full flex flex-col bg-transparent" style={{ cursor: "default" }}>
+      {/* STAGE AREA (constrained by footer) */}
+      <div ref={stageAreaRef} className="relative flex-1 min-h-0 bg-transparent">
+        <StageCamera
+          ref={videoRef}
+          aria-label="Camera preview"
+          className="absolute inset-0 w-full h-full object-contain bg-transparent"
+        />
+        <StageCanvas
+          ref={canvasRef}
+          aria-hidden
+          className={[
+            "absolute inset-0 w-full h-full pointer-events-none transition-opacity",
+            detEnabled && phase === "idle" ? "opacity-100" : "opacity-0",
+          ].join(" ")}
+        />
+      </div>
+
+      {/* FOOTER (normal flow, white card) */}
       <StageFooter
         phase={phase}
+        uiBeat={uiBeat}
         runBeats={runBeats}
         matched={matched}
         resultMs={resultMs}
         error={error}
+        onStart={startCalibration}
         onReset={() => setPhase("idle")}
       />
     </div>
