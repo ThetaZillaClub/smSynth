@@ -10,7 +10,7 @@ import { Dropzone, DropzoneContent, DropzoneEmptyState } from '@/components/auth
 type Props = {
   name: string;
   uid: string | null;                         // provided by parent; avoids another getSession() call
-  initialAvatarPath?: string | null;          // user_metadata.avatar_path if any
+  initialAvatarPath?: string | null;          // (unused as SSoT) - kept for compatibility
   initialAvatarUrl?: string | null;           // already-signed (or public) URL ready to render
   onAvatarChanged?: (url: string | null, path: string | null) => void;
 };
@@ -42,10 +42,10 @@ export default function AvatarRow({
     upsert: true,
   });
 
-  // When upload succeeds, write avatar_path to user metadata and resolve a signed URL
+  // When upload succeeds, write image_path to the LATEST models row and resolve a signed URL
   React.useEffect(() => {
     (async () => {
-      if (!uid) return;                        // should always exist on /settings (server guards auth)
+      if (!uid) return;                        // should always exist on /settings
       if (!dz.isSuccess || dz.successes.length === 0) return;
 
       try {
@@ -53,15 +53,34 @@ export default function AvatarRow({
         const filename = dz.successes[0];
         const path = `${uid}/${filename}`;
 
-        const { error: updErr } = await supabase.auth.updateUser({ data: { avatar_path: path } });
+        // Find latest model id for this user
+        const { data: latest, error: findErr } = await supabase
+          .from('models')
+          .select('id')
+          .eq('uid', uid)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (findErr) throw findErr;
+        if (!latest?.id) throw new Error('No model row to update.');
+
+        // Update models.image_path
+        const { error: updErr } = await supabase
+          .from('models')
+          .update({ image_path: path })
+          .eq('id', latest.id);
+
         if (updErr) throw updErr;
 
+        // Resolve a signed URL for the new avatar
         const { data, error } = await supabase.storage.from('avatars').createSignedUrl(path, 600);
         if (error) throw error;
 
         const url = data?.signedUrl ?? null;
         setAvatarPath(path);
         setAvatarUrl(url);
+        try { localStorage.setItem('ptp:studentImagePath', path); } catch {}
         onAvatarChanged?.(url, path);
       } catch (e: any) {
         setErr(e?.message || 'Failed to save new avatar.');

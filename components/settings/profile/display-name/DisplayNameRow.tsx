@@ -29,8 +29,31 @@ export default function DisplayNameRow({ initialName, onChanged }: Props) {
     try {
       const next = value.trim();
       if (!next) throw new Error("Display name can't be empty.");
-      const { error } = await supabase.auth.updateUser({ data: { display_name: next } });
-      if (error) throw error;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) throw new Error('Not signed in');
+
+      // Find latest model id for this user
+      const { data: latest, error: findErr } = await supabase
+        .from('models')
+        .select('id')
+        .eq('uid', uid)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (findErr) throw findErr;
+      if (!latest?.id) throw new Error('No model row to update.');
+
+      // Update creator_display_name
+      const { error: updErr } = await supabase
+        .from('models')
+        .update({ creator_display_name: next })
+        .eq('id', latest.id);
+
+      if (updErr) throw updErr;
+
       onChanged(next);
       setEditing(false);
     } catch (e: any) {

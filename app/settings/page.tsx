@@ -1,38 +1,66 @@
 // app/settings/page.tsx
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import SettingsShell from "@/components/settings/SettingsShell";
+'use client';
+
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+import SettingsShell from '@/components/settings/SettingsShell';
 
 function pickDisplayNameFromEmail(email?: string | null) {
-  return email?.split("@")?.[0] ?? "You";
+  return email?.split('@')?.[0] ?? 'You';
 }
 
-export default async function SettingsPage() {
-  const supabase = await createClient();
+export default function SettingsPage() {
+  const supabase = React.useMemo(() => createClient(), []);
+  const router = useRouter();
+  const [bootstrap, setBootstrap] = React.useState<null | {
+    uid: string;
+    displayName: string;
+    avatarPath: string | null;
+    studentImagePath: string | null;
+  }>(null);
 
-  // ✅ No network call: reads JWT claims from cookies
-  const { data } = await supabase.auth.getClaims();
-  const uid = (data?.claims?.sub as string | undefined) ?? null;
-  const email = (data?.claims?.email as string | undefined) ?? null;
+  React.useEffect(() => {
+    let cancel = false;
 
-  if (!uid) redirect("/auth/login");
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        router.replace('/auth/login?next=/settings');
+        return;
+      }
 
-  // Single-student model: one latest row
-  const { data: row } = await supabase
-    .from("models")
-    .select("id, image_path, creator_display_name")
-    .eq("uid", uid)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+      // Get latest model row for this user (SSoT for display name + image)
+      const { data: model } = await supabase
+        .from('models')
+        .select('creator_display_name, image_path')
+        .eq('uid', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-  const bootstrap = {
-    uid,
-    displayName: pickDisplayNameFromEmail(email),
-    // We skip user_metadata here to avoid /auth/v1/user. Client will hydrate avatar_path if present.
-    avatarPath: null,
-    studentImagePath: row?.image_path ?? null,
-  };
+      if (cancel) return;
+
+      setBootstrap({
+        uid: user.id,
+        displayName:
+          (model?.creator_display_name?.trim?.() ? model!.creator_display_name!.trim() : null) ??
+          pickDisplayNameFromEmail(user.email),
+        avatarPath: null, // we now keep avatar in models.image_path, not in auth metadata
+        studentImagePath: model?.image_path ?? null,
+      });
+    })();
+
+    return () => {
+      cancel = true;
+    };
+  }, [supabase, router]);
+
+  if (!bootstrap) {
+    // (optional) very light skeleton
+    return <div className="min-h-screen bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2]" />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">

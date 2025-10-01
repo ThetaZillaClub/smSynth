@@ -9,9 +9,9 @@ import DisplayNameRow from './display-name/DisplayNameRow';
 
 type Bootstrap = {
   uid: string;
-  displayName: string;
-  avatarPath: string | null;       // may be null (we're avoiding /auth/v1/user on server)
-  studentImagePath: string | null; // models.image_path (server-fetched)
+  displayName: string;            // client bootstrap value
+  avatarPath: string | null;      // not used as SSoT (kept for compat), image from models.image_path
+  studentImagePath: string | null;
 };
 
 export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
@@ -21,49 +21,44 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
   const [avatarPath, setAvatarPath] = React.useState<string | null>(bootstrap.avatarPath);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
 
-  // Resolve URL from either avatarPath or studentImagePath (no extra GET endpoints; Storage signing only)
+  // Resolve avatar URL from latest models.image_path (or from bootstrap.studentImagePath)
   React.useEffect(() => {
     let cancel = false;
     (async () => {
       try {
-        // Prefer explicit avatar (auth user_metadata) if we already have it
-        if (bootstrap.avatarPath) {
-          const { data, error } = await supabase.storage.from('avatars').createSignedUrl(bootstrap.avatarPath, 600);
-          if (!cancel) setAvatarUrl(error ? null : (data?.signedUrl ?? null));
+        // Prefer fresh fetch of the latest image_path (cheap)
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user;
+        if (!user) return;
+
+        const { data: latest } = await supabase
+          .from('models')
+          .select('image_path')
+          .eq('uid', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const imgPath = latest?.image_path ?? bootstrap.studentImagePath ?? null;
+        if (!imgPath) {
+          if (!cancel) setAvatarUrl(null);
           return;
         }
 
-        // If server didn’t pass avatarPath (to avoid /auth/v1/user), try client session (no network)
-        const { data: sess } = await supabase.auth.getSession();
-        const metaAvatar = (sess.session?.user?.user_metadata?.avatar_path as string | undefined) ?? null;
-        if (metaAvatar) {
-          const { data, error } = await supabase.storage.from('avatars').createSignedUrl(metaAvatar, 600);
-          if (!cancel) {
-            if (!error) {
-              setAvatarPath(metaAvatar);
-              setAvatarUrl(data?.signedUrl ?? null);
-              return;
-            }
-          }
-        }
-
-        // Fallback: student image from models.image_path
-        if (bootstrap.studentImagePath) {
-          const url = await getImageUrlCached(supabase, bootstrap.studentImagePath);
-          if (!cancel) setAvatarUrl(url ?? null);
-          try { localStorage.setItem('ptp:studentImagePath', bootstrap.studentImagePath); } catch {}
-        } else {
-          if (!cancel) setAvatarUrl(null);
+        const url = await getImageUrlCached(supabase, imgPath);
+        if (!cancel) {
+          setAvatarPath(imgPath);
+          setAvatarUrl(url ?? null);
+          try { localStorage.setItem('ptp:studentImagePath', imgPath); } catch {}
         }
       } catch {
         if (!cancel) setAvatarUrl(null);
       }
     })();
     return () => { cancel = true; };
-  }, [supabase, bootstrap.avatarPath, bootstrap.studentImagePath]);
+  }, [supabase, bootstrap.studentImagePath]);
 
   React.useEffect(() => { setUid(bootstrap.uid); }, [bootstrap.uid]);
-  React.useEffect(() => { setDisplayName(bootstrap.displayName); }, [bootstrap.displayName]);
   React.useEffect(() => { setAvatarPath(bootstrap.avatarPath); }, [bootstrap.avatarPath]);
 
   return (
@@ -78,6 +73,7 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
           setAvatarPath(path);
         }}
       />
+      {/* onChanged updates our local state immediately after update succeeds */}
       <DisplayNameRow initialName={displayName} onChanged={setDisplayName} />
     </div>
   );

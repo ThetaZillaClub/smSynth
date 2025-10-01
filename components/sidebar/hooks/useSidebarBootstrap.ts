@@ -1,10 +1,11 @@
+// components/sidebar/hooks/useSidebarBootstrap.ts
 'use client';
 
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady, getImageUrlCached } from '@/lib/client-cache';
 import { fetchJsonNoStore } from '../fetch/noStore';
-import { pickDisplayName, STUDENT_IMAGE_HINT_KEY } from '../types';
+import { STUDENT_IMAGE_HINT_KEY, pickDisplayName } from '../types';
 
 export function useSidebarBootstrap(opts: {
   isAuthRoute: boolean;
@@ -36,42 +37,37 @@ export function useSidebarBootstrap(opts: {
 
       if (!isAuthed) {
         setStudentImgUrl(null);
+        setDisplayName('You');
         return;
       }
 
       const user = session!.user;
-      setDisplayName(pickDisplayName(user));
 
-      // 1) Prefer custom avatar
-      const metaAvatar = (user.user_metadata?.avatar_path as string | undefined) || null;
-      if (metaAvatar) {
-        try {
-          const { data, error } = await supabase.storage.from('avatars').createSignedUrl(metaAvatar, 600);
-          if (!cancelled) setStudentImgUrl(error ? null : (data?.signedUrl ?? null));
-        } catch {/* ignore */}
-        return; // no need to query /api/students/current
-      }
+      // First: attempt to load name & image from our /api (no-store) → models row
+      // This avoids reading auth.user_metadata entirely.
+      const row = await fetchJsonNoStore<{ creator_display_name?: string; image_path?: string }>('/api/students/current');
 
-      // 2) Try localStorage hint before any network
+      const nameFromModel = (row?.creator_display_name || '').trim();
+      setDisplayName(nameFromModel || pickDisplayName(user)); // fallback to email prefix
+
+      // Image priority:
+      // 1) LocalStorage hint of models.image_path
+      // 2) /api row.image_path
+      // 3) Nothing
       let hintedPath: string | null = null;
       try { hintedPath = localStorage.getItem(STUDENT_IMAGE_HINT_KEY); } catch {}
-      if (hintedPath) {
-        try {
-          const url = await getImageUrlCached(supabase, hintedPath);
-          if (!cancelled) setStudentImgUrl(url ?? null);
-        } catch {/* ignore */}
-        return;
-      }
 
-      // 3) Last resort: one no-store GET to learn image_path, then cache the hint
-      const row = await fetchJsonNoStore<{ image_path?: string }>('/api/students/current');
-      const imagePath = row?.image_path ?? null;
+      const imagePath = hintedPath || (row?.image_path ?? null);
       if (imagePath) {
-        try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, imagePath); } catch {}
         try {
           const url = await getImageUrlCached(supabase, imagePath);
           if (!cancelled) setStudentImgUrl(url ?? null);
+          try {
+            if (!hintedPath) localStorage.setItem(STUDENT_IMAGE_HINT_KEY, imagePath);
+          } catch {}
         } catch {/* ignore */}
+      } else {
+        setStudentImgUrl(null);
       }
     })();
 

@@ -2,22 +2,20 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-type RangePatchBody = {
-  low?: unknown;
-  high?: unknown;
-};
+type RangePatchBody = { low?: unknown; high?: unknown };
 
 export async function GET() {
   const supabase = await createClient();
 
-  // Auth via server-side user
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  // ✅ No network: JWT claims
+  const { data } = await supabase.auth.getClaims();
+  const uid = (data?.claims?.sub as string | undefined) ?? null;
+  if (!uid) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
   const { data: row, error } = await supabase
     .from("models")
     .select("range_low, range_high")
-    .eq("uid", user.id)
+    .eq("uid", uid)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -35,12 +33,13 @@ export async function GET() {
 export async function PATCH(req: Request) {
   const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  // ✅ No network: JWT claims
+  const { data } = await supabase.auth.getClaims();
+  const uid = (data?.claims?.sub as string | undefined) ?? null;
+  if (!uid) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
   const raw = (await req.json().catch(() => null)) as unknown;
-  const body: RangePatchBody | null =
-    raw && typeof raw === "object" ? (raw as RangePatchBody) : null;
+  const body: RangePatchBody | null = raw && typeof raw === "object" ? (raw as RangePatchBody) : null;
 
   const low = typeof body?.low === "string" ? body.low : undefined;
   const high = typeof body?.high === "string" ? body.high : undefined;
@@ -48,7 +47,7 @@ export async function PATCH(req: Request) {
   const { data: latest, error: findErr } = await supabase
     .from("models")
     .select("id")
-    .eq("uid", user.id)
+    .eq("uid", uid)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -59,16 +58,12 @@ export async function PATCH(req: Request) {
   const payload: { range_low?: string; range_high?: string } = {};
   if (low) payload.range_low = low;
   if (high) payload.range_high = high;
-
   if (!payload.range_low && !payload.range_high) {
     return NextResponse.json({ error: "no valid fields" }, { status: 400 });
   }
 
-  const { error: updateErr } = await supabase
-    .from("models")
-    .update(payload)
-    .eq("id", latest.id);
-
+  const { error: updateErr } = await supabase.from("models").update(payload).eq("id", latest.id);
   if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+
   return NextResponse.json({ ok: true });
 }
