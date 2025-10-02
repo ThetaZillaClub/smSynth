@@ -35,10 +35,6 @@ export default function SetupLayout({
     >
       <div className="px-6 pt-8 pb-10 max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-[#0f0f0f]">{title}</h1>
-        {subtitle ? (
-          <p className="text-sm text-[#0f0f0f] mt-1">{subtitle}</p>
-        ) : null}
-
         <div className="mt-4 rounded-2xl overflow-hidden bg-[#eeeeee] border border-[#d7d7d7]">
           <div className="p-4 md:p-6">{children}</div>
         </div>

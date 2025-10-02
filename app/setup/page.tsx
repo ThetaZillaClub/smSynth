@@ -37,7 +37,6 @@ export default function SetupPage() {
   return (
     <SetupLayout
       title="Setup"
-      subtitle="Run these once to capture range and calibrate vision."
     >
       <AllSetupCard items={items} />
     </SetupLayout>
