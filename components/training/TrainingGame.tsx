@@ -276,8 +276,11 @@ export default function TrainingGame({
   }, [pretestActive, needVision, loop.loopPhase, loop.anchorMs, hand, sampler]);
 
   // ---- Review + scoring
+  // ✅ Show rhythm playback ONLY when the blue rhythm line is enabled AND present.
   const haveRhythm: boolean =
-    (fabric.melodyRhythm?.length ?? 0) > 0 || (fabric.syncRhythmFabric?.length ?? 0) > 0;
+    rhythmLineEnabled &&
+    (fabric.syncRhythmFabric?.length ?? 0) > 0;
+
   const { lastScore, sessionScores, scoreTake } = useTakeScoring();
   const alignForScoring = useScoringAlignment();
 
@@ -352,14 +355,16 @@ export default function TrainingGame({
 
   const onPlayMelody = async () => { if (phrase) await playPhrase(phrase, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0, metronome: false }); };
   const onPlayRhythm = async () => {
+    // 🔔 Play the BLUE RHYTHM LINE only
     if (!haveRhythm) return;
-    const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
-    await playRhythm(rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0 });
+    const rhythmToUse = (fabric.syncRhythmFabric ?? []) as RhythmEvent[];
+    await playRhythm(rhythmToUse, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0 });
   };
   const onPlayBoth = async () => {
-    if (!phrase) return;
-    const rhythmToUse = (fabric.melodyRhythm?.length ? fabric.melodyRhythm : fabric.syncRhythmFabric ?? []) as any[];
-    await playMelodyAndRhythm(phrase, rhythmToUse as any, { bpm, tsNum: ts.num, tsDen: ts.den, metronome: true });
+    // 🎼 Melody + BLUE RHYTHM LINE (only if the line exists/enabled)
+    if (!phrase || !haveRhythm) return;
+    const rhythmToUse = (fabric.syncRhythmFabric ?? []) as RhythmEvent[];
+    await playMelodyAndRhythm(phrase, rhythmToUse, { bpm, tsNum: ts.num, tsDen: ts.den, metronome: true });
   };
   const onStopPlayback = () => stopPlayback();
 
