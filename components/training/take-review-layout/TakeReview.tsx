@@ -10,30 +10,27 @@ type Props = {
   onPlayRhythm: () => Promise<void> | void;
   onPlayBoth: () => Promise<void> | void;
   onStop: () => void;
-  onNext: () => void; // kept for API compatibility (handled by side panel footer)
+  onNext: () => void;
   score?: TakeScore;
   sessionScores?: TakeScore[];
-  /** If provided, disables “Next” unless true. (Games can gate advancement.) */
   canProceed?: boolean;
-  /** Optional retry action (handled by side panel footer now; kept for API compatibility) */
   onRetry?: () => void;
+  onClose?: () => void;
+
+  /** NEW: redo handler (jump back to this take’s exercise and run it again) */
+  onRedo?: () => void;
 };
 
-/**
- * Vertical-friendly TakeReview:
- * - Designed for the thin side panel (portrait card).
- * - No header action buttons; playback controls live UNDER stats and mimic footer style.
- * - Visual language matches AllCourses cards: light, airy, subtle, rounded.
- */
 export default function TakeReview({
   haveRhythm,
   onPlayMelody,
   onPlayRhythm,
   onPlayBoth,
   onStop,
-  // onNext is handled by the side panel footer button now
   score,
   sessionScores = [],
+  onClose,
+  onRedo,             // ⬅️ NEW
 }: Props) {
   const finalPct = score?.final?.percent ?? 0;
   const finalLetter = score?.final?.letter ?? "—";
@@ -42,7 +39,6 @@ export default function TakeReview({
   const timeOnPitch = score?.pitch?.timeOnPitchRatio ?? 0;
   const centsMae = score?.pitch?.centsMae ?? 0;
 
-  // Separate rhythm tracks
   const melodyRhythmPct = score?.rhythm?.melodyPercent ?? 0;
   const lineEvaluated = !!score?.rhythm?.lineEvaluated;
   const lineRhythmPct = lineEvaluated ? score?.rhythm?.linePercent ?? 0 : null;
@@ -50,14 +46,21 @@ export default function TakeReview({
   const intervals = score?.intervals ?? null;
 
   return (
-    <div
-      className={[
-        // match AllCourses card interior spacing and feel (panel wrapper provides the outer card chrome)
-        "flex flex-col gap-3",
-      ].join(" ")}
-    >
-      {/* Header: compact, portrait-friendly */}
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3">
+      {/* Back link for list→detail flow */}
+      {onClose ? (
+        <button
+          type="button"
+          onClick={onClose}
+          className="self-start text-xs text-[#373737] hover:underline"
+          title="Back to takes"
+        >
+          ← Back to takes
+        </button>
+      ) : null}
+
+      {/* Header + redo button */}
+      <div className="flex items-center justify-between gap-2">
         <div className="text-base md:text-lg font-semibold text-[#0f0f0f]">
           Take review
         </div>
@@ -68,17 +71,27 @@ export default function TakeReview({
           <span className="text-xs text-[#373737]">
             {finalLetter !== "—" ? `(${finalLetter})` : ""}
           </span>
+
+          {/* NEW: Redo button (only when handler provided) */}
+          {onRedo ? (
+            <button
+              type="button"
+              onClick={onRedo}
+              className="ml-1 px-2.5 py-1.5 rounded-md border border-[#d2d2d2] bg-white text-xs hover:bg-[#f8f8f8]"
+              title="Load this exercise again and try it now"
+            >
+              Redo this take
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {/* Stats: stack vertically; light tiles to keep hierarchy but avoid heavy borders */}
+      {/* Stats */}
       <div className="grid grid-cols-1 gap-2">
         <StatTile
           label="Pitch"
           value={`${pitchPct.toFixed(1)}%`}
-          detail={`On pitch ${(timeOnPitch * 100).toFixed(0)}% • MAE ${Math.round(
-            centsMae
-          )}¢`}
+          detail={`On pitch ${(timeOnPitch * 100).toFixed(0)}% • MAE ${Math.round(centsMae)}¢`}
         />
         <StatTile
           label="Melody rhythm"
@@ -94,27 +107,18 @@ export default function TakeReview({
         )}
         <StatTile
           label="Intervals"
-          value={
-            intervals ? `${Math.round((intervals.correctRatio || 0) * 100)}%` : "—"
-          }
-          detail={
-            intervals ? `${intervals.correct}/${intervals.total} correct` : "Not evaluated"
-          }
+          value={intervals ? `${Math.round((intervals.correctRatio || 0) * 100)}%` : "—"}
+          detail={intervals ? `${intervals.correct}/${intervals.total} correct` : "Not evaluated"}
         />
       </div>
 
-      {/* Session history: tiny, unobtrusive */}
+      {/* Session chips */}
       {sessionScores.length ? (
         <div className="mt-1">
-          <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">
-            Session
-          </div>
+          <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">Session</div>
           <div className="flex flex-wrap gap-1.5">
             {sessionScores.map((s, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 text-xs rounded-md bg-[#ebebeb] text-[#0f0f0f] border border-[#dcdcdc]"
-              >
+              <span key={i} className="px-2 py-0.5 text-xs rounded-md bg-[#ebebeb] text-[#0f0f0f] border border-[#dcdcdc]">
                 {s.final?.percent?.toFixed(1) ?? "—"}%
               </span>
             ))}
@@ -122,50 +126,29 @@ export default function TakeReview({
         </div>
       ) : null}
 
-      {/* Playback controls: mimic footer (round buttons, #ebebeb bg, black icons) */}
+      {/* Playback */}
       <div className="mt-1">
         <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">
           Playback
         </div>
         <div className="flex items-center gap-2.5 flex-wrap">
-          <RoundIconButton
-            title="Play melody"
-            ariaLabel="Play melody"
-            onClick={onPlayMelody}
-          >
-            {/* Music note */}
+          <RoundIconButton title="Play melody" ariaLabel="Play melody" onClick={onPlayMelody}>
             <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-              <path
-                d="M12 3v10.55A4 4 0 1 1 10 9V5l10-2v6.55A4 4 0 1 1 18 9V3l-6 1.2Z"
-                fill="currentColor"
-              />
+              <path d="M12 3v10.55A4 4 0 1 1 10 9V5l10-2v6.55A4 4 0 1 1 18 9V3l-6 1.2Z" fill="currentColor" />
             </svg>
           </RoundIconButton>
 
           {haveRhythm && (
-            <RoundIconButton
-              title="Play rhythm line"
-              ariaLabel="Play rhythm line"
-              onClick={onPlayRhythm}
-            >
-              {/* Simple metronome icon */}
+            <RoundIconButton title="Play rhythm line" ariaLabel="Play rhythm line" onClick={onPlayRhythm}>
               <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-                <path
-                  d="M9 3h6l3 10H6L9 3Zm1.5 2L8.5 11h7L13.5 5H10.5Z"
-                  fill="currentColor"
-                />
+                <path d="M9 3h6l3 10H6L9 3Zm1.5 2L8.5 11h7L13.5 5H10.5Z" fill="currentColor" />
                 <path d="M5 20h14v2H5z" fill="currentColor" />
               </svg>
             </RoundIconButton>
           )}
 
           {haveRhythm && (
-            <RoundIconButton
-              title="Play both"
-              ariaLabel="Play both melody and rhythm"
-              onClick={onPlayBoth}
-            >
-              {/* Layers icon */}
+            <RoundIconButton title="Play both" ariaLabel="Play both melody and rhythm" onClick={onPlayBoth}>
               <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
                 <path d="M12 2l10 6-10 6L2 8l10-6Z" fill="currentColor" />
                 <path d="M22 14l-10 6L2 14v2l10 6 10-6v-2Z" fill="currentColor" />
@@ -174,7 +157,6 @@ export default function TakeReview({
           )}
 
           <RoundIconButton title="Stop" ariaLabel="Stop" onClick={onStop}>
-            {/* Stop square */}
             <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
               <rect x="6" y="6" width="12" height="12" fill="currentColor" />
             </svg>
@@ -185,32 +167,16 @@ export default function TakeReview({
   );
 }
 
-/** Small, soft “stat tile” that reads well in a narrow column. */
-function StatTile({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-}) {
+function StatTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="rounded-lg bg-[#ebebeb] border border-[#dcdcdc] px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-        {label}
-      </div>
-      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
-        {value}
-      </div>
-      {detail ? (
-        <div className="text-xs text-[#373737] mt-0.5">{detail}</div>
-      ) : null}
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{label}</div>
+      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{value}</div>
+      {detail ? <div className="text-xs text-[#373737] mt-0.5">{detail}</div> : null}
     </div>
   );
 }
 
-/** Round icon button matching the footer’s visual language. */
 function RoundIconButton({
   children,
   title,
