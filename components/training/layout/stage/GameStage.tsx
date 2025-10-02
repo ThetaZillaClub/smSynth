@@ -9,7 +9,7 @@ import SheetOverlay from "@/components/training/layout/stage/sheet/SheetOverlay"
 import type { SystemLayout } from "@/components/training/layout/stage/sheet/vexscore/types";
 import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
-import SidePanelLayout from "./side-panel/sidepanellayout";
+import SidePanelLayout from "./side-panel/SidePanelLayout";
 
 type Props = {
   phrase?: Phrase | null;

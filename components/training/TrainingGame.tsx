@@ -22,7 +22,7 @@ import usePretest from "@/hooks/gameplay/usePretest";
 import { useExerciseFabric } from "@/hooks/gameplay/useExerciseFabric";
 import { useMelodyClef } from "@/hooks/gameplay/useMelodyClef";
 import { useLeadInMetronome } from "@/hooks/gameplay/useLeadInMetronome";
-import TakeReview from "@/components/training/take-review-layout/TakeReview";
+import TakeReview from "@/components/training/layout/stage/side-panel/TakeReview";
 import useHandBeat from "@/hooks/vision/useHandBeat";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";

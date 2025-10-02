@@ -6,7 +6,8 @@ import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useStudentRange from "@/hooks/students/useStudentRange";
 import usePhrasePlayer from "@/hooks/audio/usePhrasePlayer";
 import { DEFAULT_SESSION_CONFIG } from "@/components/training/session";
-import TakeReview from "@/components/training/take-review-layout/TakeReview";
+
+import TakeReview from "@/components/training/layout/stage/side-panel/TakeReview";
 
 import { usePitchTimeRoot } from "./hooks/usePitchTimeRoot";
 import { usePitchTimePhrase } from "./hooks/usePitchTimePhrase";
