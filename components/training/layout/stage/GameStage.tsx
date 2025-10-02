@@ -9,6 +9,14 @@ import SheetOverlay from "@/components/training/layout/stage/sheet/SheetOverlay"
 import type { SystemLayout } from "@/components/training/layout/stage/sheet/vexscore/types";
 import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
+import SidePanelLayout from "./side-panel/sidepanellayout";
+
+type FooterButton = {
+  label: string;
+  onClick: () => void | Promise<void>;
+  title?: string;
+  disabled?: boolean;
+};
 
 type Props = {
   phrase?: Phrase | null;
@@ -37,6 +45,12 @@ type Props = {
   showNoteBlocks?: boolean;    // default true
   showNoteBorders?: boolean;   // default true
   blocksWhenLyrics?: boolean;  // default false → text-only when lyrics exist
+
+  /** NEW: optional right-side vertical panel content (e.g., Pretest / TakeReview). */
+  stageAside?: React.ReactNode;
+
+  /** NEW: optional footer button for the side panel (always shown). */
+  stageAsideFooterButton: FooterButton;
 };
 
 export default function GameStage({
@@ -65,6 +79,9 @@ export default function GameStage({
   showNoteBlocks = true,
   showNoteBorders = true,
   blocksWhenLyrics = true,
+
+  stageAside,
+  stageAsideFooterButton,
 }: Props) {
   // 🔁 unify timeline settings so both canvases compute identical px/sec + anchor
   const WINDOW_SEC = 4;
@@ -124,10 +141,26 @@ export default function GameStage({
     return beatsToSeconds(barsToBeats(bars, tsNum), bpm, den);
   }, [leadInSec, leadBars, tsNum, bpm, den]);
 
+  const renderedPanel = (
+    <SidePanelLayout footerButton={stageAsideFooterButton}>
+      {stageAside}
+    </SidePanelLayout>
+  );
+
   // We can still early-return for type safety (e.g., VexScore requires a Phrase),
   // because all hooks are already called above.
   if (!phrase || !Array.isArray(phrase.notes) || phrase.notes.length === 0) {
-    return <div ref={hostRef} className="w-full h-full min-h-[260px]" />;
+    return (
+      <div ref={hostRef} className="w-full h-full min-h-[260px]">
+        <div className="w-full h-full flex gap-3">
+          <div className="flex-1 min-w-0" />
+          {/* Side panel ALWAYS mounts, even without stage content */}
+          <aside className="shrink-0 w-[320px] lg:w-[360px] xl:w-[380px]">
+            {renderedPanel}
+          </aside>
+        </div>
+      </div>
+    );
   }
 
   const resolvedClef = clef ?? pickClef(phrase);
@@ -136,89 +169,99 @@ export default function GameStage({
 
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
-      <div className="w-full">
-        {view === "sheet" ? (
-          <div className="w-full" style={{ height: mainH }}>
-            <div
-              ref={sheetHostRef}
-              className={`relative w-full ${sheetReady ? "opacity-100" : "opacity-0"}`}
-              style={{ height: sheetStaffHeight, transition: "opacity 150ms ease-out" }}
-            >
-              <VexScore
+      <div className="w-full h-full flex gap-3">
+        {/* LEFT: Main stage area (piano-roll/sheet + rhythm roll) */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="w-full">
+            {view === "sheet" ? (
+              <div className="w-full" style={{ height: mainH }}>
+                <div
+                  ref={sheetHostRef}
+                  className={`relative w-full ${sheetReady ? "opacity-100" : "opacity-0"}`}
+                  style={{ height: sheetStaffHeight, transition: "opacity 150ms ease-out" }}
+                >
+                  <VexScore
+                    phrase={phrase}
+                    lyrics={lyrics ?? undefined}
+                    bpm={bpm}
+                    den={den}
+                    tsNum={tsNum}
+                    leadInSec={leadInSecEff}
+                    clef={resolvedClef}
+                    onLayout={handleLayout}
+                    rhythm={rhythm}
+                    melodyRhythm={melodyRhythm}
+                    keySig={keySig || null}
+                    useSharps={useSharpsPref}
+                  />
+                  {sheetW && sheetW > 4 && sheetReady ? (
+                    <SheetOverlay
+                      width={sheetW}
+                      height={sheetStaffHeight}
+                      phrase={phrase}
+                      running={running}
+                      startAtMs={startAtMs}
+                      leadInSec={leadInSecEff}
+                      livePitchHz={livePitchHz}
+                      confidence={confidence}
+                      confThreshold={confThreshold}
+                      a4Hz={440}
+                      systems={systems!}
+                      clef={resolvedClef}
+                      lowHz={lowHz}
+                      highHz={highHz}
+                      useSharps={useSharpsPref}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <PianoRollCanvas
+                height={mainH}
                 phrase={phrase}
-                lyrics={lyrics ?? undefined}
+                running={running}
+                onActiveNoteChange={onActiveNoteChange}
+                livePitchHz={livePitchHz}
+                confidence={confidence}
+                confThreshold={confThreshold}
+                leadInSec={leadInSecEff}
+                startAtMs={startAtMs}
+                lyrics={lyrics}
+                keySig={keySig}
+                /** keep in lockstep with rhythm roll */
+                windowSec={WINDOW_SEC}
+                anchorRatio={ANCHOR_RATIO}
+                /** NEW: visual toggles for rectangles */
+                showNoteBlocks={showNoteBlocks}
+                showNoteBorders={showNoteBorders}
+                blocksWhenLyrics={blocksWhenLyrics}
+              />
+            )}
+          </div>
+
+          {showRhythm && view !== "sheet" ? (
+            <div className="w-full mt-2">
+              <RhythmRollCanvas
+                height={rhythmH}
+                rhythm={rhythm}
+                running={running}
+                startAtMs={startAtMs}
+                leadInSec={leadInSecEff}
                 bpm={bpm}
                 den={den}
-                tsNum={tsNum}
-                leadInSec={leadInSecEff}
-                clef={resolvedClef}
-                onLayout={handleLayout}
-                rhythm={rhythm}
-                melodyRhythm={melodyRhythm}
-                keySig={keySig || null}
-                useSharps={useSharpsPref}
+                /** keep in lockstep with piano roll */
+                windowSec={WINDOW_SEC}
+                anchorRatio={ANCHOR_RATIO}
               />
-              {sheetW && sheetW > 4 && sheetReady ? (
-                <SheetOverlay
-                  width={sheetW}
-                  height={sheetStaffHeight}
-                  phrase={phrase}
-                  running={running}
-                  startAtMs={startAtMs}
-                  leadInSec={leadInSecEff}
-                  livePitchHz={livePitchHz}
-                  confidence={confidence}
-                  confThreshold={confThreshold}
-                  a4Hz={440}
-                  systems={systems!}
-                  clef={resolvedClef}
-                  lowHz={lowHz}
-                  highHz={highHz}
-                  useSharps={useSharpsPref}
-                />
-              ) : null}
             </div>
-          </div>
-        ) : (
-          <PianoRollCanvas
-            height={mainH}
-            phrase={phrase}
-            running={running}
-            onActiveNoteChange={onActiveNoteChange}
-            livePitchHz={livePitchHz}
-            confidence={confidence}
-            confThreshold={confThreshold}
-            leadInSec={leadInSecEff}
-            startAtMs={startAtMs}
-            lyrics={lyrics}
-            keySig={keySig}
-            /** keep in lockstep with rhythm roll */
-            windowSec={WINDOW_SEC}
-            anchorRatio={ANCHOR_RATIO}
-            /** NEW: visual toggles for rectangles */
-            showNoteBlocks={showNoteBlocks}
-            showNoteBorders={showNoteBorders}
-            blocksWhenLyrics={blocksWhenLyrics}
-          />
-        )}
-      </div>
-
-      {showRhythm && view !== "sheet" ? (
-        <div className="w-full mt-2">
-          <RhythmRollCanvas
-            height={rhythmH}
-            rhythm={rhythm}
-            running={running}
-            startAtMs={startAtMs}
-            leadInSec={leadInSecEff}
-            bpm={bpm}
-            den={den}
-            /** keep in lockstep with piano roll */
-            windowSec={WINDOW_SEC}
-            anchorRatio={ANCHOR_RATIO}
-          />
+          ) : null}
         </div>
-      ) : null}
+
+        {/* RIGHT: Vertical card panel (Courses style) — ALWAYS visible */}
+        <aside className="shrink-0 w-[320px] lg:w-[360px] xl:w-[380px]">
+          {renderedPanel}
+        </aside>
+      </div>
     </div>
   );
 }

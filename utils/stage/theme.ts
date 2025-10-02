@@ -2,7 +2,7 @@
 // Shared stage colors (aligned to site palette).
 
 export const PR_COLORS = {
-  bg: "#ebebeb",
+  bg: "#f2f2f2",
   gridMinor: "rgba(15,15,15,0.08)",
   gridMajor: "rgba(15,15,15,0.18)",
   label: "rgba(15,15,15,1)",

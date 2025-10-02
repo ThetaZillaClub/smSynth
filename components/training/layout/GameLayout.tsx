@@ -9,6 +9,13 @@ import type { RhythmEvent } from "@/utils/phrase/generator";
 
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
 
+type StageFooterButton = {
+  label: string;
+  onClick: () => void | Promise<void>;
+  title?: string;
+  disabled?: boolean;
+};
+
 type LayoutProps = {
   title: string;
   error?: string | null;
@@ -49,6 +56,13 @@ type LayoutProps = {
   /** Optional: new footer session panel props */
   sessionPanel?: FooterSession;
 
+  /** NEW: content to render as a vertical panel on the right side of the stage */
+  stageAside?: React.ReactNode;
+
+  /** NEW: button to show in the side panel footer (always visible) */
+  stageAsideFooterButton: StageFooterButton;
+
+  /** (Legacy) children were rendered between stage and footer; kept for back-compat */
   children?: React.ReactNode;
 };
 
@@ -79,13 +93,17 @@ export default function GameLayout({
   lowHz = null,
   highHz = null,
   sessionPanel,
-  children,
+  stageAside,
+  stageAsideFooterButton,
+  // eslint-disable-next-line react/no-children-prop
+  children, // kept but unused by default in favor of stageAside
 }: LayoutProps) {
   const showPlay = !!phrase;
 
   return (
     <main className="min-h-dvh h-dvh flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
-      <div className="w-full flex-1 min-h-0 flex flex-col gap-4 pb-0">
+      <div className="w-full flex-1 min-h-0 flex flex-col pb-0">
+        {/* Stage row (fills available height); includes optional right-side panel */}
         <div className="w-full flex-1 min-h-0 px-0 md:px-6 pt-2">
           <GameStage
             phrase={phrase ?? null}
@@ -106,9 +124,12 @@ export default function GameLayout({
             clef={clef ?? undefined}
             lowHz={lowHz}
             highHz={highHz}
+            stageAside={stageAside}
+            stageAsideFooterButton={stageAsideFooterButton}
           />
         </div>
 
+        {/* (Legacy) Below-stage area retained for compatibility; not needed for new stageAside flow */}
         {children ? (
           <div className="w-full flex justify-center px-6 pb-2">
             <div className="w-full max-w-7xl">{children}</div>

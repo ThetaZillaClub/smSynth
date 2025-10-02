@@ -392,6 +392,49 @@ export default function TrainingGame({
       }
     : undefined;
 
+  // NEW: Stage side panel content (Courses card look; the wrapper is in GameStage)
+  const stageAside =
+    pretestActive ? (
+      <PretestPanel
+        statusText={statusText}
+        detail="Call & Response runs first. After you finish, the exercise will unlock and start with a metronome lead-in."
+        running={pretest.running}
+        onStart={startPretestSafe}
+        onContinue={pretest.continueResponse}
+        onReset={() => { stopPlayback(); pretest.reset(); }}
+      />
+    ) : reviewVisible ? (
+      <TakeReview
+        haveRhythm={haveRhythm}
+        onPlayMelody={onPlayMelody}
+        onPlayRhythm={onPlayRhythm}
+        onPlayBoth={onPlayBoth}
+        onStop={onStopPlayback}
+        onNext={onNextPhrase}
+        score={lastScore || undefined}
+        sessionScores={sessionScores}
+      />
+    ) : null;
+
+  // NEW: Side panel footer button always present
+  const stageAsideFooterButton = pretestActive
+    ? {
+        label: "Reset pre-test",
+        title: "Reset pre-test",
+        onClick: () => { stopPlayback(); pretest.reset(); },
+      }
+    : reviewVisible
+    ? {
+        label: "Next →",
+        title: "Proceed to the next round",
+        onClick: onNextPhrase,
+      }
+    : {
+        label: running ? "Pause" : "Resume",
+        title: running ? "Pause exercise" : "Resume exercise",
+        onClick: onToggleExercise,
+      };
+
   return (
     <GameLayout
       title={title}
@@ -420,28 +463,8 @@ export default function TrainingGame({
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
       sessionPanel={footerSessionPanel}  // ⬅️ only BPM / Time / Round
-    >
-      {pretestActive ? (
-        <PretestPanel
-          statusText={statusText}
-          detail="Call & Response runs first. After you finish, the exercise will unlock and start with a metronome lead-in."
-          running={pretest.running}
-          onStart={startPretestSafe}
-          onContinue={pretest.continueResponse}
-          onReset={() => { stopPlayback(); pretest.reset(); }}
-        />
-      ) : reviewVisible ? (
-        <TakeReview
-          haveRhythm={haveRhythm}
-          onPlayMelody={onPlayMelody}
-          onPlayRhythm={onPlayRhythm}
-          onPlayBoth={onPlayBoth}
-          onStop={onStopPlayback}
-          onNext={onNextPhrase}
-          score={lastScore || undefined}
-          sessionScores={sessionScores}
-        />
-      ) : null}
-    </GameLayout>
+      stageAside={stageAside}
+      stageAsideFooterButton={stageAsideFooterButton}
+    />
   );
 }

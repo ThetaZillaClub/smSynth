@@ -1,3 +1,4 @@
+// components/training/take-review-layout/TakeReview.tsx
 "use client";
 
 import React from "react";
@@ -9,26 +10,30 @@ type Props = {
   onPlayRhythm: () => Promise<void> | void;
   onPlayBoth: () => Promise<void> | void;
   onStop: () => void;
-  onNext: () => void;
+  onNext: () => void; // kept for API compatibility (handled by side panel footer)
   score?: TakeScore;
   sessionScores?: TakeScore[];
   /** If provided, disables “Next” unless true. (Games can gate advancement.) */
   canProceed?: boolean;
-  /** Optional retry action (if present we show a Retry button). */
+  /** Optional retry action (handled by side panel footer now; kept for API compatibility) */
   onRetry?: () => void;
 };
 
+/**
+ * Vertical-friendly TakeReview:
+ * - Designed for the thin side panel (portrait card).
+ * - No header action buttons; playback controls live UNDER stats and mimic footer style.
+ * - Visual language matches AllCourses cards: light, airy, subtle, rounded.
+ */
 export default function TakeReview({
   haveRhythm,
   onPlayMelody,
   onPlayRhythm,
   onPlayBoth,
   onStop,
-  onNext,
+  // onNext is handled by the side panel footer button now
   score,
   sessionScores = [],
-  canProceed = true,
-  onRetry,
 }: Props) {
   const finalPct = score?.final?.percent ?? 0;
   const finalLetter = score?.final?.letter ?? "—";
@@ -37,7 +42,7 @@ export default function TakeReview({
   const timeOnPitch = score?.pitch?.timeOnPitchRatio ?? 0;
   const centsMae = score?.pitch?.centsMae ?? 0;
 
-  // ⬇️ Show rhythm tracks separately (no combined score)
+  // Separate rhythm tracks
   const melodyRhythmPct = score?.rhythm?.melodyPercent ?? 0;
   const lineEvaluated = !!score?.rhythm?.lineEvaluated;
   const lineRhythmPct = lineEvaluated ? score?.rhythm?.linePercent ?? 0 : null;
@@ -45,92 +50,71 @@ export default function TakeReview({
   const intervals = score?.intervals ?? null;
 
   return (
-    <div className="mt-3 grid gap-3 rounded-lg border border-[#d2d2d2] bg-white p-3 shadow-sm">
-      {/* Title row */}
+    <div
+      className={[
+        // match AllCourses card interior spacing and feel (panel wrapper provides the outer card chrome)
+        "flex flex-col gap-3",
+      ].join(" ")}
+    >
+      {/* Header: compact, portrait-friendly */}
       <div className="flex items-center justify-between">
-        <div className="text-base font-semibold">
-          Take Review
-          <span className="ml-2 text-sm font-normal text-[#2d2d2d]">
-            {finalPct ? `${finalPct.toFixed(1)}%` : "—"} {finalLetter !== "—" ? `(${finalLetter})` : ""}
-          </span>
+        <div className="text-base md:text-lg font-semibold text-[#0f0f0f]">
+          Take review
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={onPlayMelody}
-            className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f7f7f7] hover:bg-white"
-            title="Play melody"
-          >
-            ▶︎ Melody
-          </button>
-          {haveRhythm && (
-            <button
-              onClick={onPlayRhythm}
-              className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f7f7f7] hover:bg-white"
-              title="Play rhythm line"
-            >
-              ▶︎ Rhythm
-            </button>
-          )}
-          {haveRhythm && (
-            <button
-              onClick={onPlayBoth}
-              className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f7f7f7] hover:bg-white"
-              title="Play both"
-            >
-              ▶︎ Both
-            </button>
-          )}
-          <button
-            onClick={onStop}
-            className="px-2 py-1 text-sm rounded-md border border-[#d2d2d2] bg-[#f0f0f0]"
-            title="Stop"
-          >
-            ⏸ Stop
-          </button>
+          <span className="inline-flex items-center rounded-full bg-[#ebebeb] px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
+            {finalPct ? `${finalPct.toFixed(1)}%` : "—"}
+          </span>
+          <span className="text-xs text-[#373737]">
+            {finalLetter !== "—" ? `(${finalLetter})` : ""}
+          </span>
         </div>
       </div>
 
-      {/* Breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
-        <ScoreChip
+      {/* Stats: stack vertically; light tiles to keep hierarchy but avoid heavy borders */}
+      <div className="grid grid-cols-1 gap-2">
+        <StatTile
           label="Pitch"
-          primary={`${pitchPct.toFixed(1)}%`}
-          secondary={`On pitch: ${(timeOnPitch * 100).toFixed(0)}% • Cents MAE: ${centsMae}`}
+          value={`${pitchPct.toFixed(1)}%`}
+          detail={`On pitch ${(timeOnPitch * 100).toFixed(0)}% • MAE ${Math.round(
+            centsMae
+          )}¢`}
         />
-        <ScoreChip
-          label="Melody Rhythm"
-          primary={`${melodyRhythmPct.toFixed(1)}%`}
-          secondary="Voiced coverage in note windows"
+        <StatTile
+          label="Melody rhythm"
+          value={`${melodyRhythmPct.toFixed(1)}%`}
+          detail="Voiced coverage in note windows"
         />
         {haveRhythm && (
-          <ScoreChip
-            label="Rhythm Line"
-            primary={lineRhythmPct != null ? `${lineRhythmPct.toFixed(1)}%` : "—"}
-            secondary={lineEvaluated ? "Hand taps vs. blue line" : "Not evaluated"}
+          <StatTile
+            label="Rhythm line"
+            value={lineRhythmPct != null ? `${lineRhythmPct.toFixed(1)}%` : "—"}
+            detail={lineEvaluated ? "Hand taps vs. blue line" : "Not evaluated"}
           />
         )}
-        <ScoreChip
+        <StatTile
           label="Intervals"
-          primary={
-            intervals
-              ? `${Math.round((intervals.correctRatio || 0) * 100)}%`
-              : "—"
+          value={
+            intervals ? `${Math.round((intervals.correctRatio || 0) * 100)}%` : "—"
           }
-          secondary={
-            intervals
-              ? `${intervals.correct}/${intervals.total} correct`
-              : "Not evaluated"
+          detail={
+            intervals ? `${intervals.correct}/${intervals.total} correct` : "Not evaluated"
           }
         />
       </div>
 
-      {/* Session history */}
+      {/* Session history: tiny, unobtrusive */}
       {sessionScores.length ? (
-        <div className="rounded-md border border-[#e2e2e2] bg-[#fafafa] p-2">
-          <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">Session</div>
-          <div className="flex flex-wrap gap-2">
+        <div className="mt-1">
+          <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">
+            Session
+          </div>
+          <div className="flex flex-wrap gap-1.5">
             {sessionScores.map((s, i) => (
-              <span key={i} className="px-2 py-0.5 text-xs rounded-md border border-[#d2d2d2] bg-white">
+              <span
+                key={i}
+                className="px-2 py-0.5 text-xs rounded-md bg-[#ebebeb] text-[#0f0f0f] border border-[#dcdcdc]"
+              >
                 {s.final?.percent?.toFixed(1) ?? "—"}%
               </span>
             ))}
@@ -138,39 +122,121 @@ export default function TakeReview({
         </div>
       ) : null}
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2">
-        {onRetry && (
-          <button
-            onClick={onRetry}
-            className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#f7f7f7] text-sm hover:bg-white"
+      {/* Playback controls: mimic footer (round buttons, #ebebeb bg, black icons) */}
+      <div className="mt-1">
+        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">
+          Playback
+        </div>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <RoundIconButton
+            title="Play melody"
+            ariaLabel="Play melody"
+            onClick={onPlayMelody}
           >
-            Retry
-          </button>
-        )}
-        <button
-          onClick={onNext}
-          disabled={!canProceed}
-          className={`px-3 py-1.5 rounded-md text-sm transition ${
-            canProceed
-              ? "bg-[#0f0f0f] text-white hover:opacity-90"
-              : "bg-[#ebebeb] text-[#6b6b6b] cursor-not-allowed"
-          }`}
-          title={canProceed ? "Next round" : "Pass required to continue"}
-        >
-          Next →
-        </button>
+            {/* Music note */}
+            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+              <path
+                d="M12 3v10.55A4 4 0 1 1 10 9V5l10-2v6.55A4 4 0 1 1 18 9V3l-6 1.2Z"
+                fill="currentColor"
+              />
+            </svg>
+          </RoundIconButton>
+
+          {haveRhythm && (
+            <RoundIconButton
+              title="Play rhythm line"
+              ariaLabel="Play rhythm line"
+              onClick={onPlayRhythm}
+            >
+              {/* Simple metronome icon */}
+              <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+                <path
+                  d="M9 3h6l3 10H6L9 3Zm1.5 2L8.5 11h7L13.5 5H10.5Z"
+                  fill="currentColor"
+                />
+                <path d="M5 20h14v2H5z" fill="currentColor" />
+              </svg>
+            </RoundIconButton>
+          )}
+
+          {haveRhythm && (
+            <RoundIconButton
+              title="Play both"
+              ariaLabel="Play both melody and rhythm"
+              onClick={onPlayBoth}
+            >
+              {/* Layers icon */}
+              <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+                <path d="M12 2l10 6-10 6L2 8l10-6Z" fill="currentColor" />
+                <path d="M22 14l-10 6L2 14v2l10 6 10-6v-2Z" fill="currentColor" />
+              </svg>
+            </RoundIconButton>
+          )}
+
+          <RoundIconButton title="Stop" ariaLabel="Stop" onClick={onStop}>
+            {/* Stop square */}
+            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+              <rect x="6" y="6" width="12" height="12" fill="currentColor" />
+            </svg>
+          </RoundIconButton>
+        </div>
       </div>
     </div>
   );
 }
 
-function ScoreChip({ label, primary, secondary }: { label: string; primary: string; secondary?: string }) {
+/** Small, soft “stat tile” that reads well in a narrow column. */
+function StatTile({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) {
   return (
-    <div className="rounded-md border border-[#d2d2d2] bg-[#f9f9f9] px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{label}</div>
-      <div className="text-sm text-[#0f0f0f]">{primary}</div>
-      {secondary ? <div className="text-xs text-[#2d2d2d]">{secondary}</div> : null}
+    <div className="rounded-lg bg-[#ebebeb] border border-[#dcdcdc] px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
+        {label}
+      </div>
+      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
+        {value}
+      </div>
+      {detail ? (
+        <div className="text-xs text-[#373737] mt-0.5">{detail}</div>
+      ) : null}
     </div>
+  );
+}
+
+/** Round icon button matching the footer’s visual language. */
+function RoundIconButton({
+  children,
+  title,
+  ariaLabel,
+  onClick,
+}: {
+  children: React.ReactNode;
+  title: string;
+  ariaLabel: string;
+  onClick: () => void | Promise<void>;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      className={[
+        "inline-flex items-center justify-center",
+        "rounded-full p-2.5 bg-[#ebebeb] text-[#0f0f0f]",
+        "hover:opacity-90 active:scale-[0.98] transition",
+        "border border-[#dcdcdc] shadow-sm",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }
