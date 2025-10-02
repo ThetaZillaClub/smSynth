@@ -184,6 +184,7 @@ export default function TrainingGame({
   // NEW: panel selection (null = list)
   const [panelTakeIndex, setPanelTakeIndex] = useState<number | null>(null);
 
+
   // Loop
   const loop = usePracticeLoop({
     step,
@@ -207,7 +208,9 @@ export default function TrainingGame({
     onEnterPlay: () => {},
     autoContinue: !!loopingMode,
     onRestComplete: () => {
-      if (!loopingMode) setReviewVisible(true);
+      if (!loopingMode) {
+        setReviewVisible(true);
+      }
     },
   });
 
@@ -366,7 +369,6 @@ export default function TrainingGame({
 
       if (!loopingMode) {
         setReviewVisible(true);
-        setPanelTakeIndex(null);
       }
     }
   }, [
@@ -393,9 +395,14 @@ export default function TrainingGame({
 
   const openTakeDetail = (index: number) => {
     setPanelTakeIndex(index);
-    setReviewVisible(false);
+    // keep reviewVisible as-is; it's true when loopingMode is off
   };
-  const closeTakeDetail = () => setPanelTakeIndex(null);
+
+  const closeTakeDetail = () => {
+    // Go back to list view *without* triggering auto-open again
+    setPanelTakeIndex(null);
+    setReviewVisible(true);
+  };
 
   /** NEW: redo a specific past take (load its snapshot for one pass & start loop) */
   const redoTake = (index: number) => {
@@ -405,7 +412,7 @@ export default function TrainingGame({
     loop.clearAll();
     setRedoOverride({ phrase: snap.phrase, rhythm: snap.rhythm ?? null });
     setPanelTakeIndex(null);       // back to list
-    setReviewVisible(false);
+    setReviewVisible(false);       // leave review; a new review will open after next rest
     // Start a new pass with the overridden exercise
     loop.toggle();
   };
@@ -474,17 +481,6 @@ export default function TrainingGame({
         onContinue={pretest.continueResponse}
         onReset={() => { stopPlayback(); pretest.reset(); }}
       />
-    ) : reviewVisible ? (
-      <TakeReview
-        haveRhythm={haveRhythm}
-        onPlayMelody={onPlayMelody}
-        onPlayRhythm={onPlayRhythm}
-        onPlayBoth={onPlayBoth}
-        onStop={onStopPlayback}
-        onNext={onNextPhrase}
-        score={lastScore || undefined}
-        sessionScores={sessionScores}
-      />
     ) : panelHasDetail ? (
       <TakeReview
         haveRhythm={haveRhythm}
@@ -496,29 +492,11 @@ export default function TrainingGame({
         score={sessionScores[panelTakeIndex!] || undefined}
         sessionScores={sessionScores}
         onClose={closeTakeDetail}
-        onRedo={() => redoTake(panelTakeIndex!)}  // ⬅️ NEW
+        onRedo={() => redoTake(panelTakeIndex!)}
       />
     ) : (
       <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
     );
-
-  const stageAsideFooterButton = pretestActive
-    ? {
-        label: "Reset pre-test",
-        title: "Reset pre-test",
-        onClick: () => { stopPlayback(); pretest.reset(); },
-      }
-    : reviewVisible
-    ? {
-        label: "Next →",
-        title: "Proceed to the next round",
-        onClick: onNextPhrase,
-      }
-    : {
-        label: running ? "Pause" : "Resume",
-        title: running ? "Pause exercise" : "Resume exercise",
-        onClick: onToggleExercise,
-      };
 
   return (
     <GameLayout
@@ -550,7 +528,6 @@ export default function TrainingGame({
       highHz={highHz ?? null}
       sessionPanel={footerSessionPanel}
       stageAside={stageAside}
-      stageAsideFooterButton={stageAsideFooterButton}
     />
   );
 }

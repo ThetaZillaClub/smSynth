@@ -5,16 +5,8 @@ import GameStage from "./stage/GameStage";
 import GameFooter from "./footer/GameFooter";
 import { type Phrase } from "./stage/piano-roll/PianoRollCanvas";
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
-import type { RhythmEvent } from "@/utils/phrase/generator";
 
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
-
-type StageFooterButton = {
-  label: string;
-  onClick: () => void | Promise<void>;
-  title?: string;
-  disabled?: boolean;
-};
 
 type LayoutProps = {
   title: string;
@@ -39,12 +31,6 @@ type LayoutProps = {
   step: "low" | "high" | "play";
   loopPhase: LoopPhase;
 
-  rhythm?: RhythmEvent[];
-  melodyRhythm?: RhythmEvent[];
-  bpm?: number;
-  den?: number;
-  tsNum?: number;
-
   keySig?: string | null;
 
   view?: "piano" | "sheet";
@@ -53,17 +39,21 @@ type LayoutProps = {
   lowHz?: number | null;
   highHz?: number | null;
 
-  /** Optional: new footer session panel props */
+  /** Optional: footer session panel props */
   sessionPanel?: FooterSession;
 
-  /** NEW: content to render as a vertical panel on the right side of the stage */
+  /** Right-side panel content */
   stageAside?: React.ReactNode;
-
-  /** NEW: button to show in the side panel footer (always visible) */
-  stageAsideFooterButton: StageFooterButton;
 
   /** (Legacy) children were rendered between stage and footer; kept for back-compat */
   children?: React.ReactNode;
+
+  /** Timing & rhythm (forwarded to stage if present) */
+  rhythm?: any;
+  melodyRhythm?: any;
+  bpm?: number;
+  den?: number;
+  tsNum?: number;
 };
 
 export default function GameLayout({
@@ -94,7 +84,6 @@ export default function GameLayout({
   highHz = null,
   sessionPanel,
   stageAside,
-  stageAsideFooterButton,
   // eslint-disable-next-line react/no-children-prop
   children, // kept but unused by default in favor of stageAside
 }: LayoutProps) {
@@ -125,7 +114,6 @@ export default function GameLayout({
             lowHz={lowHz}
             highHz={highHz}
             stageAside={stageAside}
-            stageAsideFooterButton={stageAsideFooterButton}
           />
         </div>
 

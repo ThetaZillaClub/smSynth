@@ -11,13 +11,6 @@ import { pickClef, preferSharpsForKeySig } from "@/components/training/layout/st
 import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
 import SidePanelLayout from "./side-panel/sidepanellayout";
 
-type FooterButton = {
-  label: string;
-  onClick: () => void | Promise<void>;
-  title?: string;
-  disabled?: boolean;
-};
-
 type Props = {
   phrase?: Phrase | null;
   running: boolean;
@@ -46,11 +39,8 @@ type Props = {
   showNoteBorders?: boolean;   // default true
   blocksWhenLyrics?: boolean;  // default false → text-only when lyrics exist
 
-  /** NEW: optional right-side vertical panel content (e.g., Pretest / TakeReview). */
+  /** Right-side vertical panel content (e.g., Pretest / TakeReview). */
   stageAside?: React.ReactNode;
-
-  /** NEW: optional footer button for the side panel (always shown). */
-  stageAsideFooterButton: FooterButton;
 };
 
 export default function GameStage({
@@ -81,7 +71,6 @@ export default function GameStage({
   blocksWhenLyrics = true,
 
   stageAside,
-  stageAsideFooterButton,
 }: Props) {
   // 🔁 unify timeline settings so both canvases compute identical px/sec + anchor
   const WINDOW_SEC = 4;
@@ -141,11 +130,7 @@ export default function GameStage({
     return beatsToSeconds(barsToBeats(bars, tsNum), bpm, den);
   }, [leadInSec, leadBars, tsNum, bpm, den]);
 
-  const renderedPanel = (
-    <SidePanelLayout footerButton={stageAsideFooterButton}>
-      {stageAside}
-    </SidePanelLayout>
-  );
+  const renderedPanel = <SidePanelLayout>{stageAside}</SidePanelLayout>;
 
   // We can still early-return for type safety (e.g., VexScore requires a Phrase),
   // because all hooks are already called above.
@@ -231,7 +216,7 @@ export default function GameStage({
                 /** keep in lockstep with rhythm roll */
                 windowSec={WINDOW_SEC}
                 anchorRatio={ANCHOR_RATIO}
-                /** NEW: visual toggles for rectangles */
+                /** Visual toggles for rectangles */
                 showNoteBlocks={showNoteBlocks}
                 showNoteBorders={showNoteBorders}
                 blocksWhenLyrics={blocksWhenLyrics}
