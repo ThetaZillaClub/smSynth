@@ -44,47 +44,42 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
   };
 
   if (!activeCourse) {
-    // Empty state
+    // Empty state (no CTA button)
     return (
-      <div className="rounded-xl border border-[#dcdcdc] bg-[#fbfbfb] p-5">
+      <div className="rounded-xl border border-[#dcdcdc] bg-[#f2f2f2] p-5 shadow-sm">
         <h3 className="text-lg font-semibold">No courses in progress</h3>
         <p className="mt-1 text-sm text-[#373737]">
           When you start a course, it’ll appear here so you can quickly continue.
         </p>
-        <div className="mt-4">
-          <button
-            type="button"
-            onClick={() => go('pitch-tune')}
-            className="inline-flex items-center gap-1 rounded-lg bg-[#0f0f0f] text-white px-4 py-2 text-sm hover:opacity-90 active:scale-[0.99] transition"
-          >
-            Try Pitch Tune <span aria-hidden>↗</span>
-          </button>
-        </div>
       </div>
     );
   }
 
-  // Active course card
+  // Active course card: whole card is interactive (no Resume button)
   return (
-    <div className="rounded-xl border border-[#dcdcdc] bg-white p-5">
+    <button
+      type="button"
+      onClick={() => go(activeCourse.slug)}
+      className={[
+        'w-full text-left rounded-xl border border-[#dcdcdc] bg-white p-5',
+        'hover:shadow-md shadow-sm active:scale-[0.99] transition',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
+      ].join(' ')}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-sm uppercase tracking-wide text-[#373737]">Continue</div>
-          <div className="mt-1 text-xl font-semibold text-[#0f0f0f]">{activeCourse.title}</div>
+          <div className="mt-1 text-xl font-semibold text-[#0f0f0f]">
+            {activeCourse.title}
+          </div>
           {activeCourse.subtitle && (
-            <div className="mt-1 text-sm text-[#373737]">{activeCourse.subtitle}</div>
+            <div className="mt-1 text-sm text-[#373737]">
+              {activeCourse.subtitle}
+            </div>
           )}
         </div>
-        <div>
-          <button
-            type="button"
-            onClick={() => go(activeCourse.slug)}
-            className="inline-flex items-center gap-1 rounded-lg bg-[#0f0f0f] text-white px-4 py-2 text-sm hover:opacity-90 active:scale-[0.99] transition"
-          >
-            Resume <span aria-hidden>↗</span>
-          </button>
-        </div>
+        {/* Right side CTA removed; rely on card hover/active styles */}
       </div>
-    </div>
+    </button>
   );
 }

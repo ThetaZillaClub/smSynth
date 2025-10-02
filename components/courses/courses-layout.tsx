@@ -39,7 +39,7 @@ export default function CoursesLayout({ courses }: { courses: Course[] }) {
       <div className="px-6 pt-8 pb-10 max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-[#0f0f0f]">Courses</h1>
 
-        <div className="mt-4 rounded-2xl overflow-hidden bg-[#f1f1f1] border border-[#d7d7d7]">
+        <div className="mt-4 rounded-2xl overflow-hidden bg-[#eeeeee] border border-[#d7d7d7]">
           <Header active={tab} onChange={setTab} />
           <div className="p-4 md:p-6">
             {tab === 'in-progress' ? (

@@ -18,12 +18,13 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
             onClick={() => go(c.slug)}
             className={[
               // portrait tiles: taller than wide
-              'group text-left rounded-xl bg-white border border-[#dcdcdc]',
+              'group text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]',
               // fixed portrait aspect to read like a larger library
               'aspect-[3/2] min-h-[220px]',
               // internal layout
               'p-4 md:p-5 flex flex-col items-start justify-between',
-              'hover:shadow-md active:scale-[0.99] transition',
+              'hover:shadow-md shadow-sm active:scale-[0.99] transition',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
             ].join(' ')}
           >
             <div>
@@ -36,10 +37,7 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
                 </div>
               )}
             </div>
-
-            <div className="inline-flex items-center gap-1 text-sm text-[#0f0f0f]">
-              Start <span aria-hidden>↗</span>
-            </div>
+            {/* No inline CTA; rely on card hover/active styles */}
           </button>
         ))}
       </div>
