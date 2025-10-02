@@ -41,7 +41,7 @@ export default function RangeFooter({
     <footer className="w-full bg-transparent px-4 md:px-6 py-3">
       <div className="w-[90%] mx-auto">
         {/* lighter white card + soft shadow (matches Vision footer) */}
-        <div className="rounded-2xl shadow-[0_6px_24px_rgba(0,0,0,0.12)] px-3 md:px-4 py-2 bg-[#f4f4f4]">
+        <div className="rounded-2xl shadow-[0_6px_24px_rgba(0,0,0,0.12)] px-3 md:px-4 py-2 bg-[#f1f1f1]">
           <div className="grid grid-cols-[1fr_auto_minmax(0,1fr)] items-center gap-4">
             {/* left: step + progress */}
             <div className="justify-self-start w-full min-w-0">

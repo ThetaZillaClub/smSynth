@@ -24,6 +24,17 @@ export default function usePhrasePlayer() {
 
   const scheduledStopFns = useRef<Array<() => void>>([]);
 
+  // Cached gentle harmonic spectrum for musical tone
+  const waveRef = useRef<PeriodicWave | null>(null);
+  const getPeriodicWave = (ctx: AudioContext) => {
+    if (waveRef.current) return waveRef.current;
+    // Fundamental + very small 2nd/3rd/4th partials (keeps fundamental dominant)
+    const real = new Float32Array([0, 1.0, 0.20, 0.10, 0.05]);
+    const imag = new Float32Array(real.length); // all sine terms = 0 (cosine series)
+    waveRef.current = ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    return waveRef.current;
+  };
+
   const initCtx = useCallback(async () => {
     if (!ctxRef.current) {
       const ctx = getAudioContext();
@@ -59,64 +70,186 @@ export default function usePhrasePlayer() {
     }
   }, []);
 
-  const playTick = useCallback((time: number) => {
+  /** Mild waveshaper to thicken transients without harshness */
+  const createSaturator = (ctx: AudioContext, amount = 2.0) => {
+    const ws = ctx.createWaveShaper();
+    const n = 1024;
+    const curve = new Float32Array(n);
+    const k = amount; // 0 = linear, 1-4 = gentle
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(k * x) / Math.tanh(k);
+    }
+    ws.curve = curve;
+    ws.oversample = "2x";
+    return ws;
+  };
+
+  const isBarline = (beatsFromStart: number, tsNum: number) => {
+    // true when we're very close to an integer multiple of tsNum
+    const eps = 1e-3;
+    const mod = beatsFromStart % tsNum;
+    return mod < eps || tsNum - mod < eps;
+  };
+
+  /**
+   * Thicker metronome tick:
+   * Layer A: short filtered noise burst.
+   * Layer B: ultra-short triangle "pip" with BP filter (adds body without steady pitch).
+   * Accent: slightly brighter, faster, and a tiny upward chirp.
+   */
+  const playTick = useCallback((time: number, accent = false) => {
     if (!ctxRef.current || !metronomeGainRef.current) return;
     const ctx = ctxRef.current;
+
+    const bus = metronomeGainRef.current;
+
+    // Per-tick master gain (lets us shape the combined envelope)
     const g = ctx.createGain();
     g.gain.value = 1;
-    g.connect(metronomeGainRef.current);
+    g.connect(bus);
 
+    // ===== Layer A: Noise burst =====
+    const noiseLen = Math.ceil(ctx.sampleRate * 0.02); // ~20 ms
+    const nbuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+    const ch = nbuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (noiseLen * 0.7));
+    }
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = nbuf;
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = accent ? 2700 : 2400;
+    bp.Q.value = accent ? 6 : 4;
+
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 550;
+    hp.Q.value = 0.707;
+
+    const sat = createSaturator(ctx, 2.0);
+    const ng = ctx.createGain();
+    ng.gain.value = accent ? 0.8 : 0.65;
+
+    noise.connect(bp);
+    bp.connect(hp);
+    hp.connect(sat);
+    sat.connect(ng);
+    ng.connect(g);
+
+    // Envelope for noise layer
+    const nATT = accent ? 0.001 : 0.0015;
+    const nREL = accent ? 0.035 : 0.05;
+    const nDUR = 0.012;
+
+    ng.gain.setValueAtTime(0.0001, time);
+    ng.gain.exponentialRampToValueAtTime(1, time + nATT);
+    ng.gain.exponentialRampToValueAtTime(0.0001, time + nDUR + nREL);
+
+    // ===== Layer B: Pitched "pip" =====
     const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = 880;
-    osc.connect(g);
+    osc.type = "triangle";
+    const baseHz = accent ? 1950 : 1650; // short pip—high, but not "beep"
+    osc.frequency.setValueAtTime(baseHz, time);
+    if (accent) {
+      // tiny upward chirp adds punch without feeling tonal
+      osc.frequency.exponentialRampToValueAtTime(baseHz * 1.12, time + 0.03);
+    }
 
-    const ATT = 0.001;
-    const REL = 0.04;
-    const dur = 0.05;
+    const pipBP = ctx.createBiquadFilter();
+    pipBP.type = "bandpass";
+    pipBP.frequency.value = accent ? 2100 : 1750;
+    pipBP.Q.value = accent ? 9 : 7;
 
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(1, time + ATT);
-    g.gain.setValueAtTime(1, time + dur - REL);
-    g.gain.linearRampToValueAtTime(0, time + dur);
+    const og = ctx.createGain();
+    og.gain.value = 0.0001;
 
+    osc.connect(pipBP);
+    pipBP.connect(og);
+    og.connect(g);
+
+    // Envelope for pip
+    const pATT = 0.0012;
+    const pREL = accent ? 0.055 : 0.06;
+
+    og.gain.setValueAtTime(0.0001, time);
+    og.gain.exponentialRampToValueAtTime(accent ? 0.9 : 0.7, time + pATT);
+    og.gain.exponentialRampToValueAtTime(0.0001, time + pREL);
+
+    // ===== Master tick tail (prevents hard cutoff clicks) =====
+    const tickTail = ctx.createGain();
+    tickTail.gain.value = 1;
+    tickTail.connect(bus);
+    g.connect(tickTail);
+
+    const tailREL = 0.04;
+    tickTail.gain.setValueAtTime(1, time);
+    tickTail.gain.exponentialRampToValueAtTime(0.0001, time + Math.max(nREL, pREL) + tailREL);
+
+    // Start/stop + cleanup
+    const stopAt = time + Math.max(nDUR + nREL, pREL) + tailREL + 0.01;
+
+    noise.start(time);
+    noise.stop(stopAt);
     osc.start(time);
-    osc.stop(time + dur + 0.005);
-    osc.onended = () => {
-      try { osc.disconnect(); g.disconnect(); } catch {}
+    osc.stop(stopAt);
+
+    const cleanup = () => {
+      try {
+        noise.disconnect(); bp.disconnect(); hp.disconnect();
+        sat.disconnect(); ng.disconnect();
+        osc.disconnect(); pipBP.disconnect(); og.disconnect();
+        g.disconnect(); tickTail.disconnect();
+      } catch {}
     };
+    osc.onended = cleanup;
   }, []);
 
+  /**
+   * More natural amplitude envelope for tones:
+   * ~12–20 ms attack, ~80–120 ms release (scaled by note duration).
+   */
   const applyEnvelope = (g: GainNode, start: number, dur: number, floor = 0.0001) => {
-    const ATT_MAX = 0.01;
-    const REL_MAX = 0.06;
-    const att = Math.min(ATT_MAX, Math.max(0.002, dur * 0.2));
-    const rel = Math.min(REL_MAX, Math.max(0.02, dur * 0.2));
+    const ATT = Math.max(0.012, Math.min(0.02, dur * 0.15));
+    const REL = Math.max(0.08, Math.min(0.12, dur * 0.35));
     const now = ctxRef.current!.currentTime;
     const safeStart = Math.max(start, now + 0.005);
-    const attEnd = safeStart + att;
-    const relStart = Math.max(safeStart + att * 0.5, safeStart + dur - rel);
+    const attEnd = safeStart + ATT;
+    const relStart = Math.max(safeStart + ATT * 0.6, safeStart + dur - REL);
 
     g.gain.cancelScheduledValues(0);
     g.gain.setValueAtTime(floor, safeStart);
     g.gain.exponentialRampToValueAtTime(1, attEnd);
     g.gain.setValueAtTime(1, relStart);
-    g.gain.exponentialRampToValueAtTime(floor, relStart + rel);
+    g.gain.exponentialRampToValueAtTime(floor, relStart + REL);
 
-    return { safeStart, stopAt: relStart + rel + 0.01 };
+    return { safeStart, stopAt: relStart + REL + 0.01 };
   };
 
+  /**
+   * Musical tone: gentle harmonic spectrum + soft low-pass
+   * Keeps A4 exact while sounding less “edgy” than a bare sine.
+   */
   const scheduleNote = useCallback((midi: number, start: number, dur: number, a4Hz: number) => {
     if (!ctxRef.current || !noteMasterGainRef.current) return;
     const ctx = ctxRef.current;
     const hz = midiToHz(midi, a4Hz);
 
     const osc = ctx.createOscillator();
-    osc.type = "sine";
+    osc.setPeriodicWave(getPeriodicWave(ctx));
     osc.frequency.value = hz;
 
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 3800; // gentle roll-off
+    filter.Q.value = 0.707;
+
     const g = ctx.createGain();
-    osc.connect(g);
+    osc.connect(filter);
+    filter.connect(g);
     g.connect(noteMasterGainRef.current);
 
     const { safeStart, stopAt } = applyEnvelope(g, start, dur);
@@ -125,7 +258,7 @@ export default function usePhrasePlayer() {
     osc.stop(stopAt);
 
     const cleanup = () => {
-      try { osc.disconnect(); g.disconnect(); } catch {}
+      try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
     };
     osc.onended = cleanup;
 
@@ -147,7 +280,10 @@ export default function usePhrasePlayer() {
       const startTime = ctxRef.current.currentTime + 0.08;
 
       if (metronome && leadBeats > 0) {
-        for (let b = 0; b < leadBeats; b++) playTick(startTime + b * secPerBeat);
+        for (let b = 0; b < leadBeats; b++) {
+          const accent = b % tsNum === 0;
+          playTick(startTime + b * secPerBeat, accent);
+        }
       }
 
       for (const n of phrase.notes) {
@@ -169,6 +305,9 @@ export default function usePhrasePlayer() {
 
   useEffect(() => () => stopAllScheduled(), [stopAllScheduled]);
 
+  /**
+   * Standalone tone (e.g., A440) with the same timbre chain.
+   */
   const playToneHz = useCallback(
     async (hz: number, durSec: number) => {
       await warm();
@@ -180,18 +319,24 @@ export default function usePhrasePlayer() {
       const start = ctx.currentTime + 0.05;
 
       const osc = ctx.createOscillator();
-      osc.type = "sine";
+      osc.setPeriodicWave(getPeriodicWave(ctx));
       osc.frequency.value = hz;
 
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 3800;
+      filter.Q.value = 0.707;
+
       const g = ctx.createGain();
-      osc.connect(g);
+      osc.connect(filter);
+      filter.connect(g);
       g.connect(noteMasterGainRef.current);
 
       const { safeStart, stopAt } = applyEnvelope(g, start, durSec);
       osc.start(safeStart);
       osc.stop(stopAt);
       osc.onended = () => {
-        try { osc.disconnect(); g.disconnect(); } catch {}
+        try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
       };
     },
     [warm, stopAllScheduled]
@@ -215,7 +360,7 @@ export default function usePhrasePlayer() {
   );
 
   const playLeadInTicks = useCallback(
-    async (countBeats: number, secPerBeat: number, startAtPerfMs?: number | null) => {
+    async (countBeats: number, secPerBeat: number, startAtPerfMs?: number | null, tsNum: number = 4) => {
       await warm();
       if (!ctxRef.current) return;
 
@@ -226,7 +371,10 @@ export default function usePhrasePlayer() {
       const mapped = startAtPerfMs != null ? nowCtx + (startAtPerfMs - nowPerf) / 1000 : null;
       const startTime = Math.max(ctxRef.current.currentTime + 0.05, mapped ?? 0);
 
-      for (let b = 0; b < countBeats; b++) playTick(startTime + b * secPerBeat);
+      for (let b = 0; b < countBeats; b++) {
+        const accent = b % tsNum === 0;
+        playTick(startTime + b * secPerBeat, accent);
+      }
     },
     [warm, playTick, stopAllScheduled]
   );
@@ -238,16 +386,24 @@ export default function usePhrasePlayer() {
 
       stopAllScheduled();
 
-      const { bpm, tsDen, startAtPerfMs } = opts;
+      const { bpm, tsDen, tsNum, startAtPerfMs } = opts;
       const nowPerf = performance.now();
       const nowCtx = ctxRef.current.currentTime;
       const mapped = startAtPerfMs != null ? nowCtx + (startAtPerfMs - nowPerf) / 1000 : null;
       const startTime = Math.max(ctxRef.current.currentTime + 0.08, mapped ?? 0);
 
+      const secPerBeat = beatsToSeconds(1, bpm, tsDen);
       let t = 0;
+      let beatsElapsed = 0;
+
       for (const ev of rhythm) {
-        if (ev.type === "note") playTick(startTime + t);
-        t += noteValueToSeconds(ev.value, bpm, tsDen);
+        if (ev.type === "note") {
+          const accent = isBarline(beatsElapsed, tsNum);
+          playTick(startTime + t, accent);
+        }
+        const durSec = noteValueToSeconds(ev.value, bpm, tsDen);
+        t += durSec;
+        beatsElapsed += durSec / secPerBeat;
       }
     },
     [warm, playTick, stopAllScheduled]
@@ -260,17 +416,24 @@ export default function usePhrasePlayer() {
 
       stopAllScheduled();
 
-      const { bpm, tsDen, startAtPerfMs, a4Hz = 440, metronome = true } = opts;
+      const { bpm, tsDen, tsNum, startAtPerfMs, a4Hz = 440, metronome = true } = opts;
       const nowPerf = performance.now();
       const nowCtx = ctxRef.current.currentTime;
       const mapped = startAtPerfMs != null ? nowCtx + (startAtPerfMs - nowPerf) / 1000 : null;
       const startTime = Math.max(ctxRef.current.currentTime + 0.05, mapped ?? 0);
 
       if (metronome && rhythm?.length) {
+        const secPerBeat = beatsToSeconds(1, bpm, tsDen);
         let t = 0;
+        let beatsElapsed = 0;
         for (const ev of rhythm) {
-          if (ev.type === "note") playTick(startTime + t);
-          t += noteValueToSeconds(ev.value, bpm, tsDen);
+          if (ev.type === "note") {
+            const accent = isBarline(beatsElapsed, tsNum);
+            playTick(startTime + t, accent);
+          }
+          const durSec = noteValueToSeconds(ev.value, bpm, tsDen);
+          t += durSec;
+          beatsElapsed += durSec / secPerBeat;
         }
       }
 

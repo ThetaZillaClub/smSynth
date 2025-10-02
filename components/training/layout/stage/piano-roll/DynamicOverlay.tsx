@@ -358,7 +358,7 @@ export default function DynamicOverlay({
           if (x < visLeft - 64 || x > visRight + 64) continue;
           if (lastX !== null && x === lastX) continue;
           lastX = x;
-          const y = midiToY(p.midi, height, minMidi, maxMidi);
+          const y = midiToY(p.midi + 0.5, height, minMidi, maxMidi);
           if (!pen) {
             ctx.moveTo(x, y);
             pen = true;
