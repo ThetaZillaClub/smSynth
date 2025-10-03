@@ -94,17 +94,17 @@ export default function GameStage({
 
     const measure = () => {
       const next = Math.max(260, el.clientHeight || 0);
-      // only update when the number actually changes
       setFillH((prev) => (prev !== next ? next : prev));
     };
 
     measure();
     const ro = new ResizeObserver(() => {
-      // throttle to the next frame to avoid ping-pong with layout
       requestAnimationFrame(measure);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+    };
   }, [height]);
 
   // Sheet sizing + systems
@@ -112,7 +112,6 @@ export default function GameStage({
   const [sheetW, setSheetW] = useState<number>(0);
   const [systems, setSystems] = useState<SystemLayout[] | null>(null);
 
-  // Measure sheet width with a throttled RO; only set state if changed
   useLayoutEffect(() => {
     const el = sheetHostRef.current;
     if (!el) return;
@@ -134,7 +133,6 @@ export default function GameStage({
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-    // Depend only on element existence; not on heights that we set, to avoid loops
   }, [sheetHostRef.current]);
 
   const handleLayout = useCallback((m: { systems: SystemLayout[] }) => {
@@ -155,7 +153,8 @@ export default function GameStage({
 
   const renderedPanel = <SidePanelLayout>{stageAside}</SidePanelLayout>;
 
-  const resolvedClef = clef ?? pickClef(phrase);
+  const hasPhrase = !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
+  const resolvedClef = (clef ?? pickClef(phrase)) as "treble" | "bass";
   const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
 
   return (
@@ -165,7 +164,7 @@ export default function GameStage({
         <div className="flex-1 min-w-0 flex flex-col">
           <div className="w-full">
             {/* If no phrase, render an empty stage area with the correct height */}
-            {!phrase || !Array.isArray(phrase.notes) || phrase.notes.length === 0 ? (
+            {!hasPhrase ? (
               <div style={{ height: mainH }} />
             ) : view === "sheet" ? (
               <div className="w-full" style={{ height: mainH }}>
@@ -175,7 +174,7 @@ export default function GameStage({
                   style={{ height: sheetStaffHeight }}
                 >
                   <VexScore
-                    phrase={phrase}
+                    phrase={phrase!}
                     lyrics={lyrics ?? undefined}
                     bpm={bpm}
                     den={den}
@@ -193,7 +192,7 @@ export default function GameStage({
                     <SheetOverlay
                       width={sheetW}
                       height={sheetStaffHeight}
-                      phrase={phrase}
+                      phrase={phrase!}
                       running={running}
                       startAtMs={startAtMs}
                       leadInSec={leadInSecEff}
@@ -206,6 +205,8 @@ export default function GameStage({
                       lowHz={lowHz}
                       highHz={highHz}
                       useSharps={useSharpsPref}
+                      bpm={bpm}
+                      den={den}
                     />
                   ) : null}
                 </div>
@@ -213,7 +214,7 @@ export default function GameStage({
             ) : (
               <PianoRollCanvas
                 height={mainH}
-                phrase={phrase}
+                phrase={phrase ?? null}
                 running={running}
                 onActiveNoteChange={onActiveNoteChange}
                 livePitchHz={livePitchHz}
@@ -235,11 +236,11 @@ export default function GameStage({
           </div>
 
           {/* Match previous behavior: hide rhythm roll when no phrase */}
-          {phrase && showRhythm && view !== "sheet" ? (
+          {hasPhrase && showRhythm && view !== "sheet" ? (
             <div className="w-full mt-2">
               <RhythmRollCanvas
                 height={rhythmH}
-                rhythm={rhythm}
+                rhythm={rhythm ?? null}
                 running={running}
                 startAtMs={startAtMs}
                 leadInSec={leadInSecEff}

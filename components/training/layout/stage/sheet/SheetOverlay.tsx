@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { PR_COLORS, type Phrase, timeToX } from "@/utils/stage";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { SystemLayout } from "./vexscore/types";
+import { secondsPerBeat } from "@/utils/time/tempo";
 
 type Props = {
   width: number;
@@ -30,6 +31,10 @@ type Props = {
   /** (Kept for parity with props; not used for folding anymore) */
   lowHz?: number | null;
   highHz?: number | null;
+
+  /** For 1/16-note padding alignment with makeTickables. */
+  bpm?: number;
+  den?: number;
 };
 
 /* ---------------- staff geometry helpers (top staff only) ---------------- */
@@ -137,6 +142,8 @@ export default function SheetOverlay({
 
   clef = null,
   useSharps = true,
+  bpm = 80,
+  den = 4,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -195,47 +202,56 @@ export default function SheetOverlay({
         ? Math.max(0, Math.min(mapDur, tNow))
         : Math.max(0, Math.min(mapDur, tNow - lead));
 
+      // --- compute continuous 1/16-note push-ahead AS TIME, not pixels ---
+      const spb = secondsPerBeat(bpm, den);       // sec per beat in current denominator
+      const pad16thSec = spb * (den / 16);        // seconds of a 16th note
+      const tShifted = Math.max(0, Math.min(mapDur, timeForMapping + pad16thSec));
+
       // --- playhead & TOP staff band (use melY0/melY1 when present) ---
-      let xGuide = 0.5;
+      let xGuide = 0;
       let band: Band = { yTop: 0, yBottom: height };
 
       if (useSystems) {
-        // System/segment mapping uses the *exact* system timebase (includes lead-in)
+        // Find current system for the shifted time
         let sys = systems![0];
         for (let i = 0; i < systems!.length; i++) {
-          const s = systems![i];
-          if (timeForMapping >= s.startSec && timeForMapping < s.endSec) { sys = s; break; }
-          if (timeForMapping >= s.endSec) sys = s;
+          const s = systems![i]!;
+          if (tShifted >= s.startSec && tShifted < s.endSec) { sys = s; break; }
+          if (tShifted >= s.endSec) sys = s;
         }
 
+        // If we have bar segments, map within the current bar; else map within the whole system.
         if (Array.isArray(sys.segments) && sys.segments.length) {
           let seg = sys.segments[0];
           for (let i = 0; i < sys.segments.length; i++) {
             const s = sys.segments[i]!;
-            if (timeForMapping >= s.startSec && timeForMapping < s.endSec) { seg = s; break; }
-            if (timeForMapping >= s.endSec) seg = s;
+            if (tShifted >= s.startSec && tShifted < s.endSec) { seg = s; break; }
+            if (tShifted >= s.endSec) seg = s;
           }
-          const dur = Math.max(1e-6, seg.endSec - seg.startSec);
-          const u = Math.max(0, Math.min(1, (timeForMapping - seg.startSec) / dur));
-          xGuide = Math.round(seg.x0 + u * (seg.x1 - seg.x0)) + 0.5;
+
+          const segDur = Math.max(1e-6, seg.endSec - seg.startSec);
+          const u = Math.max(0, Math.min(1, (tShifted - seg.startSec) / segDur));
+          const xBase = seg.x0 + u * (seg.x1 - seg.x0);
+          xGuide = Math.max(seg.x0, Math.min(seg.x1, xBase));
         } else {
-          const dur = Math.max(1e-6, sys.endSec - sys.startSec);
-          const u = Math.max(0, Math.min(1, (timeForMapping - sys.startSec) / dur));
-          xGuide = Math.round(sys.x0 + u * (sys.x1 - sys.x0)) + 0.5;
+          const sysDur = Math.max(1e-6, sys.endSec - sys.startSec);
+          const u = Math.max(0, Math.min(1, (tShifted - sys.startSec) / sysDur));
+          const xBase = sys.x0 + u * (sys.x1 - sys.x0);
+          xGuide = Math.max(sys.x0, Math.min(sys.x1, xBase));
         }
 
         band = topStaffBand(sys);
       } else {
-        // Legacy layout: map *content* time over [x0, x1]
+        // Legacy layout: map *content* time over [x0, x1] using shifted time too
         const x0 = Number.isFinite(staffStartX as number) ? (staffStartX as number) : 0;
         const x1 = Number.isFinite(staffEndX as number) ? (staffEndX as number) : width;
         const W = Math.max(1, x1 - x0);
-        const xLocal = timeToX(timeForMapping, W, mapDur);
-        xGuide = Math.round(x0 + xLocal) + 0.5;
+        const xLocal = timeToX(tShifted, W, mapDur);
+        xGuide = x0 + Math.min(W, Math.max(0, xLocal));
         band = { yTop: 0, yBottom: height };
       }
 
-      // Playhead
+      // Playhead — draw at float x (no pixel rounding) to avoid "stick then jump".
       ctx.strokeStyle = "#22c55e";
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -311,6 +327,8 @@ export default function SheetOverlay({
       shouldShowPitch,
       clef,
       useSharps,
+      bpm,
+      den,
     ]
   );
 

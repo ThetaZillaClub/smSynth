@@ -1,4 +1,4 @@
-// components/training/layout/sheet/vexscore/ScoreView.tsx
+// components/training/layout/stage/sheet/vexscore/ScoreView.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef } from "react";
@@ -29,7 +29,6 @@ export default function ScoreView({
 }: VexScoreProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const hasDrawnOnceRef = useRef<boolean>(false);
-  // Upcast ref type (HTMLDivElement -> HTMLElement) without using `any`
   const dims = useResizeObserver(hostRef as unknown as React.RefObject<HTMLElement>, 120, heightPx);
 
   const clef = clefProp ?? pickClef(phrase);
@@ -37,7 +36,6 @@ export default function ScoreView({
   // timing helpers
   const secPerBeat = useMemo(() => (60 / Math.max(1, bpm)) * (4 / Math.max(1, den)), [bpm, den]);
   const secPerBar = useMemo(() => tsNum * secPerBeat, [tsNum, secPerBeat]);
-  // whole-notes per second (for seconds→tokens conversions)
   const wnPerSec = useMemo(() => bpm / (60 * Math.max(1, den)), [bpm, den]);
 
   const contentSec = useMemo(() => {
@@ -49,7 +47,6 @@ export default function ScoreView({
     return Math.max(fromPhrase, fromMelodyRhy);
   }, [phrase?.durationSec, melodyRhythm, bpm, den]);
 
-  // Total length = ceil((lead-in + content) to whole bars) — used only for page/system planning
   const totalSec = useMemo(() => {
     const raw = Math.max(leadInSec + contentSec, 1e-6);
     return Math.ceil(raw / Math.max(1e-9, secPerBar)) * secPerBar;
@@ -64,11 +61,7 @@ export default function ScoreView({
     const ensureVexFonts = async () => {
       if (typeof document === "undefined") return;
 
-      // Narrow typing for CSS Font Loading without using `any`
-      type FontFaceSetLike = {
-        ready: Promise<unknown>;
-        load: (font: string) => Promise<unknown>;
-      };
+      type FontFaceSetLike = { ready: Promise<unknown>; load: (font: string) => Promise<unknown> };
       type DocumentWithFonts = Document & { fonts?: FontFaceSetLike };
 
       const doc = document as DocumentWithFonts;
@@ -98,7 +91,6 @@ export default function ScoreView({
 
       const keyMap = keyAccidentals(keySig || null);
 
-      // Build tickables using tick-accurate bar math (den-aware)
       const mel = buildMelodyTickables({
         phrase,
         clef,
@@ -108,7 +100,7 @@ export default function ScoreView({
         secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
         secPerBar,
         tsNum,
-        den, // ✅ denominator-aware bars
+        den,
         lyrics,
         rhythm: melodyRhythm,
         keyAccidentals: keySig ? keyMap : null,
@@ -121,12 +113,11 @@ export default function ScoreView({
         secPerWholeNote: 1 / Math.max(1e-9, wnPerSec),
         secPerBar,
         tsNum,
-        den, // ✅
+        den,
       });
 
       const haveRhythm = Array.isArray(rhythm) && rhythm.length > 0;
 
-      // bars-per-row from first line density, then lock
       const { systems, barsPerRow } = computeSystems(totalSec, secPerBar, {
         melodyStarts: mel.starts,
         maxBarsPerRow: 4,
@@ -234,7 +225,12 @@ export default function ScoreView({
     <div
       ref={hostRef}
       className={className}
-      style={{ position: "relative", width: "100%", height: heightPx ? `${heightPx}px` : "100%" }}
+      style={{
+        position: "relative",
+        zIndex: 0, // base layer; overlay goes above
+        width: "100%",
+        height: heightPx ? `${heightPx}px` : "100%",
+      }}
     />
   );
 }
