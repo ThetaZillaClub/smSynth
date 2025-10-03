@@ -6,11 +6,10 @@ import type {
   PitchSample,
   TakeScore,
 } from "./types";
-
+import { letterFromPercent } from "./grade";
 import { computePitchScore } from "./pitch/computePitch";
 import { computeRhythmScore } from "./rhythm";
 import { computeIntervalScore } from "./intervals/computeIntervals";
-import { finalizeScore } from "./final/finalize";
 
 export type { PitchSample, TakeScore } from "./types";
 
@@ -49,7 +48,15 @@ export function computeTakeScore({
   const intervals = computeIntervalScore(phrase, voiced);
 
   // ---- Finalize ----
-  const final = finalizeScore(pitch.percent, rhythm.combinedPercent);
+const parts: number[] = [pitch.percent, rhythm.melodyPercent];
+if (rhythm.lineEvaluated) parts.push(rhythm.linePercent);
 
+const finalPctRaw = parts.reduce((a, b) => a + b, 0) / parts.length;
+const finalPct = Math.max(0, Math.min(100, finalPctRaw));
+
+const final = {
+  percent: finalPct,
+  letter: letterFromPercent(finalPct),
+};
   return { pitch, rhythm, intervals, final };
 }
