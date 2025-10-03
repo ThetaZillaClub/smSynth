@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { PR_COLORS, type Phrase } from "@/utils/stage";
+import { PR_COLORS, type Phrase, timeToX } from "@/utils/stage";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { SystemLayout } from "./vexscore/types";
 
@@ -145,11 +145,14 @@ export default function SheetOverlay({
     []
   );
 
+  // Total duration source:
+  // - systems path: VexScore provides content+lead-in timeline via endSec
+  // - legacy path: we synthesize from lead-in + phrase
   const totalSec = useMemo(() => {
     if (Array.isArray(systems) && systems.length) {
       return systems[systems.length - 1]!.endSec;
     }
-    return Math.max(leadInSec + (phrase?.durationSec ?? 0), 0.001);
+    return Math.max((leadInSec || 0) + (phrase?.durationSec ?? 0), 0.001);
   }, [systems, leadInSec, phrase?.durationSec]);
 
   const shouldShowPitch =
@@ -175,45 +178,60 @@ export default function SheetOverlay({
       ctx.clearRect(0, 0, width, height);
 
       const isLiveTransport = running && startAtMs != null;
-      const tNow = isLiveTransport ? (nowMs - (startAtMs as number)) / 1000 : 0;
-      const headTime = Math.max(0, Math.min(totalSec, tNow));
+      const tNow = isLiveTransport ? (nowMs - (startAtMs as number)) / 1000 : 0; // 0 at first click (lead-in start)
+
+      const lead = Math.max(0, leadInSec || 0);
+
+      // ---- Timeline used for mapping (systems vs legacy) ----
+      // systems: DO NOT subtract lead; their times already include the lead-in.
+      // legacy: subtract lead so playhead stays pinned during the count-in.
+      const useSystems = Array.isArray(systems) && systems.length > 0;
+
+      const mapDur = useSystems
+        ? Math.max(1e-6, totalSec)
+        : Math.max(1e-6, totalSec - lead);
+
+      const timeForMapping = useSystems
+        ? Math.max(0, Math.min(mapDur, tNow))
+        : Math.max(0, Math.min(mapDur, tNow - lead));
 
       // --- playhead & TOP staff band (use melY0/melY1 when present) ---
       let xGuide = 0.5;
       let band: Band = { yTop: 0, yBottom: height };
 
-      if (Array.isArray(systems) && systems.length) {
-        let sys = systems[0];
-        for (let i = 0; i < systems.length; i++) {
-          const s = systems[i];
-          if (headTime >= s.startSec && headTime < s.endSec) { sys = s; break; }
-          if (headTime >= s.endSec) sys = s;
+      if (useSystems) {
+        // System/segment mapping uses the *exact* system timebase (includes lead-in)
+        let sys = systems![0];
+        for (let i = 0; i < systems!.length; i++) {
+          const s = systems![i];
+          if (timeForMapping >= s.startSec && timeForMapping < s.endSec) { sys = s; break; }
+          if (timeForMapping >= s.endSec) sys = s;
         }
 
         if (Array.isArray(sys.segments) && sys.segments.length) {
           let seg = sys.segments[0];
           for (let i = 0; i < sys.segments.length; i++) {
             const s = sys.segments[i]!;
-            if (headTime >= s.startSec && headTime < s.endSec) { seg = s; break; }
-            if (headTime >= s.endSec) seg = s;
+            if (timeForMapping >= s.startSec && timeForMapping < s.endSec) { seg = s; break; }
+            if (timeForMapping >= s.endSec) seg = s;
           }
           const dur = Math.max(1e-6, seg.endSec - seg.startSec);
-          const u = Math.max(0, Math.min(1, (headTime - seg.startSec) / dur));
+          const u = Math.max(0, Math.min(1, (timeForMapping - seg.startSec) / dur));
           xGuide = Math.round(seg.x0 + u * (seg.x1 - seg.x0)) + 0.5;
         } else {
           const dur = Math.max(1e-6, sys.endSec - sys.startSec);
-          const u = (headTime - sys.startSec) / dur;
+          const u = Math.max(0, Math.min(1, (timeForMapping - sys.startSec) / dur));
           xGuide = Math.round(sys.x0 + u * (sys.x1 - sys.x0)) + 0.5;
         }
 
         band = topStaffBand(sys);
       } else {
-        // legacy layout
+        // Legacy layout: map *content* time over [x0, x1]
         const x0 = Number.isFinite(staffStartX as number) ? (staffStartX as number) : 0;
         const x1 = Number.isFinite(staffEndX as number) ? (staffEndX as number) : width;
-        const bandW = Math.max(1, x1 - x0);
-        const ratio = headTime / totalSec;
-        xGuide = Math.round(x0 + ratio * bandW) + 0.5;
+        const W = Math.max(1, x1 - x0);
+        const xLocal = timeToX(timeForMapping, W, mapDur);
+        xGuide = Math.round(x0 + xLocal) + 0.5;
         band = { yTop: 0, yBottom: height };
       }
 
@@ -229,7 +247,6 @@ export default function SheetOverlay({
       if (shouldShowPitch) {
         const rawMidi = hzToMidi(livePitchHz as number, a4Hz);
         if (Number.isFinite(rawMidi)) {
-          // NO octave folding — map actual MIDI directly
           const yRaw = yFromMidiOnStaff(
             rawMidi,
             band.yTop,
@@ -285,11 +302,12 @@ export default function SheetOverlay({
       running,
       startAtMs,
       totalSec,
-      livePitchHz,
-      a4Hz,
+      leadInSec,
+      systems,
       staffStartX,
       staffEndX,
-      systems,
+      livePitchHz,
+      a4Hz,
       shouldShowPitch,
       clef,
       useSharps,
