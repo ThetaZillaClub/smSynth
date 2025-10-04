@@ -489,7 +489,7 @@ const stageAside =
   tsNum={ts.num}
   tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
   lowHz={lowHz ?? null}
-  // NEW: let the pretest know which scale we’re in
+  // let the pretest know which scale we’re in
   scaleName={sessionConfigLocal.scale?.name ?? "major"}
   // audio/mic
   liveHz={liveHz}

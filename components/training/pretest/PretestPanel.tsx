@@ -5,7 +5,8 @@ import React from "react";
 import SinglePitch from "@/components/training/pretest/single-pitch/SinglePitch";
 import DerivedTonic from "@/components/training/pretest/derived-tonic/DerivedTonic";
 import GuidedArpeggio from "@/components/training/pretest/guided-arpeggio/GuidedArpeggio";
-import type { ScaleName } from "@/utils/phrase/scales"; // ⬅️ NEW
+import InternalArpeggio from "@/components/training/pretest/internal-arpeggio/InternalArpeggio";
+import type { ScaleName } from "@/utils/phrase/scales";
 
 type ModeKind =
   | "single_tonic"
@@ -27,7 +28,7 @@ export default function PretestPanel({
   tsNum,
   tonicPc,
   lowHz,
-  scaleName = "major", // ⬅️ NEW (optional, defaults to major)
+  scaleName = "major",
 
   // audio/mic
   liveHz,
@@ -45,7 +46,7 @@ export default function PretestPanel({
   tsNum: number;
   tonicPc: number;
   lowHz: number | null;
-  scaleName?: ScaleName; // ⬅️ NEW
+  scaleName?: ScaleName;
 
   liveHz: number | null;
   confidence: number;
@@ -101,13 +102,33 @@ export default function PretestPanel({
         tsNum={tsNum}
         tonicPc={tonicPc}
         lowHz={lowHz}
-        scaleName={scaleName}  // ⬅️ NEW
+        scaleName={scaleName}
         liveHz={liveHz}
         confidence={confidence}
         playMidiList={playMidiList}
       />
     );
   }
+
+if (modeKind === "internal_arpeggio") {
+  return (
+    <InternalArpeggio
+      statusText={statusText}
+      running={running}
+      inResponse={inResponse}
+      onStart={onStart}
+      onContinue={onContinue}
+      bpm={bpm}
+      tsNum={tsNum}
+      tonicPc={tonicPc}
+      lowHz={lowHz}
+      scaleName={scaleName}
+      liveHz={liveHz}
+      confidence={confidence}
+      playMidiList={playMidiList} // ⬅️ pass through for A440 cue
+    />
+  );
+}
 
   // Minimal generic shell for other (upcoming) modes; single footer play button.
   const handleFooterPlay = async () => {
