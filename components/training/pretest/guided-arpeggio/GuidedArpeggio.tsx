@@ -19,7 +19,7 @@ export default function GuidedArpeggio({
   tsNum,
   tonicPc,
   lowHz,
-  scaleName = "major", // ⬅️ NEW
+  scaleName = "major",
 
   // audio/mic
   liveHz,
@@ -36,7 +36,7 @@ export default function GuidedArpeggio({
   tsNum: number;
   tonicPc: number;
   lowHz: number | null;
-  scaleName?: ScaleName; // ⬅️ NEW
+  scaleName?: ScaleName;
 
   liveHz: number | null;
   confidence: number;
@@ -62,19 +62,21 @@ export default function GuidedArpeggio({
   }, [tonicMidi]);
 
   // —— Intervals: choose 3rd/5th by scale —— //
-  const isMinorish = useMemo(() => (
-    scaleName === "natural_minor" ||
-    scaleName === "harmonic_minor" ||
-    scaleName === "melodic_minor" ||
-    scaleName === "dorian" ||
-    scaleName === "phrygian" ||
-    scaleName === "minor_pentatonic"
-  ), [scaleName]);
+  const isMinorish = useMemo(
+    () =>
+      scaleName === "natural_minor" ||
+      scaleName === "harmonic_minor" ||
+      scaleName === "melodic_minor" ||
+      scaleName === "dorian" ||
+      scaleName === "phrygian" ||
+      scaleName === "minor_pentatonic",
+    [scaleName]
+  );
 
   const triadOffsets = useMemo(() => {
     if (scaleName === "locrian") return { third: 3, fifth: 6 }; // diminished 5th
-    if (isMinorish) return { third: 3, fifth: 7 };              // minor 3rd, perfect 5th
-    return { third: 4, fifth: 7 };                               // major
+    if (isMinorish) return { third: 3, fifth: 7 }; // minor 3rd, perfect 5th
+    return { third: 4, fifth: 7 }; // major
   }, [scaleName, isMinorish]);
 
   const callMidis = useMemo<number[] | null>(() => {
@@ -85,19 +87,11 @@ export default function GuidedArpeggio({
   }, [tonicMidi, triadOffsets]);
 
   // —— Solfège labels for the chip row —— //
-  // Requirement: Major → do–mi–sol–mi–do ; Minor → la–do–me–do–la (example provided)
   const labelForDegree = (deg: 1 | 3 | 5): string => {
-    if (scaleName === "locrian") {
-      // Locrian (ti-based) with flat 5 → se
-      return deg === 1 ? "ti" : deg === 3 ? "re" : "se";
-    }
-    if (isMinorish) {
-      // As requested (example): la, do, me
-      return deg === 1 ? "la" : deg === 3 ? "do" : "me";
-    }
-    // Major-ish default
+    if (scaleName === "locrian") return deg === 1 ? "ti" : deg === 3 ? "re" : "se";
+    if (isMinorish) return deg === 1 ? "la" : deg === 3 ? "do" : "me";
     return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
-  };
+    };
 
   const targetDegrees = [1, 3, 5, 3, 1] as const;
   const targetLabels = useMemo(
@@ -106,7 +100,7 @@ export default function GuidedArpeggio({
     [scaleName]
   );
 
-  // Matcher (degrees stay numeric; UI shows solfège)
+  // Matcher (waits for correct notes only)
   const matcher = useGuidedArpMatcher({
     active: !!inResponse && running && tonicMidi != null,
     tonicMidi: tonicMidi ?? 60,
@@ -119,50 +113,67 @@ export default function GuidedArpeggio({
     holdSecPerNote: 0.25,
   });
 
-  // Auto-advance on pass
+  // Delayed auto-advance (digest/rest)
+  const advanceTimeoutRef = useRef<number | null>(null);
+  const queueAdvance = () => {
+    if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
+  };
+  useEffect(
+    () => () => {
+      if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    },
+    []
+  );
+
+  // Auto-advance on pass (with 1s delay)
   const passLatch = useRef(false);
-  useEffect(() => { if (!running) passLatch.current = false; }, [running]);
+  useEffect(() => {
+    if (!running) passLatch.current = false;
+  }, [running]);
   useEffect(() => {
     if (running && inResponse && matcher.passed && !passLatch.current) {
       passLatch.current = true;
-      onContinue();
+      queueAdvance();
     }
     if (!matcher.passed) passLatch.current = false;
-  }, [running, inResponse, matcher.passed, onContinue]);
+  }, [running, inResponse, matcher.passed]);
 
   // Back-compat skip for any “long” variant text (unchanged)
   useEffect(() => {
     if (!running || !inResponse) return;
     if (statusText.includes("do–mi–sol–do–sol–mi–do–sol–do")) {
-      onContinue();
+      queueAdvance();
     }
-  }, [running, inResponse, statusText, onContinue]);
+  }, [running, inResponse, statusText]);
 
   const help = useMemo(() => {
     const pat = targetLabels.join("–");
     if (!running) return "Press Play to start. Then echo the arpeggio.";
     if (!inResponse) return `Listen… the teacher will sing ${pat}.`;
     if (matcher.passed) return "Great! You sang the pattern in order.";
-    if (matcher.mismatch) return "Close! Try again in order.";
     return "Sing the five notes in order — any tempo or octave.";
-  }, [running, inResponse, matcher.passed, matcher.mismatch, targetLabels]);
+  }, [running, inResponse, matcher.passed, targetLabels]);
 
   const onFooterPlay = async () => {
-    if (!running) { onStart(); return; }
+    if (!running) {
+      onStart();
+      return;
+    }
     if (!callMidis) return;
-    try { await playMidiList(callMidis, quarterSec); } catch {}
+    try {
+      await playMidiList(callMidis, quarterSec);
+    } catch {}
   };
 
-  const progress = matcher.capturedDegrees; // numeric [1,3,5,...]
+  const progress = matcher.capturedDegrees;
 
   return (
     <div className="mt-2 grid gap-3 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
       {/* Header row */}
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold">{statusText}</div>
-        <div className="text-xs opacity-70">
-          Pattern: {targetLabels.join("–")}
-        </div>
+        <div className="text-xs opacity-70">Pattern: {targetLabels.join("–")}</div>
       </div>
 
       {/* Target + helper copy */}
@@ -176,25 +187,22 @@ export default function GuidedArpeggio({
         </div>
         <div className="mt-1 text-xs text-[#2d2d2d]">{help}</div>
 
-        {/* Progress chips — now labeled with solfège */}
+        {/* Progress chips — only "matched" or "waiting" (no red) */}
         <div className="mt-2 flex items-center gap-1">
           {targetDegrees.map((deg, i) => {
-            const got = progress[i] ?? null;           // numeric (1/3/5)
-            const expected = deg;
-            const ok = got != null && got === expected;
-            const bad = got != null && got !== expected;
+            const got = progress[i] ?? null;
+            const ok = got != null && got === deg;
             const label = targetLabels[i];
-
             return (
               <span
                 key={i}
                 className={[
                   "inline-flex items-center justify-center w-10 h-7 rounded-md border text-xs font-semibold",
-                  ok ? "bg-[#0f0f0f] text-white border-[#0f0f0f]" : "",
-                  bad ? "bg-[#ffd1d1] text-[#7a0000] border-[#ffb6b6]" : "",
-                  !ok && !bad ? "bg-white text-[#2d2d2d] border-[#dcdcdc]" : "",
+                  ok
+                    ? "bg-[#0f0f0f] text-white border-[#0f0f0f]"
+                    : "bg-white text-[#2d2d2d] border-[#dcdcdc]",
                 ].join(" ")}
-                title={`${label} (degree ${expected})`}
+                title={`${ok ? "Matched" : "Waiting…"} (${label})`}
               >
                 {label}
               </span>
@@ -229,7 +237,11 @@ export default function GuidedArpeggio({
 }
 
 function RoundIconButton({
-  children, title, ariaLabel, onClick, disabled,
+  children,
+  title,
+  ariaLabel,
+  onClick,
+  disabled,
 }: {
   children: React.ReactNode;
   title: string;

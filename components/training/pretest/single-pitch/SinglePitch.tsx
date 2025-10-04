@@ -74,7 +74,20 @@ export default function SinglePitch({
   const held = Math.min(gate.heldSec, requiredHoldSec);
   const pct = Math.max(0, Math.min(1, requiredHoldSec ? held / requiredHoldSec : 0));
 
-  // Auto-advance when passed (no UI "Continue" button)
+  // Delayed auto-advance (digest/rest)
+  const advanceTimeoutRef = useRef<number | null>(null);
+  const queueAdvance = () => {
+    if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
+  };
+  useEffect(
+    () => () => {
+      if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    },
+    []
+  );
+
+  // Auto-advance when passed (no UI "Continue" button) — with 1s delay
   const passLatch = useRef(false);
   useEffect(() => {
     if (!running) passLatch.current = false;
@@ -82,13 +95,10 @@ export default function SinglePitch({
   useEffect(() => {
     if (running && inResponse && gate.passed && !passLatch.current) {
       passLatch.current = true;
-      onContinue();
+      queueAdvance();
     }
-    if (!gate.passed) {
-      // allow future passes to trigger again if needed
-      passLatch.current = false;
-    }
-  }, [running, inResponse, gate.passed, onContinue]);
+    if (!gate.passed) passLatch.current = false;
+  }, [running, inResponse, gate.passed]);
 
   const help = useMemo(() => {
     if (tonicMidi == null) return "Waiting for your saved range…";
@@ -122,15 +132,11 @@ export default function SinglePitch({
 
       {/* Target + helper */}
       <div className="rounded-md border border-[#d2d2d2] bg-white/70 px-3 py-2">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-          Single Pitch — Tonic
-        </div>
+        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Single Pitch — Tonic</div>
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold">
             Target {tonicLabel}
-            <span className="ml-2 text-xs font-normal text-[#2d2d2d]">
-              Hold for {requiredHoldSec.toFixed(2)}s
-            </span>
+            <span className="ml-2 text-xs font-normal text-[#2d2d2d]">Hold for {requiredHoldSec.toFixed(2)}s</span>
           </div>
         </div>
         <div className="mt-1 text-xs text-[#2d2d2d]">{help}</div>
@@ -140,10 +146,7 @@ export default function SinglePitch({
       <div className="rounded-md border border-[#d2d2d2] bg:white/70 bg-white/70 px-3 py-2">
         <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Hold progress</div>
         <div className="mt-1 h-2 rounded-full bg-[#ebebeb] overflow-hidden border border-[#dcdcdc]">
-          <div
-            className="h-full bg-[#0f0f0f] transition-[width]"
-            style={{ width: `${Math.round(pct * 100)}%` }}
-          />
+          <div className="h-full bg-[#0f0f0f] transition-[width]" style={{ width: `${Math.round(pct * 100)}%` }} />
         </div>
         <div className="mt-1 text-xs text-[#2d2d2d]">
           Held {held.toFixed(2)}s / {requiredHoldSec.toFixed(2)}s
@@ -153,12 +156,7 @@ export default function SinglePitch({
 
       {/* Footer controls: single round Play button */}
       <div className="mt-1 flex items-center justify-end">
-        <RoundIconButton
-          title={running ? "Play target" : "Start pre-test"}
-          ariaLabel="Play"
-          onClick={onFooterPlay}
-          disabled={running && tonicMidi == null}
-        >
+        <RoundIconButton title={running ? "Play target" : "Start pre-test"} ariaLabel="Play" onClick={onFooterPlay} disabled={running && tonicMidi == null}>
           {/* Play triangle */}
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
             <path d="M8 5v14l11-7L8 5z" fill="currentColor" />

@@ -1,7 +1,7 @@
 // components/training/pretest/internal-arpeggio/InternalArpeggio.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
@@ -9,9 +9,9 @@ import useGuidedArpMatcher from "@/components/training/pretest/guided-arpeggio/h
 import type { ScaleName } from "@/utils/phrase/scales";
 
 function triadOffsetsForScale(name?: ScaleName) {
-  const minorish = new Set<ScaleName>([
-    "minor","aeolian","dorian","phrygian","harmonic_minor","melodic_minor",
-  ] as unknown as ScaleName[]);
+  const minorish = new Set<ScaleName>(
+    ["minor", "aeolian", "dorian", "phrygian", "harmonic_minor", "melodic_minor"] as unknown as ScaleName[]
+  );
   const dim5 = new Set<ScaleName>(["locrian"] as unknown as ScaleName[]);
   const third = name && minorish.has(name) ? 3 : 4;
   const fifth = name && dim5.has(name) ? 6 : 7;
@@ -31,7 +31,7 @@ export default function InternalArpeggio({
   scaleName = "major",
   liveHz,
   confidence,
-  playMidiList, // ⬅️ used to play A440
+  playMidiList, // used to play A440
 }: {
   statusText: string;
   running: boolean;
@@ -87,14 +87,14 @@ export default function InternalArpeggio({
     retryAfterSec: 6,
   });
 
-  // Advance to step 2 when tonic passes
+  // Advance to step 2 when tonic passes (no delay here; delay only before *next pretest*)
   useEffect(() => {
     if (running && inResponse && phase === "tonic" && gate.passed) {
       setPhase("arp");
     }
   }, [running, inResponse, phase, gate.passed]);
 
-  // Step 2: unguided arpeggio matcher (1–3–5–3–1)
+  // Step 2: unguided arpeggio matcher (1–3–5–3–1), waiting for correct notes only
   const matcher = useGuidedArpMatcher({
     active: running && inResponse && phase === "arp" && tonicMidi != null,
     tonicMidi: tonicMidi ?? 60,
@@ -107,12 +107,25 @@ export default function InternalArpeggio({
     holdSecPerNote: 0.25,
   });
 
-  // Finish when arpeggio sequence matches
+  // Delayed auto-advance (digest/rest)
+  const advanceTimeoutRef = useRef<number | null>(null);
+  const queueAdvance = () => {
+    if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
+  };
+  useEffect(
+    () => () => {
+      if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    },
+    []
+  );
+
+  // Finish when arpeggio sequence matches (with 1s delay)
   useEffect(() => {
     if (running && inResponse && phase === "arp" && matcher.passed) {
-      onContinue();
+      queueAdvance();
     }
-  }, [running, inResponse, phase, matcher.passed, onContinue]);
+  }, [running, inResponse, phase, matcher.passed]);
 
   const showTonicPhase = phase === "tonic";
   const target = [1, 3, 5, 3, 1] as const;
@@ -121,16 +134,19 @@ export default function InternalArpeggio({
   // Single control button behavior:
   // - First press: start pretest AND play A440
   // - While still on Step 1: replay A440
-  // - On Step 2: button remains inert (disabled)
+  // - On Step 2: button inert
   const onFooterPlay = async () => {
     if (!running) {
       onStart();
-      // fire A440 immediately on the same click
-      try { await playMidiList([69], Math.min(quarterSec, requiredHoldSec)); } catch {}
+      try {
+        await playMidiList([69], Math.min(quarterSec, requiredHoldSec)); // A4
+      } catch {}
       return;
     }
     if (showTonicPhase) {
-      try { await playMidiList([69], Math.min(quarterSec, requiredHoldSec)); } catch {}
+      try {
+        await playMidiList([69], Math.min(quarterSec, requiredHoldSec));
+      } catch {}
     }
   };
 
@@ -170,9 +186,9 @@ export default function InternalArpeggio({
         </div>
         <div className="mt-1 text-xs text-[#2d2d2d]">
           {showTonicPhase
-            ? (!running
-                ? "Press Play to start and hear A440. Then derive and hold the tonic."
-                : "Listen… A440 will play. Then hold the tonic steady.")
+            ? !running
+              ? "Press Play to start and hear A440. Then derive and hold the tonic."
+              : "Listen… A440 will play. Then hold the tonic steady."
             : "Sing the five notes in order (any tempo or octave)."}
         </div>
       </div>
@@ -198,17 +214,15 @@ export default function InternalArpeggio({
           <div className="mt-2 flex items-center gap-1">
             {target.map((deg, i) => {
               const got = progress[i] ?? null;
-              const state = got == null ? "empty" : got === deg ? "ok" : "bad";
+              const ok = got != null && got === deg;
               return (
                 <span
                   key={i}
                   className={[
                     "inline-flex items-center justify-center w-7 h-7 rounded-md border text-xs font-semibold",
-                    state === "ok" ? "bg-[#0f0f0f] text-white border-[#0f0f0f]" : "",
-                    state === "bad" ? "bg-[#ffd1d1] text-[#7a0000] border-[#ffb6b6]" : "",
-                    state === "empty" ? "bg-white text-[#2d2d2d] border-[#dcdcdc]" : "",
+                    ok ? "bg-[#0f0f0f] text-white border-[#0f0f0f]" : "bg-white text-[#2d2d2d] border-[#dcdcdc]",
                   ].join(" ")}
-                  title={state === "empty" ? "Waiting…" : state === "ok" ? "Matched" : "Mismatch"}
+                  title={ok ? "Matched" : "Waiting…"}
                 >
                   {deg}
                 </span>
@@ -223,12 +237,7 @@ export default function InternalArpeggio({
 
       {/* Single control button */}
       <div className="mt-1 flex items-center justify-end">
-        <RoundIconButton
-          title={playBtnTitle}
-          ariaLabel="Play"
-          onClick={onFooterPlay}
-          disabled={running && !showTonicPhase} // inert during Step 2
-        >
+        <RoundIconButton title={playBtnTitle} ariaLabel="Play" onClick={onFooterPlay} disabled={running && !showTonicPhase}>
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
             <path d="M8 5v14l11-7L8 5z" fill="currentColor" />
           </svg>

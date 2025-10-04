@@ -10,8 +10,8 @@ import type { ScaleName } from "@/utils/phrase/scales";
 export type CRMode =
   | { kind: "single_tonic" }        // Teacher: tonic (quarter). Student: tonic (1 response)
   | { kind: "derived_tonic" }       // Teacher: A440 (quarter). Student: tonic (1 response)
-  | { kind: "guided_arpeggio" }     // Teacher: do-mi-sol-mi-do (5 quarters). Student: 2 responses
-  | { kind: "internal_arpeggio" };  // No teacher call. Student: 2 responses
+  | { kind: "guided_arpeggio" }     // Teacher: do-mi-sol-mi-do (5 quarters). Student: 2 responses (2nd is auto-skipped by UI)
+  | { kind: "internal_arpeggio" };  // No teacher call. Student: 1 response (1–3–5–3–1) ✅
 
 export type PretestStatus = "idle" | "call" | "response" | "done";
 
@@ -121,9 +121,8 @@ export default function usePretest({
           : "Sing: do–mi–sol–do–sol–mi–do–sol–do";
       }
       if (mode === "internal_arpeggio") {
-        return subResponse === 0
-          ? "Sing (internal): do–mi–sol–mi–do"
-          : "Sing (internal): do–mi–sol–do–sol–mi–do–sol–do";
+        // ✅ Always the short pass; no 2nd, long variant requested
+        return "Sing (internal): do–mi–sol–mi–do";
       }
     }
     return "Pre-test";
@@ -231,7 +230,9 @@ export default function usePretest({
     setShouldRecord(false);
     setAnchorMs(null);
 
-    const needsTwo = mode === "guided_arpeggio" || mode === "internal_arpeggio";
+    // 🔁 Only guided_arpeggio requests two responses; internal_arpeggio now completes after one
+    const needsTwo = mode === "guided_arpeggio";
+
     if (status === "response" && needsTwo && subResponse === 0) {
       setSubResponse(1);
       setStatus("response");           // stay in response for 2nd pass

@@ -74,7 +74,20 @@ export default function DerivedTonic({
   const held = Math.min(gate.heldSec, requiredHoldSec);
   const pct = Math.max(0, Math.min(1, requiredHoldSec ? held / requiredHoldSec : 0));
 
-  // Auto-advance once the gate passes
+  // Delayed auto-advance (digest/rest)
+  const advanceTimeoutRef = useRef<number | null>(null);
+  const queueAdvance = () => {
+    if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
+  };
+  useEffect(
+    () => () => {
+      if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
+    },
+    []
+  );
+
+  // Auto-advance once the gate passes (with 1s delay)
   const passLatch = useRef(false);
   useEffect(() => {
     if (!running) passLatch.current = false;
@@ -82,10 +95,10 @@ export default function DerivedTonic({
   useEffect(() => {
     if (running && inResponse && gate.passed && !passLatch.current) {
       passLatch.current = true;
-      onContinue();
+      queueAdvance();
     }
     if (!gate.passed) passLatch.current = false;
-  }, [running, inResponse, gate.passed, onContinue]);
+  }, [running, inResponse, gate.passed]);
 
   const help = useMemo(() => {
     if (!running) return "Press Play to hear A440. Then derive the tonic and hold it.";
@@ -97,7 +110,7 @@ export default function DerivedTonic({
 
   // Footer Play behavior:
   // - first click starts (handled upstream via onStart)
-  // - subsequent clicks replay the teacher cue (A440), not the tonic
+  // - subsequent clicks replay the teacher cue (A440)
   const onFooterPlay = async () => {
     if (!running) {
       onStart();
@@ -118,9 +131,7 @@ export default function DerivedTonic({
 
       {/* Target + helper copy */}
       <div className="rounded-md border border-[#d2d2d2] bg-white/70 px-3 py-2">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-          Derived Tonic
-        </div>
+        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Derived Tonic</div>
         <div className="text-sm font-semibold">
           Target {tonicLabel}
           <span className="ml-2 text-xs font-normal text-[#2d2d2d]">
@@ -137,10 +148,7 @@ export default function DerivedTonic({
       <div className="rounded-md border border-[#d2d2d2] bg-white/70 px-3 py-2">
         <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Hold progress</div>
         <div className="mt-1 h-2 rounded-full bg-[#ebebeb] overflow-hidden border border-[#dcdcdc]">
-          <div
-            className="h-full bg-[#0f0f0f] transition-[width]"
-            style={{ width: `${Math.round(pct * 100)}%` }}
-          />
+          <div className="h-full bg-[#0f0f0f] transition-[width]" style={{ width: `${Math.round(pct * 100)}%` }} />
         </div>
         <div className="mt-1 text-xs text-[#2d2d2d]">
           Held {held.toFixed(2)}s / {requiredHoldSec.toFixed(2)}s
@@ -150,11 +158,7 @@ export default function DerivedTonic({
 
       {/* Footer: single Play button (start / replay A440) */}
       <div className="mt-1 flex items-center justify-end">
-        <RoundIconButton
-          title={running ? "Play A440" : "Start pre-test"}
-          ariaLabel="Play"
-          onClick={onFooterPlay}
-        >
+        <RoundIconButton title={running ? "Play A440" : "Start pre-test"} ariaLabel="Play" onClick={onFooterPlay}>
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
             <path d="M8 5v14l11-7L8 5z" fill="currentColor" />
           </svg>
