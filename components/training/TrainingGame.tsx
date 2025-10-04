@@ -2,7 +2,6 @@
 "use client";
 import React, { useRef, useState, useEffect, useMemo } from "react";
 import GameLayout from "./layout/GameLayout";
-import { PretestPanel } from "./session";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
 import useRecorderAutoSync from "@/hooks/audio/useRecorderAutoSync";
@@ -29,6 +28,9 @@ import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";
 import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 import SidePanelScores from "@/components/training/layout/stage/side-panel/SidePanelScores";
+
+// ✅ NEW: pretest panel orchestrator (router for all pretests)
+import PretestPanel from "@/components/training/pretest/PretestPanel";
 
 type Props = {
   title?: string;
@@ -101,7 +103,6 @@ export default function TrainingGame({
     return {
       ...sessionConfig,
       customPhrase: redoOverride.phrase,
-      // (optional) you could also set customWords if you captured them
     };
   }, [sessionConfig, redoOverride]);
 
@@ -183,7 +184,6 @@ export default function TrainingGame({
 
   // NEW: panel selection (null = list)
   const [panelTakeIndex, setPanelTakeIndex] = useState<number | null>(null);
-
 
   // Loop
   const loop = usePracticeLoop({
@@ -339,7 +339,7 @@ export default function TrainingGame({
     prevPhaseRef.current = curr;
 
     if (!pretestActive && prev === "record" && curr === "rest") {
-      const usedPhrase = phraseForTakeRef.current ?? phrase;    // fallback defensively
+      const usedPhrase = phraseForTakeRef.current ?? phrase;
       const usedRhythm = rhythmForTakeRef.current ?? rhythmEffective;
 
       if (usedPhrase) {
@@ -360,11 +360,9 @@ export default function TrainingGame({
           align: alignForScoring,
         });
 
-        // Snapshot the exercise used for this take
         setTakeSnapshots((xs) => [...xs, { phrase: usedPhrase, rhythm: usedRhythm ?? null }]);
       }
 
-      // If we were in redo mode, clear it after the redo take completes.
       if (redoOverride) setRedoOverride(null);
 
       if (!loopingMode) {
@@ -395,11 +393,9 @@ export default function TrainingGame({
 
   const openTakeDetail = (index: number) => {
     setPanelTakeIndex(index);
-    // keep reviewVisible as-is; it's true when loopingMode is off
   };
 
   const closeTakeDetail = () => {
-    // Go back to list view *without* triggering auto-open again
     setPanelTakeIndex(null);
     setReviewVisible(true);
   };
@@ -411,9 +407,8 @@ export default function TrainingGame({
     stopPlayback();
     loop.clearAll();
     setRedoOverride({ phrase: snap.phrase, rhythm: snap.rhythm ?? null });
-    setPanelTakeIndex(null);       // back to list
-    setReviewVisible(false);       // leave review; a new review will open after next rest
-    // Start a new pass with the overridden exercise
+    setPanelTakeIndex(null);
+    setReviewVisible(false);
     loop.toggle();
   };
 
@@ -470,33 +465,53 @@ export default function TrainingGame({
     ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES }
     : undefined;
 
-  // Stage side panel content
-  const stageAside =
-    pretestActive ? (
-      <PretestPanel
-        statusText={statusText}
-        detail="Call & Response runs first. After you finish, the exercise will unlock and start with a metronome lead-in."
-        running={pretest.running}
-        onStart={startPretestSafe}
-        onContinue={pretest.continueResponse}
-        onReset={() => { stopPlayback(); pretest.reset(); }}
-      />
-    ) : panelHasDetail ? (
-      <TakeReview
-        haveRhythm={haveRhythm}
-        onPlayMelody={onPlayMelody}
-        onPlayRhythm={onPlayRhythm}
-        onPlayBoth={onPlayBoth}
-        onStop={onStopPlayback}
-        onNext={onNextPhrase}
-        score={sessionScores[panelTakeIndex!] || undefined}
-        sessionScores={sessionScores}
-        onClose={closeTakeDetail}
-        onRedo={() => redoTake(panelTakeIndex!)}
-      />
-    ) : (
-      <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
-    );
+  // 🔁 Which pretest mode are we on?
+  const currentPretestKind =
+    (callResponseSequence?.[pretest.modeIndex]?.kind as
+      | "single_tonic"
+      | "derived_tonic"
+      | "guided_arpeggio"
+      | "internal_arpeggio"
+      | undefined) ?? undefined;
+
+  // Stage side panel content (router handles all pretest UIs)
+const stageAside =
+  pretestActive ? (
+<PretestPanel
+  statusText={statusText}
+  running={pretest.running}
+  inResponse={pretest.status === "response"}
+  modeKind={currentPretestKind}
+  onStart={startPretestSafe}
+  onContinue={pretest.continueResponse}
+  // musical context for pretests
+  bpm={bpm}
+  tsNum={ts.num}
+  tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
+  lowHz={lowHz ?? null}
+  // NEW: let the pretest know which scale we’re in
+  scaleName={sessionConfigLocal.scale?.name ?? "major"}
+  // audio/mic
+  liveHz={liveHz}
+  confidence={confidence}
+  playMidiList={playMidiList}
+/>
+  ) : panelHasDetail ? (
+    <TakeReview
+      haveRhythm={haveRhythm}
+      onPlayMelody={onPlayMelody}
+      onPlayRhythm={onPlayRhythm}
+      onPlayBoth={onPlayBoth}
+      onStop={onStopPlayback}
+      onNext={onNextPhrase}
+      score={sessionScores[panelTakeIndex!] || undefined}
+      sessionScores={sessionScores}
+      onClose={closeTakeDetail}
+      onRedo={() => redoTake(panelTakeIndex!)}
+    />
+  ) : (
+    <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
+  );
 
   return (
     <GameLayout
@@ -515,7 +530,6 @@ export default function TrainingGame({
       isReady={isReady && (!!phrase || pretestActive)}
       step={step}
       loopPhase={pretestActive ? "call" : loop.loopPhase}
-      // IMPORTANT: show the blue line that matches either the redo or current fabric
       rhythm={(rhythmEffective ?? undefined) as any}
       melodyRhythm={fabric.melodyRhythm ?? undefined}
       bpm={bpm}
