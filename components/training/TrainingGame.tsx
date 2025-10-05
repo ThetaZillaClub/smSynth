@@ -21,17 +21,12 @@ import usePretest from "@/hooks/gameplay/usePretest";
 import { useExerciseFabric } from "@/hooks/gameplay/useExerciseFabric";
 import { useMelodyClef } from "@/hooks/gameplay/useMelodyClef";
 import { useLeadInMetronome } from "@/hooks/gameplay/useLeadInMetronome";
-import TakeReview from "@/components/training/layout/stage/side-panel/TakeReview";
 import useHandBeat from "@/hooks/vision/useHandBeat";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";
 import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
-import SidePanelScores from "@/components/training/layout/stage/side-panel/SidePanelScores";
-import { OverallReview } from "@/components/training/layout/stage/side-panel/SidePanelScores/index";
-
-// ✅ NEW: pretest panel orchestrator (router for all pretests)
-import PretestPanel from "@/components/training/pretest/PretestPanel";
+import { TrainingSidePanel } from "@/components/training/layout/stage/side-panel";
 
 type Props = {
   title?: string;
@@ -183,9 +178,6 @@ export default function TrainingGame({
 
   const [reviewVisible, setReviewVisible] = useState(false);
 
-  // NEW: panel selection (null = list)
-  const [panelTakeIndex, setPanelTakeIndex] = useState<number | null>(null);
-
   // Loop
   const loop = usePracticeLoop({
     step,
@@ -287,7 +279,9 @@ export default function TrainingGame({
         if (!hand.isRunning) await hand.start(performance.now());
       } catch {}
     })();
-    return () => { if (!needVision || pretestActive) hand.stop(); };
+    return () => {
+      if (!needVision || pretestActive) hand.stop();
+    };
   }, [needVision, pretestActive, hand]);
 
   // Re-anchor at lead-in
@@ -389,16 +383,6 @@ export default function TrainingGame({
   const onNextPhrase = () => {
     setSeedBump((n) => n + 1);
     setReviewVisible(false);
-    setPanelTakeIndex(null);
-  };
-
-  const openTakeDetail = (index: number) => {
-    setPanelTakeIndex(index);
-  };
-
-  const closeTakeDetail = () => {
-    setPanelTakeIndex(null);
-    setReviewVisible(true);
   };
 
   /** NEW: redo a specific past take (load its snapshot for one pass & start loop) */
@@ -408,7 +392,6 @@ export default function TrainingGame({
     stopPlayback();
     loop.clearAll();
     setRedoOverride({ phrase: snap.phrase, rhythm: snap.rhythm ?? null });
-    setPanelTakeIndex(null);
     setReviewVisible(false);
     loop.toggle();
   };
@@ -426,34 +409,6 @@ export default function TrainingGame({
   const running = showExercise && loop.running;
   const startAtMs = showExercise ? loop.anchorMs : null;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
-
-  /** If a past take is open, the playback buttons should use that take’s exercise */
-  const panelHasDetail = panelTakeIndex != null;
-  const panelIsOverall = panelHasDetail && panelTakeIndex === -1;
-  const validTakeIndex =
-    panelHasDetail &&
-    typeof panelTakeIndex === "number" &&
-    panelTakeIndex >= 0 &&
-    panelTakeIndex < sessionScores.length;
-  const selectedSnap = validTakeIndex ? takeSnapshots[panelTakeIndex!] : null;
-
-  const playbackPhrase = (selectedSnap?.phrase ?? phrase) || null;
-  const playbackRhythm = selectedSnap ? selectedSnap.rhythm : rhythmEffective;
-
-  const onPlayMelody = async () => {
-    if (playbackPhrase) await playPhrase(playbackPhrase, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0, metronome: false });
-  };
-  const onPlayRhythm = async () => {
-    if (!haveRhythm) return;
-    const rhythmToUse = (playbackRhythm ?? []) as RhythmEvent[];
-    await playRhythm(rhythmToUse, { bpm, tsNum: ts.num, tsDen: ts.den, leadBars: 0 });
-  };
-  const onPlayBoth = async () => {
-    if (!playbackPhrase || !haveRhythm) return;
-    const rhythmToUse = (playbackRhythm ?? []) as RhythmEvent[];
-    await playMelodyAndRhythm(playbackPhrase, rhythmToUse, { bpm, tsNum: ts.num, tsDen: ts.den, metronome: true });
-  };
-  const onStopPlayback = () => stopPlayback();
 
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
   const onToggleExercise = () => { if (exerciseUnlocked) loop.toggle(); };
@@ -481,61 +436,45 @@ export default function TrainingGame({
       | "internal_arpeggio"
       | undefined) ?? undefined;
 
-  // Stage side panel content (router handles all pretest UIs)
-const stageAside =
-  pretestActive ? (
-    <PretestPanel
-      statusText={statusText}
-      running={pretest.running}
-      inResponse={pretest.status === "response"}
-      modeKind={currentPretestKind}
-      onStart={startPretestSafe}
-      onContinue={pretest.continueResponse}
+  // 🧩 Side panel (moved to dedicated router component)
+  const stageAside = (
+    <TrainingSidePanel
+      pretest={{
+        active: pretestActive,
+        statusText,
+        running: pretest.running,
+        inResponse: pretest.status === "response",
+        modeKind: currentPretestKind,
+        start: startPretestSafe,
+        continueResponse: pretest.continueResponse,
+        bpm,
+        tsNum: ts.num,
+        tonicPc: sessionConfigLocal.scale?.tonicPc ?? 0,
+        lowHz: lowHz ?? null,
+        scaleName: sessionConfigLocal.scale?.name ?? "major",
+        liveHz,
+        confidence,
+        playMidiList,
+      }}
+      scores={sessionScores}
+      snapshots={takeSnapshots}
+      currentPhrase={phrase}
+      currentRhythm={rhythmEffective}
+      haveRhythm={haveRhythm}
+      player={{
+        playPhrase,
+        playRhythm,
+        playMelodyAndRhythm,
+        stop: stopPlayback,
+      }}
       bpm={bpm}
+      den={ts.den}
       tsNum={ts.num}
       tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
-      lowHz={lowHz ?? null}
       scaleName={sessionConfigLocal.scale?.name ?? "major"}
-      liveHz={liveHz}
-      confidence={confidence}
-      playMidiList={playMidiList}
+      onRedo={redoTake}
     />
-  ) : panelHasDetail ? (
-    panelIsOverall ? (
-      <OverallReview
-        scores={sessionScores}
-        onClose={closeTakeDetail}
-        snapshots={takeSnapshots}
-        bpm={bpm}
-        den={ts.den}
-        tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
-        scaleName={sessionConfigLocal.scale?.name ?? "major"}
-      />
-    ) : validTakeIndex ? (
-      <TakeReview
-        haveRhythm={haveRhythm}
-        onPlayMelody={onPlayMelody}
-        onPlayRhythm={onPlayRhythm}
-        onPlayBoth={onPlayBoth}
-        onStop={onStopPlayback}
-        score={sessionScores[panelTakeIndex!]}
-        onClose={closeTakeDetail}
-        onRedo={() => redoTake(panelTakeIndex!)}
-        /* context */
-        phrase={playbackPhrase}
-        bpm={bpm}
-        den={ts.den}
-        tsNum={ts.num}
-        tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
-      />
-    ) : (
-      // index out of range (defensive): fall back to list
-      <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
-    )
-  ) : (
-    <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
   );
-
 
   return (
     <GameLayout
