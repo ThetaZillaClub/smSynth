@@ -497,18 +497,24 @@ const stageAside =
   playMidiList={playMidiList}
 />
   ) : panelHasDetail ? (
-    <TakeReview
-      haveRhythm={haveRhythm}
-      onPlayMelody={onPlayMelody}
-      onPlayRhythm={onPlayRhythm}
-      onPlayBoth={onPlayBoth}
-      onStop={onStopPlayback}
-      onNext={onNextPhrase}
-      score={sessionScores[panelTakeIndex!] || undefined}
-      sessionScores={sessionScores}
-      onClose={closeTakeDetail}
-      onRedo={() => redoTake(panelTakeIndex!)}
-    />
+<TakeReview
+  haveRhythm={haveRhythm}
+  onPlayMelody={onPlayMelody}
+  onPlayRhythm={onPlayRhythm}
+  onPlayBoth={onPlayBoth}
+  onStop={onStopPlayback}
+  score={sessionScores[panelTakeIndex!] || undefined}
+  sessionScores={sessionScores}
+  onClose={closeTakeDetail}
+  onRedo={() => redoTake(panelTakeIndex!)}
+  /* ✅ add required/context props */
+  phrase={playbackPhrase}
+  bpm={bpm}
+  den={ts.den}
+  tsNum={ts.num}
+  tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
+  scaleName={sessionConfigLocal.scale?.name ?? "major"}
+/>
   ) : (
     <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
   );
