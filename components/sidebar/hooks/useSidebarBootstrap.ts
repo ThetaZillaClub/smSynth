@@ -5,7 +5,7 @@ import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady, getImageUrlCached } from '@/lib/client-cache';
 import { fetchJsonNoStore } from '../fetch/noStore';
-import { STUDENT_IMAGE_HINT_KEY, pickDisplayName } from '../types';
+import { STUDENT_IMAGE_HINT_KEY, pickDisplayName, pickAuthAvatarUrl } from '../types';
 
 export function useSidebarBootstrap(opts: {
   isAuthRoute: boolean;
@@ -43,31 +43,38 @@ export function useSidebarBootstrap(opts: {
 
       const user = session!.user;
 
-      // First: attempt to load name & image from our /api (no-store) → models row
-      // This avoids reading auth.user_metadata entirely.
-      const row = await fetchJsonNoStore<{ creator_display_name?: string; image_path?: string }>('/api/students/current');
+      // Load name (prefer API row, else email prefix)
+      const row = await fetchJsonNoStore<{ creator_display_name?: string; image_path?: string }>(
+        '/api/students/current'
+      );
 
       const nameFromModel = (row?.creator_display_name || '').trim();
-      setDisplayName(nameFromModel || pickDisplayName(user)); // fallback to email prefix
+      setDisplayName(nameFromModel || pickDisplayName(user));
 
       // Image priority:
       // 1) LocalStorage hint of models.image_path
       // 2) /api row.image_path
-      // 3) Nothing
+      // 3) auth user_metadata avatar (GitHub/Google/etc)
       let hintedPath: string | null = null;
       try { hintedPath = localStorage.getItem(STUDENT_IMAGE_HINT_KEY); } catch {}
 
       const imagePath = hintedPath || (row?.image_path ?? null);
+
+      const authAvatar = pickAuthAvatarUrl(user);
+
       if (imagePath) {
         try {
           const url = await getImageUrlCached(supabase, imagePath);
-          if (!cancelled) setStudentImgUrl(url ?? null);
+          if (!cancelled) setStudentImgUrl(url ?? authAvatar ?? null);
           try {
             if (!hintedPath) localStorage.setItem(STUDENT_IMAGE_HINT_KEY, imagePath);
           } catch {}
-        } catch {/* ignore */}
+        } catch {
+          if (!cancelled) setStudentImgUrl(authAvatar ?? null);
+        }
       } else {
-        setStudentImgUrl(null);
+        // No storage image — fall back to the auth provider avatar (if any)
+        setStudentImgUrl(authAvatar ?? null);
       }
     })();
 

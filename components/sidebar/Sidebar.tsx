@@ -49,7 +49,12 @@ export default function Sidebar() {
   return (
     <aside className={['sticky top-0 h-svh', 'bg-[#f4f4f4]', 'flex flex-col justify-between'].join(' ')}>
       <div>
-        <BrandRow authed={authed} collapsed={collapsed} brand={BRAND} goCourses={() => go('/courses')} />
+        <BrandRow
+          authed={authed}
+          collapsed={collapsed}
+          brand={BRAND}
+          goHome={() => go('/home')}
+        />
 
         <nav>
           {items.map((it) => {

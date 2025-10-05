@@ -8,12 +8,12 @@ export default function BrandRow({
   authed,
   collapsed,
   brand,
-  goCourses,
+  goHome,
 }: {
   authed: boolean;
   collapsed: boolean;
   brand: string;
-  goCourses: () => void;
+  goHome: () => void;
 }) {
   const baseRow = [
     'flex items-stretch w-full select-none transition',
@@ -26,13 +26,13 @@ export default function BrandRow({
 
   return (
     <Link
-      href={authed ? '/courses' : '/'}
+      href={authed ? '/home' : '/'}
       prefetch={false}
       className={baseRow}
       onClick={(e) => {
         if (authed) {
           e.preventDefault();
-          goCourses();
+          goHome();
         }
       }}
     >
