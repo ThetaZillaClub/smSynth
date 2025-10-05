@@ -1,9 +1,9 @@
-// components/training/session/PretestPanel.tsx
+// components/training/layout/stage/side-panel/PretestShell.tsx
 "use client";
 
 import React from "react";
 
-export default function PretestPanel({
+export default function PretestShell({
   statusText,
   detail,
   running,
