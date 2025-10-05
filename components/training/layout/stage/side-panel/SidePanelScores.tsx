@@ -14,11 +14,13 @@ import type { TakeScore } from "@/utils/scoring/score";
  *
  * Visual language matches the Courses cards (rounded, soft gray, subtle borders).
  */
+
 export default function SidePanelScores({
   scores,
   onOpen,
 }: {
   scores: TakeScore[];
+  /** onOpen(index): 0..N-1 = take detail, -1 = overall session detail */
   onOpen: (index: number) => void;
 }) {
   const overallPercent = React.useMemo(() => {
@@ -28,11 +30,27 @@ export default function SidePanelScores({
   }, [scores]);
 
   const overallLetter = overallPercent == null ? "—" : percentToLetter(overallPercent);
+  const canOpenOverall = scores.length >= 2;
 
   return (
     <div className="flex flex-col gap-3">
       {/* Overall */}
-      <div className="rounded-xl bg-[#f2f2f2] border border-[#dcdcdc] p-3 shadow-sm">
+      <button
+        type="button"
+        disabled={!canOpenOverall}
+        onClick={() => canOpenOverall && onOpen(-1)}
+        className={[
+          "rounded-xl border border-[#dcdcdc] p-3 shadow-sm text-left",
+          canOpenOverall
+            ? "bg-[#f2f2f2] hover:shadow-md active:scale-[0.99] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]"
+            : "bg-[#f5f5f5] opacity-80 cursor-not-allowed",
+        ].join(" ")}
+        title={
+          canOpenOverall
+            ? "Open overall session stats"
+            : "Overall details unlock after 2 takes"
+        }
+      >
         <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
           Overall
         </div>
@@ -43,8 +61,11 @@ export default function SidePanelScores({
           <span className="text-xs text-[#373737]">
             {overallPercent == null ? "" : `(${overallLetter})`}
           </span>
+          {canOpenOverall && (
+            <span className="ml-1 text-[11px] text-[#6b6b6b]">(click for details)</span>
+          )}
         </div>
-      </div>
+      </button>
 
       {/* Takes list */}
       <div>
