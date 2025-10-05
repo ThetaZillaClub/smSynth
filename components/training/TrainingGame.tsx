@@ -79,7 +79,7 @@ export default function TrainingGame({
   const restBeats = barsToBeats(restBars, ts.num);
   const restSec = beatsToSeconds(restBeats, bpm, ts.den);
 
-  const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 24));
+  const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 10));
   const MAX_SESSION_SEC = 15 * 60;
 
   // Pitch

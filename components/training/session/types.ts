@@ -156,7 +156,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   advancedMode: false,
 
   callResponseSequence: [],
-  exerciseLoops: 24,
+  exerciseLoops: 10,
   regenerateBetweenTakes: false,
 
   /** NEW default: auto-continue like today unless user turns it off in curriculum */
