@@ -77,7 +77,7 @@ export default function TakeReview({
           Take review
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full bg-[#ebebeb] px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
+          <span className="inline-flex items-center rounded-full bg-[#f8f8f8] shadow-sm px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
             {finalPct ? `${finalPct.toFixed(1)}%` : "—"}
           </span>
           <span className="text-xs text-[#373737]">
@@ -94,7 +94,7 @@ export default function TakeReview({
             onClick={onRedo}
             className={[
               "px-3 py-1.5 rounded-md border border-[#dcdcdc]",
-              "bg-white text-[#0f0f0f] text-sm shadow-sm",
+              "bg-[#f4f4f4] text-[#0f0f0f] text-sm shadow-sm",
               "hover:bg-[#f8f8f8] active:scale-[0.99] transition",
               "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
             ].join(" ")}
@@ -147,7 +147,7 @@ export default function TakeReview({
             {sessionScores.map((s, i) => (
               <span
                 key={i}
-                className="px-2 py-0.5 text-xs rounded-md bg-[#ebebeb] text-[#0f0f0f] border border-[#dcdcdc]"
+                className="px-2 py-0.5 text-xs rounded-md bg-[#f9f9f9] text-[#0f0f0f] border border-[#dcdcdc]"
               >
                 {s.final?.percent?.toFixed(1) ?? "—"}%
               </span>
@@ -230,7 +230,7 @@ function StatTile({
   detail?: string;
 }) {
   return (
-    <div className="rounded-lg bg-[#ebebeb] border border-[#dcdcdc] px-3 py-2">
+    <div className="rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
         {label}
       </div>
@@ -264,9 +264,9 @@ function RoundIconButton({
       onClick={onClick}
       className={[
         "inline-flex items-center justify-center",
-        "rounded-full p-2.5 bg-[#ebebeb] text-[#0f0f0f]",
+        "rounded-full p-2.5 bg-[#f4f4f4] hover:bg-[#f8f8f8] text-[#0f0f0f]",
         "hover:opacity-90 active:scale-[0.98] transition",
-        "border border-[#dcdcdc] shadow-sm",
+        "border border-[#dcdcdc] shadow-md",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
       ].join(" ")}
     >

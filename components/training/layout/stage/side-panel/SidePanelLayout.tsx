@@ -26,7 +26,7 @@ export default function SidePanelLayout({
   return (
     <div
       className={[
-        "h-full rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "h-full rounded-xl bg-[#eeeeee] border border-[#dcdcdc]",
         "shadow-sm p-3 md:p-4 flex flex-col",
       ].join(" ")}
     >

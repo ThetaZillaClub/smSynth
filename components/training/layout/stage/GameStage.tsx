@@ -161,7 +161,7 @@ export default function GameStage({
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
       <div className="w-full h-full flex gap-3">
         {/* LEFT: Main stage area */}
-        <div className="flex-1 min-w-0 flex flex-col">
+        <div className="flex-1 min-w-0 flex flex-col shadow-md">
           <div className="w-full">
             {/* If no phrase, render an empty stage area with the correct height */}
             {!hasPhrase ? (
@@ -255,7 +255,7 @@ export default function GameStage({
         </div>
 
         {/* RIGHT: Vertical panel — ALWAYS visible */}
-        <aside className="shrink-0 w-[320px] lg:w-[360px] xl:w-[380px]">
+        <aside className="shrink-0 w-[320px] lg:w-[360px] xl:w-[380px] shadow-sm">
           {renderedPanel}
         </aside>
       </div>
