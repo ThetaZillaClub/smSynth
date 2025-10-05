@@ -5,6 +5,7 @@ import GameStage from "./stage/GameStage";
 import GameFooter from "./footer/GameFooter";
 import { type Phrase } from "./stage/piano-roll/PianoRollCanvas";
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
+import TrainingSidePanel, { type TrainingSidePanelProps } from "./stage/side-panel/TrainingSidePanel";
 
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
 
@@ -42,8 +43,14 @@ type LayoutProps = {
   /** Optional: footer session panel props */
   sessionPanel?: FooterSession;
 
-  /** Right-side panel content */
+  /** Right-side panel content (legacy free-form) */
   stageAside?: React.ReactNode;
+
+  /**
+   * New: structured props for the built-in TrainingSidePanel.
+   * If provided, this takes precedence over `stageAside`.
+   */
+  sidePanel?: TrainingSidePanelProps;
 
   /** (Legacy) children were rendered between stage and footer; kept for back-compat */
   children?: React.ReactNode;
@@ -84,10 +91,12 @@ export default function GameLayout({
   highHz = null,
   sessionPanel,
   stageAside,
+  sidePanel,
   // eslint-disable-next-line react/no-children-prop
-  children, // kept but unused by default in favor of stageAside
+  children, // kept but unused by default in favor of aside rendering
 }: LayoutProps) {
   const showPlay = !!phrase;
+  const asideNode = sidePanel ? <TrainingSidePanel {...sidePanel} /> : stageAside;
 
   return (
     <main className="min-h-dvh h-dvh flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
@@ -113,11 +122,11 @@ export default function GameLayout({
             clef={clef ?? undefined}
             lowHz={lowHz}
             highHz={highHz}
-            stageAside={stageAside}
+            stageAside={asideNode}
           />
         </div>
 
-        {/* (Legacy) Below-stage area retained for compatibility; not needed for new stageAside flow */}
+        {/* (Legacy) Below-stage area retained for compatibility; not needed for new side panel flow */}
         {children ? (
           <div className="w-full flex justify-center px-6 pb-2">
             <div className="w-full max-w-7xl">{children}</div>

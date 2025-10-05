@@ -26,7 +26,6 @@ import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";
 import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
-import { TrainingSidePanel } from "@/components/training/layout/stage/side-panel";
 
 type Props = {
   title?: string;
@@ -436,45 +435,43 @@ export default function TrainingGame({
       | "internal_arpeggio"
       | undefined) ?? undefined;
 
-  // 🧩 Side panel (moved to dedicated router component)
-  const stageAside = (
-    <TrainingSidePanel
-      pretest={{
-        active: pretestActive,
-        statusText,
-        running: pretest.running,
-        inResponse: pretest.status === "response",
-        modeKind: currentPretestKind,
-        start: startPretestSafe,
-        continueResponse: pretest.continueResponse,
-        bpm,
-        tsNum: ts.num,
-        tonicPc: sessionConfigLocal.scale?.tonicPc ?? 0,
-        lowHz: lowHz ?? null,
-        scaleName: sessionConfigLocal.scale?.name ?? "major",
-        liveHz,
-        confidence,
-        playMidiList,
-      }}
-      scores={sessionScores}
-      snapshots={takeSnapshots}
-      currentPhrase={phrase}
-      currentRhythm={rhythmEffective}
-      haveRhythm={haveRhythm}
-      player={{
-        playPhrase,
-        playRhythm,
-        playMelodyAndRhythm,
-        stop: stopPlayback,
-      }}
-      bpm={bpm}
-      den={ts.den}
-      tsNum={ts.num}
-      tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
-      scaleName={sessionConfigLocal.scale?.name ?? "major"}
-      onRedo={redoTake}
-    />
-  );
+  // Build structured props for the side panel; GameLayout will render the panel.
+  const sidePanel = {
+    pretest: {
+      active: pretestActive,
+      statusText,
+      running: pretest.running,
+      inResponse: pretest.status === "response",
+      modeKind: currentPretestKind,
+      start: startPretestSafe,
+      continueResponse: pretest.continueResponse,
+      bpm,
+      tsNum: ts.num,
+      tonicPc: sessionConfigLocal.scale?.tonicPc ?? 0,
+      lowHz: lowHz ?? null,
+      scaleName: sessionConfigLocal.scale?.name ?? "major",
+      liveHz,
+      confidence,
+      playMidiList,
+    },
+    scores: sessionScores,
+    snapshots: takeSnapshots,
+    currentPhrase: phrase,
+    currentRhythm: rhythmEffective,
+    haveRhythm: haveRhythm,
+    player: {
+      playPhrase,
+      playRhythm,
+      playMelodyAndRhythm,
+      stop: stopPlayback,
+    },
+    bpm,
+    den: ts.den,
+    tsNum: ts.num,
+    tonicPc: sessionConfigLocal.scale?.tonicPc ?? 0,
+    scaleName: sessionConfigLocal.scale?.name ?? "major",
+    onRedo: redoTake,
+  } as const;
 
   return (
     <GameLayout
@@ -504,7 +501,7 @@ export default function TrainingGame({
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
       sessionPanel={footerSessionPanel}
-      stageAside={stageAside}
+      sidePanel={sidePanel}
     />
   );
 }

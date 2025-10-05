@@ -9,9 +9,7 @@ import type { ScaleName } from "@/utils/phrase/scales";
 
 import SidePanelScores from "./SidePanelScores";
 import TakeReview from "./TakeReview";
-// ✅ Fix: import OverallReview from its file in the SidePanelScores folder
 import OverallReview from "./SidePanelScores/OverallReview";
-// (This PretestPanel is the one under /training/pretest that expects ScaleName)
 import PretestPanel from "@/components/training/pretest/PretestPanel";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
 
@@ -39,8 +37,7 @@ type PretestBundle = {
   tonicPc: number;
   lowHz: number | null;
 
-  // ✅ Narrow to ScaleName for the pretest component;
-  //    upstream callers can still pass strings; we cast at usage.
+  // Narrow to ScaleName for the pretest component; upstream callers can still pass strings.
   scaleName: ScaleName | (string & {});
 
   // audio
@@ -66,50 +63,59 @@ type PlayerFns = {
   stop: () => void;
 };
 
-export default function TrainingSidePanel({
+export type TrainingSidePanelProps = {
   // pretest
-  pretest,
-
-  // session/take data
-  scores,
-  snapshots,
-
-  // "current" exercise (when no take is selected)
-  currentPhrase,
-  currentRhythm,
-
-  // playback + context
-  haveRhythm,
-  player,
-  bpm,
-  den,
-  tsNum,
-  tonicPc,
-  // This prop is for review/solfège views — keep SolfegeScaleName-friendly here
-  scaleName = "major",
-
-  // redo a specific take
-  onRedo,
-}: {
   pretest: PretestBundle;
 
+  // session/take data
   scores: TakeScore[];
   snapshots: TakeSnapshot[];
 
+  // "current" exercise (when no take is selected)
   currentPhrase: Phrase | null | undefined;
   currentRhythm: RhythmEvent[] | null | undefined;
 
+  // playback + context
   haveRhythm: boolean;
   player: PlayerFns;
-
   bpm: number;
   den: number;
   tsNum: number;
   tonicPc: number;
-  // Accept solfège scale names OR plain strings from upstream config
+
+  /** For solfège displays, keep broader solfège scale names here */
   scaleName?: SolfegeScaleName | (string & {});
+
+  // redo a specific take
   onRedo: (index: number) => void;
-}) {
+};
+
+export default function TrainingSidePanel(props: TrainingSidePanelProps) {
+  const {
+    // pretest
+    pretest,
+
+    // session/take data
+    scores,
+    snapshots,
+
+    // "current" exercise (when no take is selected)
+    currentPhrase,
+    currentRhythm,
+
+    // playback + context
+    haveRhythm,
+    player,
+    bpm,
+    den,
+    tsNum,
+    tonicPc,
+    scaleName = "major",
+
+    // redo a specific take
+    onRedo,
+  } = props;
+
   // - null  -> list
   // - -1    -> overall
   // - 0..N-1-> take detail
@@ -157,7 +163,7 @@ export default function TrainingSidePanel({
         tsNum={pretest.tsNum}
         tonicPc={pretest.tonicPc}
         lowHz={pretest.lowHz}
-        // ✅ Cast to the narrower type the pretest panel expects
+        // Cast to the narrower type the pretest panel expects
         scaleName={pretest.scaleName as ScaleName}
         liveHz={pretest.liveHz}
         confidence={pretest.confidence}
@@ -183,7 +189,7 @@ export default function TrainingSidePanel({
         scaleName={scaleName as SolfegeScaleName}
       />
     );
-  }
+    }
 
   if (validTake && effectivePhrase) {
     return (
