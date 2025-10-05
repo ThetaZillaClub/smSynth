@@ -1,3 +1,4 @@
+// components/training/layout/stage/side-panel/TakeReview.tsx
 "use client";
 import React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
@@ -18,7 +19,6 @@ export default function TakeReview({
   onPlayBoth,
   onStop,
   score,
-  sessionScores = [],
   onClose,
   onRedo,
   phrase,
@@ -34,7 +34,6 @@ export default function TakeReview({
   onPlayBoth: () => Promise<void> | void;
   onStop: () => void;
   score?: TakeScore;
-  sessionScores?: TakeScore[];
   onClose?: () => void;
   onRedo?: () => void;
   phrase?: Phrase | null;
@@ -68,6 +67,7 @@ export default function TakeReview({
         </button>
       ) : null}
 
+      {/* Header / overall row */}
       <div className="flex items-center justify-between">
         <div className="text-base md:text-lg font-semibold text-[#0f0f0f]">
           {view === "summary"
@@ -90,18 +90,53 @@ export default function TakeReview({
         </div>
       </div>
 
-      {onRedo ? (
-        <div>
-          <button
-            type="button"
-            onClick={onRedo}
-            className="px-3 py-1.5 rounded-md border border-[#dcdcdc] bg-[#f4f4f4] text-[#0f0f0f] text-sm shadow-sm hover:bg-[#f8f8f8] active:scale-[0.99] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]"
-            title="Redo this take"
-          >
-            Redo this take
-          </button>
-        </div>
-      ) : null}
+      {/* NEW: centered playback + redo row under header */}
+      <div className="flex items-center justify-center gap-2.5 flex-wrap py-1">
+        <RoundIconButton title="Play melody" ariaLabel="Play melody" onClick={onPlayMelody}>
+          <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+            <path
+              d="M12 3v10.55A4 4 0 1 1 10 9V5l10-2v6.55A4 4 0 1 1 18 9V3l-6 1.2Z"
+              fill="currentColor"
+            />
+          </svg>
+        </RoundIconButton>
+
+        {haveRhythm && (
+          <RoundIconButton title="Play rhythm line" ariaLabel="Play rhythm line" onClick={onPlayRhythm}>
+            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+              <path d="M9 3h6l3 10H6L9 3Zm1.5 2L8.5 11h7L13.5 5H10.5Z" fill="currentColor" />
+              <path d="M5 20h14v2H5z" fill="currentColor" />
+            </svg>
+          </RoundIconButton>
+        )}
+
+        {haveRhythm && (
+          <RoundIconButton title="Play both" ariaLabel="Play both melody and rhythm" onClick={onPlayBoth}>
+            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+              <path d="M12 2l10 6-10 6L2 8l10-6Z" fill="currentColor" />
+              <path d="M22 14l-10 6L2 14v2l10 6 10-6v-2Z" fill="currentColor" />
+            </svg>
+          </RoundIconButton>
+        )}
+
+        <RoundIconButton title="Stop" ariaLabel="Stop" onClick={onStop}>
+          <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+            <rect x="6" y="6" width="12" height="12" fill="currentColor" />
+          </svg>
+        </RoundIconButton>
+
+        {onRedo ? (
+          <RoundIconButton title="Redo this take" ariaLabel="Redo this take" onClick={onRedo}>
+            {/* circular redo/refresh arrow */}
+            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
+              <path
+                d="M12 5a7 7 0 1 1-6.32 4H3a1 1 0 0 1-.7-1.71l3.5-3.5A1 1 0 0 1 7 4v2h.09A7 7 0 0 1 12 5Zm0 2a5 5 0 1 0 4.58 7H14a1 1 0 1 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 1 1-2 0v-2.3A7 7 0 1 1 12 7Z"
+                fill="currentColor"
+              />
+            </svg>
+          </RoundIconButton>
+        ) : null}
+      </div>
 
       {view === "summary" ? (
         <div className="grid grid-cols-1 gap-2">
@@ -133,99 +168,14 @@ export default function TakeReview({
           />
         </div>
       ) : view === "pitch" ? (
-        <PitchReview
-          score={score!}
-          phrase={phrase ?? null}
-          tonicPc={tonicPc}
-          scaleName={scaleName}
-          bpm={bpm}
-          den={den}
-        />
+        <PitchReview score={score!} phrase={phrase ?? null} tonicPc={tonicPc} scaleName={scaleName} />
       ) : view === "melody" ? (
-        <MelodyRhythmReview
-          score={score!}
-          phrase={phrase ?? null}
-          bpm={bpm}
-          den={den}
-        />
+        <MelodyRhythmReview score={score!} phrase={phrase ?? null} bpm={bpm} den={den} />
       ) : view === "line" ? (
         <RhythmLineReview score={score!} />
       ) : (
         <IntervalReview score={score!} />
       )}
-
-      {sessionScores.length ? (
-        <div className="mt-1">
-          <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">
-            Session
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {sessionScores.map((s, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 text-xs rounded-md bg-[#f9f9f9] text-[#0f0f0f] border border-[#dcdcdc]"
-              >
-                {s.final?.percent?.toFixed(1) ?? "—"}%
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="mt-1">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">
-          Playback
-        </div>
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <RoundIconButton
-            title="Play melody"
-            ariaLabel="Play melody"
-            onClick={onPlayMelody}
-          >
-            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-              <path
-                d="M12 3v10.55A4 4 0 1 1 10 9V5l10-2v6.55A4 4 0 1 1 18 9V3l-6 1.2Z"
-                fill="currentColor"
-              />
-            </svg>
-          </RoundIconButton>
-
-          {haveRhythm && (
-            <RoundIconButton
-              title="Play rhythm line"
-              ariaLabel="Play rhythm line"
-              onClick={onPlayRhythm}
-            >
-              <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-                <path
-                  d="M9 3h6l3 10H6L9 3Zm1.5 2L8.5 11h7L13.5 5H10.5Z"
-                  fill="currentColor"
-                />
-                <path d="M5 20h14v2H5z" fill="currentColor" />
-              </svg>
-            </RoundIconButton>
-          )}
-
-          {haveRhythm && (
-            <RoundIconButton
-              title="Play both"
-              ariaLabel="Play both melody and rhythm"
-              onClick={onPlayBoth}
-            >
-              <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-                <path d="M12 2l10 6-10 6L2 8l10-6Z" fill="currentColor" />
-                <path d="M22 14l-10 6L2 14v2l10 6 10-6v-2Z" fill="currentColor" />
-              </svg>
-            </RoundIconButton>
-          )}
-
-          <RoundIconButton title="Stop" ariaLabel="Stop" onClick={onStop}>
-            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-              <rect x="6" y="6" width="12" height="12" fill="currentColor" />
-            </svg>
-          </RoundIconButton>
-        </div>
-      </div>
     </div>
   );
 }
@@ -247,15 +197,9 @@ function ClickableStatTile({
       onClick={onClick}
       className="text-left rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2 hover:shadow-sm transition"
     >
-      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-        {label}
-      </div>
-      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
-        {value}
-      </div>
-      {detail ? (
-        <div className="text-xs text-[#373737] mt-0.5">{detail}</div>
-      ) : null}
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{label}</div>
+      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{value}</div>
+      {detail ? <div className="text-xs text-[#373737] mt-0.5">{detail}</div> : null}
     </button>
   );
 }

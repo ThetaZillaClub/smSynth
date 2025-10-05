@@ -6,7 +6,10 @@ import { intervalLabel } from "./format";
 
 export default function IntervalReview({ score }: { score: TakeScore }) {
   const base = score.intervals;
-  const classes = base.classes;
+  const classes = base.classes ?? [];
+
+  // Only show intervals that were actually attempted
+  const attempted = classes.filter((c) => (c.attempts ?? 0) > 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -26,43 +29,32 @@ export default function IntervalReview({ score }: { score: TakeScore }) {
             </tr>
           </thead>
           <tbody>
-            {(classes && classes.length ? classes : DEFAULT_CLASSES).map((c, i) => {
-              const row =
-                classes?.find((x) => x.semitones === c.semitones) ?? c;
-              return (
+            {attempted.length === 0 ? (
+              <tr className="border-t border-[#eee]">
+                <td className="px-2 py-1.5" colSpan={4}>
+                  No intervals attempted.
+                </td>
+              </tr>
+            ) : (
+              attempted.map((row, i) => (
                 <tr key={i} className="border-t border-[#eee]">
                   <td className="px-2 py-1.5 align-middle font-medium">
                     {intervalLabel(row.semitones)}
                   </td>
+                  <td className="px-2 py-1.5 align-middle">{row.attempts}</td>
+                  <td className="px-2 py-1.5 align-middle">{row.correct}</td>
                   <td className="px-2 py-1.5 align-middle">
-                    {row.attempts ?? 0}
-                  </td>
-                  <td className="px-2 py-1.5 align-middle">
-                    {row.correct ?? 0}
-                  </td>
-                  <td className="px-2 py-1.5 align-middle">
-                    {Number.isFinite(row.percent)
-                      ? `${row.percent.toFixed(0)}%`
-                      : "0%"}
+                    {Number.isFinite(row.percent) ? `${row.percent.toFixed(0)}%` : "0%"}
                   </td>
                 </tr>
-              );
-            })}
+              ))
+            )}
           </tbody>
         </table>
       </div>
     </div>
   );
 }
-
-// Show 0..12 when no data is available, for consistency with runtime buckets
-const DEFAULT_CLASSES = Array.from({ length: 13 }, (_, i) => ({
-  semitones: i,
-  label: intervalLabel(i),
-  attempts: 0,
-  correct: 0,
-  percent: 0,
-}));
 
 function Header({
   title,

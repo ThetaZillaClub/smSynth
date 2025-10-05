@@ -19,6 +19,13 @@ export default function MelodyRhythmReview({
   const per = score.rhythm.perNoteMelody;
   const notes = phrase?.notes ?? [];
 
+  // Remove " (~XX% match)" from secondsToNoteLabel output
+  const cleanNoteLabel = React.useCallback(
+    (sec: number) =>
+      secondsToNoteLabel(sec, bpm, den).replace(/\s*\(~\d+% match\)\s*/i, ""),
+    [bpm, den]
+  );
+
   return (
     <div className="flex flex-col gap-2">
       <Header
@@ -45,7 +52,7 @@ export default function MelodyRhythmReview({
                 <tr key={i} className="border-t border-[#eee]">
                   <td className="px-2 py-1.5 align-middle text-[#555]">{i + 1}</td>
                   <td className="px-2 py-1.5 align-middle text-[#444]">
-                    {secondsToNoteLabel(n.durSec, bpm, den)}
+                    {cleanNoteLabel(n.durSec)}
                   </td>
                   <td className="px-2 py-1.5 align-middle">
                     {r ? `${(r.coverage * 100).toFixed(1)}%` : "—"}

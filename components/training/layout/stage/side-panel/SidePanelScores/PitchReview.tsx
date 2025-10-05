@@ -5,25 +5,57 @@ import type { TakeScore } from "@/utils/scoring/score";
 import type { Phrase } from "@/utils/stage";
 import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
 import { midiLabelForKey } from "@/utils/pitch/enharmonics";
-import { secondsToNoteLabel } from "./format";
 
 export default function PitchReview({
   score,
   phrase,
   tonicPc,
   scaleName,
-  bpm,
-  den,
 }: {
   score: TakeScore;
   phrase: Phrase | null;
   tonicPc: number;
   scaleName: SolfegeScaleName;
-  bpm: number;
-  den: number;
 }) {
   const per = score.pitch.perNote;
   const notes = phrase?.notes ?? [];
+
+  type Acc = {
+    key: string;        // label|solf
+    label: string;      // e.g., "E3"
+    solf: string;       // e.g., "sol"
+    order: number;      // first occurrence index for stable ordering
+    n: number;
+    meanRatio: number;  // running mean (0..1)
+    meanMae: number;    // running mean (cents)
+  };
+
+  const groups = React.useMemo(() => {
+    const m = new Map<string, Acc>();
+
+    for (let i = 0; i < notes.length; i++) {
+      const n = notes[i]!;
+      const p = per?.[i];
+      if (!p) continue;
+
+      const pcAbs = ((Math.round(n.midi) % 12) + 12) % 12;
+      const solf = pcToSolfege(pcAbs, tonicPc, scaleName, { caseStyle: "lower" });
+      const label = midiLabelForKey(Math.round(n.midi), tonicPc, scaleName).text;
+      const key = `${label}|${solf}`;
+
+      if (!m.has(key)) {
+        m.set(key, { key, label, solf, order: i, n: 0, meanRatio: 0, meanMae: 0 });
+      }
+      const g = m.get(key)!;
+
+      // Incremental means
+      g.n += 1;
+      g.meanRatio += (p.ratio - g.meanRatio) / g.n;
+      g.meanMae += (p.centsMae - g.meanMae) / g.n;
+    }
+
+    return Array.from(m.values()).sort((a, b) => a.order - b.order);
+  }, [notes, per, tonicPc, scaleName]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -41,34 +73,26 @@ export default function PitchReview({
               <th className="px-2 py-2">#</th>
               <th className="px-2 py-2">Note</th>
               <th className="px-2 py-2">Solfege</th>
-              <th className="px-2 py-2">Duration</th>
               <th className="px-2 py-2">On-pitch %</th>
               <th className="px-2 py-2">MAE (¢)</th>
             </tr>
           </thead>
           <tbody>
-            {notes.map((n, i) => {
-              const p = per?.[i];
-              const pcAbs = ((Math.round(n.midi) % 12) + 12) % 12;
-              const solf = pcToSolfege(pcAbs, tonicPc, scaleName, { caseStyle: "lower" });
-              const label = midiLabelForKey(Math.round(n.midi), tonicPc, scaleName).text;
-              return (
-                <tr key={i} className="border-t border-[#eee]">
+            {groups.length === 0 ? (
+              <tr className="border-t border-[#eee]">
+                <td className="px-2 py-1.5" colSpan={5}>No notes to evaluate.</td>
+              </tr>
+            ) : (
+              groups.map((g, i) => (
+                <tr key={g.key} className="border-t border-[#eee]">
                   <td className="px-2 py-1.5 align-middle text-[#555]">{i + 1}</td>
-                  <td className="px-2 py-1.5 align-middle font-medium">{label}</td>
-                  <td className="px-2 py-1.5 align-middle">{solf}</td>
-                  <td className="px-2 py-1.5 align-middle text-[#444]">
-                    {secondsToNoteLabel(n.durSec, bpm, den)}
-                  </td>
-                  <td className="px-2 py-1.5 align-middle">
-                    {p ? `${(p.ratio * 100).toFixed(1)}%` : "—"}
-                  </td>
-                  <td className="px-2 py-1.5 align-middle">
-                    {p ? Math.round(p.centsMae) : "—"}
-                  </td>
+                  <td className="px-2 py-1.5 align-middle font-medium">{g.label}</td>
+                  <td className="px-2 py-1.5 align-middle">{g.solf}</td>
+                  <td className="px-2 py-1.5 align-middle">{(g.meanRatio * 100).toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 align-middle">{Math.round(g.meanMae)}</td>
                 </tr>
-              );
-            })}
+              ))
+            )}
           </tbody>
         </table>
       </div>
