@@ -482,54 +482,60 @@ export default function TrainingGame({
       | undefined) ?? undefined;
 
   // Stage side panel content (router handles all pretest UIs)
-  const stageAside =
-    pretestActive ? (
-      <PretestPanel
-        statusText={statusText}
-        running={pretest.running}
-        inResponse={pretest.status === "response"}
-        modeKind={currentPretestKind}
-        onStart={startPretestSafe}
-        onContinue={pretest.continueResponse}
-        // musical context for pretests
+const stageAside =
+  pretestActive ? (
+    <PretestPanel
+      statusText={statusText}
+      running={pretest.running}
+      inResponse={pretest.status === "response"}
+      modeKind={currentPretestKind}
+      onStart={startPretestSafe}
+      onContinue={pretest.continueResponse}
+      bpm={bpm}
+      tsNum={ts.num}
+      tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
+      lowHz={lowHz ?? null}
+      scaleName={sessionConfigLocal.scale?.name ?? "major"}
+      liveHz={liveHz}
+      confidence={confidence}
+      playMidiList={playMidiList}
+    />
+  ) : panelHasDetail ? (
+    panelIsOverall ? (
+      <OverallReview
+        scores={sessionScores}
+        onClose={closeTakeDetail}
+        snapshots={takeSnapshots}
         bpm={bpm}
+        den={ts.den}
+        tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
+        scaleName={sessionConfigLocal.scale?.name ?? "major"}
+      />
+    ) : validTakeIndex ? (
+      <TakeReview
+        haveRhythm={haveRhythm}
+        onPlayMelody={onPlayMelody}
+        onPlayRhythm={onPlayRhythm}
+        onPlayBoth={onPlayBoth}
+        onStop={onStopPlayback}
+        score={sessionScores[panelTakeIndex!]}
+        onClose={closeTakeDetail}
+        onRedo={() => redoTake(panelTakeIndex!)}
+        /* context */
+        phrase={playbackPhrase}
+        bpm={bpm}
+        den={ts.den}
         tsNum={ts.num}
         tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
-        lowHz={lowHz ?? null}
-        // let the pretest know which scale we’re in
-        scaleName={sessionConfigLocal.scale?.name ?? "major"}
-        // audio/mic
-        liveHz={liveHz}
-        confidence={confidence}
-        playMidiList={playMidiList}
       />
-    ) : panelHasDetail ? (
-      panelIsOverall ? (
-        <OverallReview scores={sessionScores} onClose={closeTakeDetail} />
-      ) : validTakeIndex ? (
-        <TakeReview
-          haveRhythm={haveRhythm}
-          onPlayMelody={onPlayMelody}
-          onPlayRhythm={onPlayRhythm}
-          onPlayBoth={onPlayBoth}
-          onStop={onStopPlayback}
-          score={sessionScores[panelTakeIndex!]}
-          onClose={closeTakeDetail}
-          onRedo={() => redoTake(panelTakeIndex!)}
-          /* context */
-          phrase={playbackPhrase}
-          bpm={bpm}
-          den={ts.den}
-          tsNum={ts.num}
-          tonicPc={sessionConfigLocal.scale?.tonicPc ?? 0}
-        />
-      ) : (
-        // index out of range (defensive): fall back to list
-        <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
-      )
     ) : (
+      // index out of range (defensive): fall back to list
       <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
-    );
+    )
+  ) : (
+    <SidePanelScores scores={sessionScores} onOpen={openTakeDetail} />
+  );
+
 
   return (
     <GameLayout
