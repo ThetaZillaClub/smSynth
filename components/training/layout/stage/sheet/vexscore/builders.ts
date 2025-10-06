@@ -112,7 +112,7 @@ const FLAT_NAMES: Record<number, string> = {
   8: "Ab",
   9: "A",
   10: "Bb",
-  11: "Cb",
+  11: "B",
 };
 
 const NAME_TO_PC: Record<string, number> = (() => {

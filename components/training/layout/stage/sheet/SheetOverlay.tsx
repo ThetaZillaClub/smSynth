@@ -242,13 +242,20 @@ export default function SheetOverlay({
 
         band = topStaffBand(sys);
       } else {
-        // Legacy layout: map *content* time over [x0, x1] using shifted time too
+        // Legacy layout: map *content* time over [x0, x1] using shifted time too,
+        // AND constrain the vertical band to an estimated TOP staff until systems arrive.
         const x0 = Number.isFinite(staffStartX as number) ? (staffStartX as number) : 0;
         const x1 = Number.isFinite(staffEndX as number) ? (staffEndX as number) : width;
         const W = Math.max(1, x1 - x0);
         const xLocal = timeToX(tShifted, W, mapDur);
         xGuide = x0 + Math.min(W, Math.max(0, xLocal));
-        band = { yTop: 0, yBottom: height };
+        const fullH = height;
+        if (fullH < TWO_STAVES_THRESHOLD) {
+          band = { yTop: 0, yBottom: fullH };
+        } else {
+          const staffH = Math.max(40, (fullH - STAFF_GAP_EST) / 2);
+          band = { yTop: 0, yBottom: Math.round(staffH) };
+        }
       }
 
       // Playhead — draw at float x (no pixel rounding) to avoid "stick then jump".
@@ -342,6 +349,7 @@ export default function SheetOverlay({
     } else {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
+      // idle: still paint once
       drawRef.current(performance.now());
     }
     return () => {
@@ -349,6 +357,21 @@ export default function SheetOverlay({
       rafRef.current = null;
     };
   }, [shouldAnimate]);
+
+  // ⬅️ NEW: when layout/timeline inputs change (e.g., systems arrive),
+  // force a one-off redraw if we're idle so the playhead repositions.
+  useEffect(() => {
+    if (!shouldAnimate) {
+      drawRef.current(performance.now());
+    }
+  }, [
+    // geometry / mapping
+    systems, width, height, dpr, staffStartX, staffEndX,
+    // timing that affects the x-map and padding
+    leadInSec, totalSec, bpm, den,
+    // staff mapping (vertical band & dot mapping)
+    clef, useSharps,
+  ]);
 
   return (
     <canvas
