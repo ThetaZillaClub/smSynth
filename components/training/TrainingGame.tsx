@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useRef, useState, useEffect, useMemo } from "react";
+import React, { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
@@ -202,10 +202,10 @@ export default function TrainingGame({
     onEnterPlay: () => {},
     autoContinue: !!loopingMode,
     onRestComplete: () => {
-      if (!loopingMode) {
-        setReviewVisible(true);
-      }
+      if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
+      setReviewVisible(true);
     },
+    
   });
 
   const startPretestSafe = async () => {
@@ -423,7 +423,24 @@ export default function TrainingGame({
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
-  const onToggleExercise = () => { if (exerciseUnlocked) loop.toggle(); };
+  const onToggleExercise = useCallback(() => {
+    if (!exerciseUnlocked) return;
+    const starting = !loop.looping;
+    const hadAtLeastOneTake = (loop.takeCount ?? 0) > 0;
+
+    // In manual mode, regenerate just before starting the *next* take.
+    if (starting && hadAtLeastOneTake && !loopingMode && regenerateBetweenTakes) {
+      setSeedBump((n) => n + 1);
+    }
+    loop.toggle();
+  }, [
+    exerciseUnlocked,
+    loop.looping,
+    loop.takeCount,
+    loop.toggle,
+    loopingMode,
+    regenerateBetweenTakes,
+  ]);
 
   // Footer session panel (same as before)
   const showFooterSessionPanel = !!phrase && !pretestActive && !reviewVisible;
