@@ -3,12 +3,15 @@
 
 import * as React from "react";
 import ProfileLayout from "./profile/profile-layout";
+import GameplayLayout from "./gameplay/gameplay-layout"; // ← NEW
+
 type Bootstrap = {
   uid: string;
   displayName: string;
   avatarPath: string | null;
   studentImagePath: string | null;
 };
+
 type RowKey =
   | "profile"
   | "audio"
@@ -18,7 +21,6 @@ type RowKey =
   | "membership";
 
 type Row = { key: RowKey; label: string; icon: React.ReactNode };
-
 const ROWS: Row[] = [
   {
     key: "profile",
@@ -89,9 +91,8 @@ const ROWS: Row[] = [
 ];
 
 export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
-  const [active, setActive] = React.useState<"profile"|"audio"|"vision"|"gameplay"|"account"|"membership">("profile");
+  const [active, setActive] = React.useState<RowKey>("profile");
 
-  // mimic main sidebar
   const baseRow = [
     "flex items-stretch w-full select-none transition",
     "hover:bg-[#e8e8e8] active:bg-[#e0e0e0]",
@@ -109,7 +110,6 @@ export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
       ].join(" ")}
     >
       <div className="grid grid-cols-[240px_1fr]">
-        {/* LEFT: Settings sidebar (rounded on the container's left) */}
         <aside className="border-r border-[#d7d7d7]">
           {ROWS.map((row) => {
             const isActive = active === row.key;
@@ -129,12 +129,17 @@ export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
           })}
         </aside>
 
-        {/* RIGHT: Content area.
-            For "profile", render directly on the shell background (no inner white card). */}
-        <section className={active === "profile" ? "p-6 min-h-[420px]" : "bg-white p-6 min-h-[420px]"}>
+        <section
+          className={
+            active === "profile" ? "p-6 min-h-[420px]" : "bg-white p-6 min-h-[420px]"
+          }
+        >
           <div className="max-w-2xl">
             {active === "profile" ? (
               <ProfileLayout bootstrap={bootstrap} />
+            ) : active === "gameplay" ? (
+              // Optional: pass a known baselineBpm to preview. Omit to just show the percentage.
+              <GameplayLayout /* baselineBpm={80} */ />
             ) : (
               <>
                 <h2 className="text-2xl font-semibold text-[#0f0f0f]">

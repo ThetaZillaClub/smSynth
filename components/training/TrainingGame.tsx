@@ -15,6 +15,7 @@ import {
   noteValueToBeats,
   noteValueToSeconds,
 } from "@/utils/time/tempo";
+import { effectiveBpm } from "@/utils/time/speed"; // ← NEW
 import type { Phrase } from "@/utils/stage";
 import { type SessionConfig, DEFAULT_SESSION_CONFIG } from "./session";
 import usePretest from "@/hooks/gameplay/usePretest";
@@ -48,6 +49,19 @@ type TakeSnapshot = {
   melodyRhythm: RhythmEvent[] | null;
 };
 
+// --- helper to read & clamp gameplay slider percent (Beginner 75 → Pro 150)
+const SPEED_KEY = "gameplay:speedPercent";
+function readSpeedPercent(): number {
+  try {
+    const raw = typeof window !== "undefined" ? window.localStorage.getItem(SPEED_KEY) : null;
+    const n = raw == null ? NaN : Number(raw);
+    const clamped = Math.max(75, Math.min(150, Math.round(Number.isFinite(n) ? n : 75)));
+    return clamped;
+  } catch {
+    return 75;
+  }
+}
+
 export default function TrainingGame({
   title = "Training",
   studentId = null,
@@ -63,12 +77,35 @@ export default function TrainingGame({
     { rangeLowLabel, rangeHighLabel }
   );
 
+  // —— gameplay speed → effective BPM
+  const [speedPercent, setSpeedPercent] = useState<number>(readSpeedPercent());
+  useEffect(() => {
+    // live update if another tab / settings page changes it
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SPEED_KEY) setSpeedPercent(readSpeedPercent());
+    };
+    window.addEventListener("storage", onStorage);
+    // also do a one-time refresh on mount to be safe
+    setSpeedPercent(readSpeedPercent());
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const baselineBpm = sessionConfig?.bpm ?? DEFAULT_SESSION_CONFIG.bpm;
+  const bpmEff = useMemo(() => effectiveBpm(baselineBpm, speedPercent), [baselineBpm, speedPercent]);
+
+  // Use a derived session *everywhere* so generation, durations, scoring all use effective BPM.
+  const sessionEff = useMemo<SessionConfig>(
+    () => ({ ...sessionConfig, bpm: bpmEff }),
+    [sessionConfig, bpmEff]
+  );
+
   const step: "play" = "play";
   const {
-    bpm, ts, leadBars, restBars, noteValue, noteDurSec, view,
+    bpm,      // ← this is effective BPM now
+    ts, leadBars, restBars, noteValue, noteDurSec, view,
     callResponseSequence, exerciseLoops, regenerateBetweenTakes,
     metronome, loopingMode, gestureLatencyMs = 90,
-  } = sessionConfig;
+  } = sessionEff;
 
   const secPerBeat = secondsPerBeat(bpm, ts.den);
   const leadBeats = barsToBeats(leadBars, ts.num);
@@ -92,7 +129,7 @@ export default function TrainingGame({
   const [seedBump, setSeedBump] = useState(0);
 
   const fabric = useExerciseFabric({
-    sessionConfig: sessionConfig,
+    sessionConfig: sessionEff, // ← use effective BPM
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     seedBump,
@@ -101,8 +138,8 @@ export default function TrainingGame({
 
   const melodyClef = useMelodyClef({
     phrase,
-    scale: sessionConfig.scale,
-    sessionConfig: sessionConfig,
+    scale: sessionEff.scale,
+    sessionConfig: sessionEff, // ← use effective BPM config consistently
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
   });
@@ -135,9 +172,9 @@ export default function TrainingGame({
 
   const pretest = usePretest({
     sequence: callResponseSequence ?? [],
-    bpm,
+    bpm,          // ← effective BPM
     ts,
-    scale: sessionConfig.scale ?? { tonicPc: 0, name: "major" },
+    scale: sessionEff.scale ?? { tonicPc: 0, name: "major" },
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     player: {
@@ -151,7 +188,7 @@ export default function TrainingGame({
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
   // Rhythm / vision
-  const rhythmCfgAny = (sessionConfig.rhythm ?? {}) as any;
+  const rhythmCfgAny = (sessionEff.rhythm ?? {}) as any;
   const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
   const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
@@ -190,9 +227,8 @@ export default function TrainingGame({
     onEnterPlay: () => {},
     autoContinue: !!loopingMode,
     onRestComplete: () => {
-      // Generate the next phrase during rest (not at play press)
       if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
-      if (!loopingMode) setReviewVisible(true); // ← only show review in non-looping mode
+      if (!loopingMode) setReviewVisible(true);
     },
   });
 
@@ -204,7 +240,8 @@ export default function TrainingGame({
   };
 
   // Auto record sync
-  const shouldRecord = (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
+  const shouldRecord =
+    (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
   useRecorderAutoSync({
     enabled: step === "play",
     shouldRecord,
@@ -296,7 +333,7 @@ export default function TrainingGame({
     const out: number[] = [];
     let t = 0;
     for (const ev of rh) {
-      const dur = noteValueToSeconds(ev.value, bpm, ts.den);
+      const dur = noteValueToSeconds(ev.value, bpm, ts.den); // ← effective BPM
       if (ev.type === "note") out.push(t);
       t += dur;
     }
@@ -309,7 +346,6 @@ export default function TrainingGame({
   const rhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
   const melodyRhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
 
-  // Capture the exact exercise when we enter lead-in (used for snapshotting + robust scoring)
   useEffect(() => {
     if (!pretestActive && loop.loopPhase === "lead-in" && phrase) {
       phraseForTakeRef.current = phrase;
@@ -334,7 +370,7 @@ export default function TrainingGame({
 
         void scoreTake({
           phrase: usedPhrase,
-          bpm,
+          bpm,              // ← effective BPM into scoring
           den: ts.den,
           leadInSec,
           pitchLagSec,
@@ -392,14 +428,14 @@ export default function TrainingGame({
 
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
   const onToggleExercise = () => {
-  if (!exerciseUnlocked) return;
-  setReviewVisible(false);     // ← ensure footer/meta shows even if review was open
-  loop.toggle();
-};
+    if (!exerciseUnlocked) return;
+    setReviewVisible(false);
+    loop.toggle();
+  };
 
-  // Footer session panel (same as before)
-  const showFooterSessionPanel = !!phrase && !pretestActive; 
-  const completedTakes = loop.takeCount ?? 0;        // from usePracticeLoop
+  // Footer session panel: show effective BPM
+  const showFooterSessionPanel = !!phrase && !pretestActive;
+  const completedTakes = loop.takeCount ?? 0;
   const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
   const footerSessionPanel = showFooterSessionPanel
     ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES }
@@ -414,7 +450,7 @@ export default function TrainingGame({
       | "internal_arpeggio"
       | undefined) ?? undefined;
 
-  // Build structured props for the side panel; GameLayout will render the panel.
+  // Side panel props (report effective BPM)
   const sidePanel = {
     pretest: {
       active: pretestActive,
@@ -426,9 +462,9 @@ export default function TrainingGame({
       continueResponse: pretest.continueResponse,
       bpm,
       tsNum: ts.num,
-      tonicPc: sessionConfig.scale?.tonicPc ?? 0,
+      tonicPc: sessionEff.scale?.tonicPc ?? 0,
       lowHz: lowHz ?? null,
-      scaleName: sessionConfig.scale?.name ?? "major",
+      scaleName: sessionEff.scale?.name ?? "major",
       liveHz,
       confidence,
       playMidiList,
@@ -447,8 +483,8 @@ export default function TrainingGame({
     bpm,
     den: ts.den,
     tsNum: ts.num,
-    tonicPc: sessionConfig.scale?.tonicPc ?? 0,
-    scaleName: sessionConfig.scale?.name ?? "major",
+    tonicPc: sessionEff.scale?.tonicPc ?? 0,
+    scaleName: sessionEff.scale?.name ?? "major",
   } as const;
 
   return (
@@ -470,7 +506,7 @@ export default function TrainingGame({
       loopPhase={pretestActive ? "call" : loop.loopPhase}
       rhythm={(rhythmEffective ?? undefined) as any}
       melodyRhythm={fabric.melodyRhythm ?? undefined}
-      bpm={bpm}
+      bpm={bpm}                 // ← effective BPM piped to layout
       den={ts.den}
       tsNum={ts.num}
       keySig={fabric.keySig}
