@@ -41,12 +41,12 @@ type Props = {
 const CONF_THRESHOLD = 0.5;
 const DEFAULT_PITCH_LATENCY_MS = 120;
 
- type TakeSnapshot = {
-   phrase: Phrase;
-   rhythm: RhythmEvent[] | null;
-   /** Melody's own rhythm for rests/ghosts on the melody staff */
-   melodyRhythm: RhythmEvent[] | null;
- };
+type TakeSnapshot = {
+  phrase: Phrase;
+  rhythm: RhythmEvent[] | null;
+  /** Melody's own rhythm for rests/ghosts on the melody staff */
+  melodyRhythm: RhythmEvent[] | null;
+};
 
 export default function TrainingGame({
   title = "Training",
@@ -91,20 +91,8 @@ export default function TrainingGame({
 
   const [seedBump, setSeedBump] = useState(0);
 
-  /** NEW: one-take override to redo a past exercise */
-  const [redoOverride, setRedoOverride] = useState<TakeSnapshot | null>(null);
-
-  /** Use override by injecting it as a customPhrase for a single take */
-  const sessionConfigLocal = useMemo(() => {
-    if (!redoOverride) return sessionConfig;
-    return {
-      ...sessionConfig,
-      customPhrase: redoOverride.phrase,
-    };
-  }, [sessionConfig, redoOverride]);
-
   const fabric = useExerciseFabric({
-    sessionConfig: sessionConfigLocal,
+    sessionConfig: sessionConfig,
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     seedBump,
@@ -113,8 +101,8 @@ export default function TrainingGame({
 
   const melodyClef = useMelodyClef({
     phrase,
-    scale: sessionConfigLocal.scale,
-    sessionConfig: sessionConfigLocal,
+    scale: sessionConfig.scale,
+    sessionConfig: sessionConfig,
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
   });
@@ -149,7 +137,7 @@ export default function TrainingGame({
     sequence: callResponseSequence ?? [],
     bpm,
     ts,
-    scale: sessionConfigLocal.scale ?? { tonicPc: 0, name: "major" },
+    scale: sessionConfig.scale ?? { tonicPc: 0, name: "major" },
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     player: {
@@ -163,7 +151,7 @@ export default function TrainingGame({
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
   // Rhythm / vision
-  const rhythmCfgAny = (sessionConfigLocal.rhythm ?? {}) as any;
+  const rhythmCfgAny = (sessionConfig.rhythm ?? {}) as any;
   const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
   const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
@@ -202,10 +190,10 @@ export default function TrainingGame({
     onEnterPlay: () => {},
     autoContinue: !!loopingMode,
     onRestComplete: () => {
+      // Generate the next phrase during rest (not at play press)
       if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
       setReviewVisible(true);
     },
-    
   });
 
   const startPretestSafe = async () => {
@@ -295,8 +283,8 @@ export default function TrainingGame({
     }
   }, [pretestActive, needVision, loop.loopPhase, loop.anchorMs, hand, sampler]);
 
-  // Effective blue rhythm (respect redo override visually and for playback/scoring)
-  const rhythmEffective: RhythmEvent[] | null = redoOverride?.rhythm ?? (fabric.syncRhythmFabric ?? null);
+  // Effective blue rhythm for current exercise
+  const rhythmEffective: RhythmEvent[] | null = fabric.syncRhythmFabric ?? null;
   const haveRhythm: boolean = rhythmLineEnabled && (rhythmEffective?.length ?? 0) > 0;
 
   // Scoring
@@ -315,18 +303,20 @@ export default function TrainingGame({
     return out;
   };
 
-  /** NEW: snap which exercise actually ran for this take (phrase + rhythm) */
+  /** Freeze the exact exercise that ran for each take (phrase + rhythms) */
   const [takeSnapshots, setTakeSnapshots] = useState<TakeSnapshot[]>([]);
   const phraseForTakeRef = useRef<Phrase | null>(null);
   const rhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
+  const melodyRhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
 
   // Capture the exact exercise when we enter lead-in (used for snapshotting + robust scoring)
   useEffect(() => {
     if (!pretestActive && loop.loopPhase === "lead-in" && phrase) {
       phraseForTakeRef.current = phrase;
       rhythmForTakeRef.current = rhythmEffective;
+      melodyRhythmForTakeRef.current = fabric.melodyRhythm ?? null;
     }
-  }, [pretestActive, loop.loopPhase, phrase, rhythmEffective]);
+  }, [pretestActive, loop.loopPhase, phrase, rhythmEffective, fabric.melodyRhythm]);
 
   const prevPhaseRef = useRef(loop.loopPhase);
   useEffect(() => {
@@ -361,12 +351,10 @@ export default function TrainingGame({
           {
             phrase: usedPhrase,
             rhythm: usedRhythm ?? null,
-            melodyRhythm: fabric.melodyRhythm ?? null, // ⬅️ capture melody rhythm for rests
+            melodyRhythm: melodyRhythmForTakeRef.current ?? null,
           },
         ]);
       }
-
-      if (redoOverride) setRedoOverride(null);
 
       if (!loopingMode) {
         setReviewVisible(true);
@@ -385,27 +373,11 @@ export default function TrainingGame({
     hand,
     rhythmEffective,
     scoreTake,
-    redoOverride,
   ]);
 
   const onNextPhrase = () => {
     setSeedBump((n) => n + 1);
     setReviewVisible(false);
-  };
-
-  /** NEW: redo a specific past take (load its snapshot for one pass & start loop) */
-  const redoTake = (index: number) => {
-    const snap = takeSnapshots[index];
-    if (!snap) return;
-    stopPlayback();
-    loop.clearAll();
-    setRedoOverride({
-      phrase: snap.phrase,
-      rhythm: snap.rhythm ?? null,
-      melodyRhythm: snap.melodyRhythm ?? null,
-    });
-    setReviewVisible(false);
-    loop.toggle();
   };
 
   // UI & playback routing
@@ -423,29 +395,12 @@ export default function TrainingGame({
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
-  const onToggleExercise = useCallback(() => {
-    if (!exerciseUnlocked) return;
-    const starting = !loop.looping;
-    const hadAtLeastOneTake = (loop.takeCount ?? 0) > 0;
-
-    // In manual mode, regenerate just before starting the *next* take.
-    if (starting && hadAtLeastOneTake && !loopingMode && regenerateBetweenTakes) {
-      setSeedBump((n) => n + 1);
-    }
-    loop.toggle();
-  }, [
-    exerciseUnlocked,
-    loop.looping,
-    loop.takeCount,
-    loop.toggle,
-    loopingMode,
-    regenerateBetweenTakes,
-  ]);
+  const onToggleExercise = () => { if (exerciseUnlocked) loop.toggle(); };
 
   // Footer session panel (same as before)
   const showFooterSessionPanel = !!phrase && !pretestActive && !reviewVisible;
- const completedTakes = loop.takeCount ?? 0;        // from usePracticeLoop
- const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
+  const completedTakes = loop.takeCount ?? 0;        // from usePracticeLoop
+  const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
   const footerSessionPanel = showFooterSessionPanel
     ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES }
     : undefined;
@@ -471,9 +426,9 @@ export default function TrainingGame({
       continueResponse: pretest.continueResponse,
       bpm,
       tsNum: ts.num,
-      tonicPc: sessionConfigLocal.scale?.tonicPc ?? 0,
+      tonicPc: sessionConfig.scale?.tonicPc ?? 0,
       lowHz: lowHz ?? null,
-      scaleName: sessionConfigLocal.scale?.name ?? "major",
+      scaleName: sessionConfig.scale?.name ?? "major",
       liveHz,
       confidence,
       playMidiList,
@@ -492,9 +447,8 @@ export default function TrainingGame({
     bpm,
     den: ts.den,
     tsNum: ts.num,
-    tonicPc: sessionConfigLocal.scale?.tonicPc ?? 0,
-    scaleName: sessionConfigLocal.scale?.name ?? "major",
-    onRedo: redoTake,
+    tonicPc: sessionConfig.scale?.tonicPc ?? 0,
+    scaleName: sessionConfig.scale?.name ?? "major",
   } as const;
 
   return (
@@ -515,7 +469,7 @@ export default function TrainingGame({
       step={step}
       loopPhase={pretestActive ? "call" : loop.loopPhase}
       rhythm={(rhythmEffective ?? undefined) as any}
-      melodyRhythm={(redoOverride?.melodyRhythm ?? fabric.melodyRhythm) ?? undefined}
+      melodyRhythm={fabric.melodyRhythm ?? undefined}
       bpm={bpm}
       den={ts.den}
       tsNum={ts.num}

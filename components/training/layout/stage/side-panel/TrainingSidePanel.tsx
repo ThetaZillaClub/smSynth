@@ -13,11 +13,11 @@ import OverallReview from "./SidePanelScores/OverallReview";
 import PretestPanel from "@/components/training/pretest/PretestPanel";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
 
- type TakeSnapshot = {
-   phrase: Phrase;
-   rhythm: RhythmEvent[] | null;
-   melodyRhythm: RhythmEvent[] | null;
- };
+type TakeSnapshot = {
+  phrase: Phrase;
+  rhythm: RhythmEvent[] | null;
+  melodyRhythm: RhythmEvent[] | null;
+};
 
 type ModeKind =
   | "single_tonic"
@@ -89,9 +89,6 @@ export type TrainingSidePanelProps = {
 
   /** For solfège displays, keep broader solfège scale names here */
   scaleName?: SolfegeScaleName | (string & {});
-
-  // redo a specific take
-  onRedo: (index: number) => void;
 };
 
 export default function TrainingSidePanel(props: TrainingSidePanelProps) {
@@ -115,9 +112,6 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
     tsNum,
     tonicPc,
     scaleName = "major",
-
-    // redo a specific take
-    onRedo,
   } = props;
 
   // - null  -> list
@@ -193,7 +187,7 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
         scaleName={scaleName as SolfegeScaleName}
       />
     );
-    }
+  }
 
   if (validTake && effectivePhrase) {
     return (
@@ -205,7 +199,6 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
         onStop={onStop}
         score={scores[openIndex!]}
         onClose={() => setOpenIndex(null)}
-        onRedo={() => onRedo(openIndex!)}
         phrase={effectivePhrase}
         bpm={bpm}
         den={den}

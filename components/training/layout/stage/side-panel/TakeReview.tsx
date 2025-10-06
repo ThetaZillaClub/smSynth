@@ -20,7 +20,6 @@ export default function TakeReview({
   onStop,
   score,
   onClose,
-  onRedo,
   phrase,
   bpm,
   den,
@@ -35,7 +34,6 @@ export default function TakeReview({
   onStop: () => void;
   score?: TakeScore;
   onClose?: () => void;
-  onRedo?: () => void;
   phrase?: Phrase | null;
   bpm: number;
   den: number;
@@ -90,7 +88,7 @@ export default function TakeReview({
         </div>
       </div>
 
-      {/* NEW: centered playback + redo row under header */}
+      {/* centered playback row under header */}
       <div className="flex items-center justify-center gap-2.5 flex-wrap py-1">
         <RoundIconButton title="Play melody" ariaLabel="Play melody" onClick={onPlayMelody}>
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
@@ -124,18 +122,6 @@ export default function TakeReview({
             <rect x="6" y="6" width="12" height="12" fill="currentColor" />
           </svg>
         </RoundIconButton>
-
-        {onRedo ? (
-          <RoundIconButton title="Redo this take" ariaLabel="Redo this take" onClick={onRedo}>
-            {/* circular redo/refresh arrow */}
-            <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-              <path
-                d="M12 5a7 7 0 1 1-6.32 4H3a1 1 0 0 1-.7-1.71l3.5-3.5A1 1 0 0 1 7 4v2h.09A7 7 0 0 1 12 5Zm0 2a5 5 0 1 0 4.58 7H14a1 1 0 1 1 0-2h5a1 1 0 0 1 1 1v5a1 1 0 1 1-2 0v-2.3A7 7 0 1 1 12 7Z"
-                fill="currentColor"
-              />
-            </svg>
-          </RoundIconButton>
-        ) : null}
       </div>
 
       {view === "summary" ? (
