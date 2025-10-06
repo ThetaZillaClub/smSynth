@@ -41,10 +41,12 @@ type Props = {
 const CONF_THRESHOLD = 0.5;
 const DEFAULT_PITCH_LATENCY_MS = 120;
 
-type TakeSnapshot = {
-  phrase: Phrase;
-  rhythm: RhythmEvent[] | null;
-};
+ type TakeSnapshot = {
+   phrase: Phrase;
+   rhythm: RhythmEvent[] | null;
+   /** Melody's own rhythm for rests/ghosts on the melody staff */
+   melodyRhythm: RhythmEvent[] | null;
+ };
 
 export default function TrainingGame({
   title = "Training",
@@ -354,7 +356,14 @@ export default function TrainingGame({
           align: alignForScoring,
         });
 
-        setTakeSnapshots((xs) => [...xs, { phrase: usedPhrase, rhythm: usedRhythm ?? null }]);
+        setTakeSnapshots((xs) => [
+          ...xs,
+          {
+            phrase: usedPhrase,
+            rhythm: usedRhythm ?? null,
+            melodyRhythm: fabric.melodyRhythm ?? null, // ⬅️ capture melody rhythm for rests
+          },
+        ]);
       }
 
       if (redoOverride) setRedoOverride(null);
@@ -390,7 +399,11 @@ export default function TrainingGame({
     if (!snap) return;
     stopPlayback();
     loop.clearAll();
-    setRedoOverride({ phrase: snap.phrase, rhythm: snap.rhythm ?? null });
+    setRedoOverride({
+      phrase: snap.phrase,
+      rhythm: snap.rhythm ?? null,
+      melodyRhythm: snap.melodyRhythm ?? null,
+    });
     setReviewVisible(false);
     loop.toggle();
   };
@@ -414,14 +427,8 @@ export default function TrainingGame({
 
   // Footer session panel (same as before)
   const showFooterSessionPanel = !!phrase && !pretestActive && !reviewVisible;
-  const rawTakeIdx =
-    (loop as any).takeIndex ??
-    (loop as any).takeIdx ??
-    (loop as any).take ??
-    (loop as any).takesDone ??
-    0;
-
-  const roundCurrent = Math.max(1, Math.min(MAX_TAKES, Number(rawTakeIdx) + 1));
+ const completedTakes = loop.takeCount ?? 0;        // from usePracticeLoop
+ const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
   const footerSessionPanel = showFooterSessionPanel
     ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES }
     : undefined;
@@ -491,7 +498,7 @@ export default function TrainingGame({
       step={step}
       loopPhase={pretestActive ? "call" : loop.loopPhase}
       rhythm={(rhythmEffective ?? undefined) as any}
-      melodyRhythm={fabric.melodyRhythm ?? undefined}
+      melodyRhythm={(redoOverride?.melodyRhythm ?? fabric.melodyRhythm) ?? undefined}
       bpm={bpm}
       den={ts.den}
       tsNum={ts.num}

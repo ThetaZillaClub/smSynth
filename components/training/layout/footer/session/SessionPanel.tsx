@@ -50,7 +50,7 @@ export default function SessionPanel({
       <div className="flex items-center justify-end gap-x-4 flex-nowrap">
         <Item className="w-[6.5rem] flex-none" label="BPM"  value={`${bpm}BPM`} />
         <Item className="w-[6.5rem] flex-none" label="Time" value={`${ts.num}/${ts.den}`} />
-        <Item className="w-[6.5rem] flex-none" label="Round" value={`${roundCurrent}/${roundTotal}`} />
+        <Item className="w-[6.5rem] flex-none" label="Take" value={`${roundCurrent}/${roundTotal}`} />
       </div>
     </div>
   );

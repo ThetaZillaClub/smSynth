@@ -13,7 +13,11 @@ import OverallReview from "./SidePanelScores/OverallReview";
 import PretestPanel from "@/components/training/pretest/PretestPanel";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
 
-type TakeSnapshot = { phrase: Phrase; rhythm: RhythmEvent[] | null };
+ type TakeSnapshot = {
+   phrase: Phrase;
+   rhythm: RhythmEvent[] | null;
+   melodyRhythm: RhythmEvent[] | null;
+ };
 
 type ModeKind =
   | "single_tonic"
