@@ -3,7 +3,7 @@
 
 import * as React from "react";
 import ProfileLayout from "./profile/profile-layout";
-import GameplayLayout from "./gameplay/gameplay-layout"; // ← NEW
+import GameplayLayout from "./gameplay/gameplay-layout";
 
 type Bootstrap = {
   uid: string;
@@ -12,13 +12,7 @@ type Bootstrap = {
   studentImagePath: string | null;
 };
 
-type RowKey =
-  | "profile"
-  | "audio"
-  | "vision"
-  | "gameplay"
-  | "account"
-  | "membership";
+type RowKey = "profile" | "audio" | "vision" | "gameplay" | "account" | "membership";
 
 type Row = { key: RowKey; label: string; icon: React.ReactNode };
 const ROWS: Row[] = [
@@ -69,7 +63,7 @@ const ROWS: Row[] = [
   },
   {
     key: "account",
-    label: "Account", // ← updated label
+    label: "Account",
     icon: (
       <svg viewBox="0 0 24 24" className="w-6 h-6" aria-hidden>
         <path
@@ -93,32 +87,29 @@ const ROWS: Row[] = [
 export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
   const [active, setActive] = React.useState<RowKey>("profile");
 
-  const baseRow = [
-    "flex items-stretch w-full select-none transition",
-    "hover:bg-[#e8e8e8] active:bg-[#e0e0e0]",
-    "text-[#0f0f0f]",
-  ].join(" ");
+  // Baseline/hover/selected colors per your spec:
+  // baseline: #f2f2f2, hover: #f6f6f6, selected: #fcfcfc
+  const rowBase = "flex items-stretch w-full select-none text-[#0f0f0f]";
+  const rowIdle = "bg-[#f2f2f2] hover:bg-[#f6f6f6] active:bg-[#f6f6f6]";
+  const rowActive = "bg-[#fcfcfc] active:bg-[#fcfcfc] cursor-default";
+
   const col1 = "w-12 flex items-center justify-center p-3";
   const col2 = "flex-1 flex items-center p-3 text-base font-medium";
 
   return (
-    <div
-      className={[
-        "w-full",
-        "bg-[#f4f4f4] border border-[#d7d7d7]",
-        "rounded-2xl overflow-hidden",
-      ].join(" ")}
-    >
+    <div className="w-full bg-[#f2f2f2] border border-[#d7d7d7] rounded-2xl overflow-hidden">
       <div className="grid grid-cols-[240px_1fr]">
-        <aside className="border-r border-[#d7d7d7]">
+        {/* Sidebar */}
+        <aside className="border-r border-[#d7d7d7] bg-[#f2f2f2]">
           {ROWS.map((row) => {
             const isActive = active === row.key;
             return (
               <button
                 key={row.key}
                 type="button"
+                aria-current={isActive ? "page" : undefined}
                 onClick={() => setActive(row.key)}
-                className={[baseRow, isActive ? "bg-[#eaeaea]" : ""].join(" ")}
+                className={[rowBase, isActive ? rowActive : rowIdle].join(" ")}
               >
                 <div className={col1} aria-hidden>
                   {row.icon}
@@ -129,16 +120,12 @@ export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
           })}
         </aside>
 
-        <section
-          className={
-            active === "profile" ? "p-6 min-h-[420px]" : "bg-white p-6 min-h-[420px]"
-          }
-        >
+        {/* Tab content (same baseline as sidebar) */}
+        <section className="bg-[#f2f2f2] p-6 min-h-[420px]">
           <div className="max-w-2xl">
             {active === "profile" ? (
               <ProfileLayout bootstrap={bootstrap} />
             ) : active === "gameplay" ? (
-              // Optional: pass a known baselineBpm to preview. Omit to just show the percentage.
               <GameplayLayout /* baselineBpm={80} */ />
             ) : (
               <>
@@ -148,7 +135,7 @@ export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
                 <p className="mt-2 text-[#373737]">
                   Content for <span className="font-medium">{active}</span> will appear here.
                 </p>
-                <div className="mt-6 rounded-lg border border-[#dcdcdc] bg-[#fbfbfb] p-4 text-sm text-[#0f0f0f]">
+                <div className="mt-6 rounded-lg border border-[#dcdcdc] bg-[#fcfcfc] p-4 text-sm text-[#0f0f0f]">
                   Placeholder — we’ll wire up each section (Profile, Audio, Vision, Gameplay, Account, Membership) next.
                 </div>
               </>

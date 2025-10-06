@@ -15,7 +15,8 @@ import {
   noteValueToBeats,
   noteValueToSeconds,
 } from "@/utils/time/tempo";
-import { effectiveBpm } from "@/utils/time/speed"; // ← NEW
+import { effectiveBpm } from "@/utils/time/speed";
+import { hzToMidi } from "@/utils/pitch/pitchMath"; // ← NEW
 import type { Phrase } from "@/utils/stage";
 import { type SessionConfig, DEFAULT_SESSION_CONFIG } from "./session";
 import usePretest from "@/hooks/gameplay/usePretest";
@@ -42,15 +43,16 @@ type Props = {
 const CONF_THRESHOLD = 0.5;
 const DEFAULT_PITCH_LATENCY_MS = 120;
 
-type TakeSnapshot = {
-  phrase: Phrase;
-  rhythm: RhythmEvent[] | null;
-  /** Melody's own rhythm for rests/ghosts on the melody staff */
-  melodyRhythm: RhythmEvent[] | null;
-};
-
-// --- helper to read & clamp gameplay slider percent (Beginner 75 → Pro 150)
+/* ---------------- Gameplay Settings (from Settings panel) ---------------- */
 const SPEED_KEY = "gameplay:speedPercent";
+const KEY_CHOICE_KEY = "gameplay:keyChoice";       // "random" | "0..11"
+const OCTAVE_PREF_KEY = "gameplay:octavePref";     // "low" | "high"
+const LEAD_KEY = "gameplay:leadBars";              // "1" | "2"
+const AUTOPLAY_KEY = "gameplay:autoplay";          // "on" | "off"
+
+type KeyChoice = "random" | number;
+type OctPref = "low" | "high";
+
 function readSpeedPercent(): number {
   try {
     const raw = typeof window !== "undefined" ? window.localStorage.getItem(SPEED_KEY) : null;
@@ -61,6 +63,52 @@ function readSpeedPercent(): number {
     return 75;
   }
 }
+
+function readKeyChoice(): KeyChoice {
+  try {
+    const raw = localStorage.getItem(KEY_CHOICE_KEY);
+    if (raw == null || raw === "random") return "random";
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 && n <= 11 ? (n as number) : "random";
+  } catch {
+    return "random";
+  }
+}
+
+function readOctPref(): OctPref {
+  try {
+    const raw = localStorage.getItem(OCTAVE_PREF_KEY);
+    return raw === "high" ? "high" : "low";
+  } catch {
+    return "low";
+  }
+}
+
+function readLeadBars(): 1 | 2 {
+  try {
+    const raw = localStorage.getItem(LEAD_KEY);
+    const n = raw == null ? 1 : Math.round(Number(raw));
+    return n === 2 ? 2 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function readAutoplay(): boolean {
+  try {
+    const raw = localStorage.getItem(AUTOPLAY_KEY);
+    return raw === "off" ? false : true; // default ON
+  } catch {
+    return true;
+  }
+}
+/* ------------------------------------------------------------------------ */
+
+type TakeSnapshot = {
+  phrase: Phrase;
+  rhythm: RhythmEvent[] | null;
+  melodyRhythm: RhythmEvent[] | null;
+};
 
 export default function TrainingGame({
   title = "Training",
@@ -77,34 +125,113 @@ export default function TrainingGame({
     { rangeLowLabel, rangeHighLabel }
   );
 
-  // —— gameplay speed → effective BPM
+  /* ----- Live gameplay settings state (reacts to Settings panel) ----- */
   const [speedPercent, setSpeedPercent] = useState<number>(readSpeedPercent());
+  const [keyChoice, setKeyChoice] = useState<KeyChoice>(readKeyChoice());
+  const [octPref, setOctPref] = useState<OctPref>(readOctPref());
+  const [leadBarsSetting, setLeadBarsSetting] = useState<1 | 2>(readLeadBars());
+  const [autoplay, setAutoplay] = useState<boolean>(readAutoplay());
+
+  // Re-select a random key only when the allowed set or "random" state toggles
+  const randomPcRef = useRef<number | null>(null);
   useEffect(() => {
-    // live update if another tab / settings page changes it
+    // Keep speed + other settings in sync with cross-tab updates
     const onStorage = (e: StorageEvent) => {
       if (e.key === SPEED_KEY) setSpeedPercent(readSpeedPercent());
+      if (e.key === KEY_CHOICE_KEY) {
+        setKeyChoice(readKeyChoice());
+        randomPcRef.current = null; // force a new pick next time if "random"
+      }
+      if (e.key === OCTAVE_PREF_KEY) setOctPref(readOctPref());
+      if (e.key === LEAD_KEY) setLeadBarsSetting(readLeadBars());
+      if (e.key === AUTOPLAY_KEY) setAutoplay(readAutoplay());
     };
     window.addEventListener("storage", onStorage);
-    // also do a one-time refresh on mount to be safe
+    // one-time refresh on mount
     setSpeedPercent(readSpeedPercent());
+    setKeyChoice(readKeyChoice());
+    setOctPref(readOctPref());
+    setLeadBarsSetting(readLeadBars());
+    setAutoplay(readAutoplay());
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  // Effective BPM (speed slider)
   const baselineBpm = sessionConfig?.bpm ?? DEFAULT_SESSION_CONFIG.bpm;
   const bpmEff = useMemo(() => effectiveBpm(baselineBpm, speedPercent), [baselineBpm, speedPercent]);
 
-  // Use a derived session *everywhere* so generation, durations, scoring all use effective BPM.
-  const sessionEff = useMemo<SessionConfig>(
-    () => ({ ...sessionConfig, bpm: bpmEff }),
-    [sessionConfig, bpmEff]
-  );
+  // Allowed tonic PCs from saved range (tonic → tonic+octave must fit)
+  const allowedTonicPcs = useMemo<Set<number>>(() => {
+    if (lowHz == null || highHz == null) return new Set();
+    const loM = Math.round(hzToMidi(Math.min(lowHz, highHz)));
+    const hiM = Math.round(hzToMidi(Math.max(lowHz, highHz)));
+    const maxTonic = hiM - 12;
+    if (maxTonic < loM) return new Set();
+    const set = new Set<number>();
+    for (let m = loM; m <= maxTonic; m++) set.add(((m % 12) + 12) % 12);
+    return set;
+  }, [lowHz, highHz]);
 
+  // Resolve tonicPc from settings (specific or random in-range, chosen once per change)
+  const resolvedTonicPc = useMemo<number>(() => {
+    if (typeof keyChoice === "number") return ((keyChoice % 12) + 12) % 12;
+    // random
+    if (!allowedTonicPcs.size) return (sessionConfig.scale?.tonicPc ?? 0) % 12;
+    if (randomPcRef.current != null) return randomPcRef.current;
+    const pcs = Array.from(allowedTonicPcs);
+    const pick = pcs[Math.floor(Math.random() * pcs.length)];
+    randomPcRef.current = pick;
+    return pick;
+  }, [keyChoice, allowedTonicPcs, sessionConfig.scale?.tonicPc]);
+
+  // Build tonic windows (absolute midi tonics) for the resolved key & range, select low/high
+  const tonicMidisFromPref = useMemo<number[] | null>(() => {
+    if (lowHz == null || highHz == null) return null;
+    const loM = Math.round(hzToMidi(Math.min(lowHz, highHz)));
+    const hiM = Math.round(hzToMidi(Math.max(lowHz, highHz)));
+    const windows: number[] = [];
+    for (let m = loM; m <= hiM - 12; m++) {
+      if ((((m % 12) + 12) % 12) === resolvedTonicPc) windows.push(m);
+    }
+    if (!windows.length) return null;
+    const idx = octPref === "high" ? windows.length - 1 : 0;
+    return [windows[idx]];
+  }, [lowHz, highHz, resolvedTonicPc, octPref]);
+
+  // Compose a session that *includes* all overrides from the Gameplay panel
+  const sessionEff = useMemo<SessionConfig>(() => {
+    const base: SessionConfig = { ...sessionConfig, bpm: bpmEff };
+
+    // Lead-in bars & autoplay (looping)
+    base.leadBars = leadBarsSetting;
+    base.loopingMode = !!autoplay;
+
+    // Key override: pin a tonicPc (even if course config had random) and prefer a window
+    const prevScale = base.scale ?? { tonicPc: 0, name: "major" as const };
+    base.scale = { ...prevScale, tonicPc: resolvedTonicPc, randomTonic: false };
+
+    // Use tonic window preference if available
+    base.tonicMidis = tonicMidisFromPref ?? null;
+
+    return base;
+  }, [sessionConfig, bpmEff, leadBarsSetting, autoplay, resolvedTonicPc, tonicMidisFromPref]);
+
+  /* ---------------- rest of original TrainingGame (unchanged) ---------------- */
   const step: "play" = "play";
   const {
-    bpm,      // ← this is effective BPM now
-    ts, leadBars, restBars, noteValue, noteDurSec, view,
-    callResponseSequence, exerciseLoops, regenerateBetweenTakes,
-    metronome, loopingMode, gestureLatencyMs = 90,
+    bpm, // effective
+    ts,
+    leadBars,
+    restBars,
+    noteValue,
+    noteDurSec,
+    view,
+    callResponseSequence,
+    exerciseLoops,
+    regenerateBetweenTakes,
+    metronome,
+    loopingMode,
+    gestureLatencyMs = 90,
   } = sessionEff;
 
   const secPerBeat = secondsPerBeat(bpm, ts.den);
@@ -116,7 +243,6 @@ export default function TrainingGame({
   const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 10));
   const MAX_SESSION_SEC = 15 * 60;
 
-  // Pitch
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true,
     fps: 50,
@@ -129,7 +255,7 @@ export default function TrainingGame({
   const [seedBump, setSeedBump] = useState(0);
 
   const fabric = useExerciseFabric({
-    sessionConfig: sessionEff, // ← use effective BPM
+    sessionConfig: sessionEff, // uses effective session w/ overrides
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     seedBump,
@@ -139,7 +265,7 @@ export default function TrainingGame({
   const melodyClef = useMelodyClef({
     phrase,
     scale: sessionEff.scale,
-    sessionConfig: sessionEff, // ← use effective BPM config consistently
+    sessionConfig: sessionEff,
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
   });
@@ -158,7 +284,6 @@ export default function TrainingGame({
   const recordWindowSec =
     Math.ceil(lastEndSec / Math.max(1e-9, ts.num * secPerBeat)) * (ts.num * secPerBeat);
 
-  // Player + pretest
   const {
     warm: warmPlayer,
     playA440,
@@ -172,14 +297,18 @@ export default function TrainingGame({
 
   const pretest = usePretest({
     sequence: callResponseSequence ?? [],
-    bpm,          // ← effective BPM
+    bpm,
     ts,
     scale: sessionEff.scale ?? { tonicPc: 0, name: "major" },
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
     player: {
-      playA440: async (durSec) => { await playA440(durSec); },
-      playMidiList: async (midi, noteDurSec) => { await playMidiList(midi, noteDurSec); },
+      playA440: async (durSec) => {
+        await playA440(durSec);
+      },
+      playMidiList: async (midi, noteDurSec) => {
+        await playMidiList(midi, noteDurSec);
+      },
     },
   });
 
@@ -187,13 +316,11 @@ export default function TrainingGame({
   const pretestActive = pretestRequired && pretest.status !== "done";
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
-  // Rhythm / vision
   const rhythmCfgAny = (sessionEff.rhythm ?? {}) as any;
   const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
   const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
 
-  // Recorder
   const {
     isRecording,
     start: startRec,
@@ -204,7 +331,6 @@ export default function TrainingGame({
 
   const [reviewVisible, setReviewVisible] = useState(false);
 
-  // Loop
   const loop = usePracticeLoop({
     step,
     lowHz: lowHz ?? null,
@@ -239,7 +365,6 @@ export default function TrainingGame({
     pretest.start();
   };
 
-  // Auto record sync
   const shouldRecord =
     (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
   useRecorderAutoSync({
@@ -250,7 +375,6 @@ export default function TrainingGame({
     stopRec,
   });
 
-  // Lead-in clicks
   useLeadInMetronome({
     enabled: exerciseUnlocked,
     metronome,
@@ -261,7 +385,6 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // Vision
   const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
   useEffect(() => {
     try {
@@ -283,12 +406,10 @@ export default function TrainingGame({
     minUpVel: 0.35,
   });
 
-  // Sampler
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
   const samplerAnchor: number | null = !pretestActive ? loop.anchorMs ?? null : null;
   const sampler = usePitchSampler({ active: samplerActive, anchorMs: samplerAnchor, hz: liveHz, confidence, fps: 60 });
 
-  // Warm IO
   useEffect(() => {
     (async () => {
       try { await warmPlayer(); } catch {}
@@ -296,7 +417,6 @@ export default function TrainingGame({
     })();
   }, [warmPlayer, warmRecorder]);
 
-  // Vision lifecycle
   useEffect(() => {
     if (!needVision || pretestActive) { hand.stop(); return; }
     (async () => {
@@ -310,7 +430,6 @@ export default function TrainingGame({
     };
   }, [needVision, pretestActive, hand]);
 
-  // Re-anchor at lead-in
   useEffect(() => {
     if (pretestActive || !needVision) return;
     if (loop.loopPhase === "lead-in") {
@@ -320,11 +439,9 @@ export default function TrainingGame({
     }
   }, [pretestActive, needVision, loop.loopPhase, loop.anchorMs, hand, sampler]);
 
-  // Effective blue rhythm for current exercise
   const rhythmEffective: RhythmEvent[] | null = fabric.syncRhythmFabric ?? null;
   const haveRhythm: boolean = rhythmLineEnabled && (rhythmEffective?.length ?? 0) > 0;
 
-  // Scoring
   const { lastScore, sessionScores, scoreTake } = useTakeScoring();
   const alignForScoring = useScoringAlignment();
 
@@ -333,14 +450,13 @@ export default function TrainingGame({
     const out: number[] = [];
     let t = 0;
     for (const ev of rh) {
-      const dur = noteValueToSeconds(ev.value, bpm, ts.den); // ← effective BPM
+      const dur = noteValueToSeconds(ev.value, bpm, ts.den);
       if (ev.type === "note") out.push(t);
       t += dur;
     }
     return out;
   };
 
-  /** Freeze the exact exercise that ran for each take (phrase + rhythms) */
   const [takeSnapshots, setTakeSnapshots] = useState<TakeSnapshot[]>([]);
   const phraseForTakeRef = useRef<Phrase | null>(null);
   const rhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
@@ -370,7 +486,7 @@ export default function TrainingGame({
 
         void scoreTake({
           phrase: usedPhrase,
-          bpm,              // ← effective BPM into scoring
+          bpm,
           den: ts.den,
           leadInSec,
           pitchLagSec,
@@ -412,7 +528,6 @@ export default function TrainingGame({
     setReviewVisible(false);
   };
 
-  // UI & playback routing
   const showLyrics = step === "play" && !!fabric.words?.length;
   const readinessError =
     rangeError
@@ -433,7 +548,6 @@ export default function TrainingGame({
     loop.toggle();
   };
 
-  // Footer session panel: show effective BPM
   const showFooterSessionPanel = !!phrase && !pretestActive;
   const completedTakes = loop.takeCount ?? 0;
   const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
@@ -441,7 +555,6 @@ export default function TrainingGame({
     ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES }
     : undefined;
 
-  // 🔁 Which pretest mode are we on?
   const currentPretestKind =
     (callResponseSequence?.[pretest.modeIndex]?.kind as
       | "single_tonic"
@@ -450,7 +563,6 @@ export default function TrainingGame({
       | "internal_arpeggio"
       | undefined) ?? undefined;
 
-  // Side panel props (report effective BPM)
   const sidePanel = {
     pretest: {
       active: pretestActive,
@@ -506,7 +618,7 @@ export default function TrainingGame({
       loopPhase={pretestActive ? "call" : loop.loopPhase}
       rhythm={(rhythmEffective ?? undefined) as any}
       melodyRhythm={fabric.melodyRhythm ?? undefined}
-      bpm={bpm}                 // ← effective BPM piped to layout
+      bpm={bpm}
       den={ts.den}
       tsNum={ts.num}
       keySig={fabric.keySig}
