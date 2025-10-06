@@ -192,7 +192,7 @@ export default function TrainingGame({
     onRestComplete: () => {
       // Generate the next phrase during rest (not at play press)
       if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
-      setReviewVisible(true);
+      if (!loopingMode) setReviewVisible(true); // ← only show review in non-looping mode
     },
   });
 
@@ -355,10 +355,6 @@ export default function TrainingGame({
           },
         ]);
       }
-
-      if (!loopingMode) {
-        setReviewVisible(true);
-      }
     }
   }, [
     loop.loopPhase,
@@ -395,10 +391,14 @@ export default function TrainingGame({
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
-  const onToggleExercise = () => { if (exerciseUnlocked) loop.toggle(); };
+  const onToggleExercise = () => {
+  if (!exerciseUnlocked) return;
+  setReviewVisible(false);     // ← ensure footer/meta shows even if review was open
+  loop.toggle();
+};
 
   // Footer session panel (same as before)
-  const showFooterSessionPanel = !!phrase && !pretestActive && !reviewVisible;
+  const showFooterSessionPanel = !!phrase && !pretestActive; 
   const completedTakes = loop.takeCount ?? 0;        // from usePracticeLoop
   const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
   const footerSessionPanel = showFooterSessionPanel
