@@ -1,6 +1,6 @@
 // components/vision/stage/hooks/useMetronome.ts
 "use client";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 
 /**
  * WebAudio metronome (robust):
@@ -8,6 +8,7 @@ import { useCallback, useRef } from "react";
  * - Await resume() inside the user gesture so Safari actually plays.
  * - Stable perf.now() <-> audioTime mapping.
  * - Sample-accurate scheduling (accent every 4th).
+ * - ✅ Reads & reacts to configured Metronome volume (localStorage + bus).
  */
 export default function useMetronome() {
   const ctxRef = useRef<AudioContext | null>(null);
@@ -17,12 +18,40 @@ export default function useMetronome() {
   const perfAtCtxStartRef = useRef<number | null>(null);
   const ctxAtPerfStartRef = useRef<number | null>(null);
 
+  // ---- Settings wiring (keys + helpers) ----
+  const AUDIO_EVENT = "audio:gain-changed";
+  const MET_KEY = "audio:metGain:v1";
+
+  // Same curve as settings: 0% ≈ -40 dB, easeInSine to 0 dB at 100%
+  const MIN_DB = -40;
+  const MIN_GAIN = Math.pow(10, MIN_DB / 20); // ≈ 0.01
+  const easeInSine = (u01: number) => 1 - Math.cos((Math.max(0, Math.min(1, u01)) * Math.PI) / 2);
+  const sliderToGain = (u01: number) => MIN_GAIN + (1 - MIN_GAIN) * easeInSine(u01);
+  const DEFAULT_GAIN = sliderToGain(0.75);
+
+  const readMetGain = () => {
+    try {
+      const raw = localStorage.getItem(MET_KEY);
+      const n = raw == null ? NaN : Number(raw);
+      return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : DEFAULT_GAIN;
+    } catch {
+      return DEFAULT_GAIN;
+    }
+  };
+
+  const applyMetGain = (g: number) => {
+    const ctx = ctxRef.current;
+    const bus = gainRef.current;
+    if (!ctx || !bus) return;
+    bus.gain.setTargetAtTime(Math.max(0, Math.min(1, g)), ctx.currentTime, 0.01);
+  };
+
   const makeCtx = useCallback(() => {
     const AC: typeof AudioContext =
       (window as any).AudioContext || (window as any).webkitAudioContext;
     const ctx = new AC();
     const g = ctx.createGain();
-    g.gain.value = 0.95;
+    g.gain.value = 0.95; // temporary until we apply configured value below
     g.connect(ctx.destination);
 
     ctxRef.current = ctx;
@@ -31,6 +60,9 @@ export default function useMetronome() {
     // set mapping anchors
     perfAtCtxStartRef.current = performance.now();
     ctxAtPerfStartRef.current = ctx.currentTime;
+
+    // init from settings
+    applyMetGain(readMetGain());
 
     return ctx;
   }, []);
@@ -51,6 +83,10 @@ export default function useMetronome() {
     // refresh mapping anchors after resume to be safe
     perfAtCtxStartRef.current = performance.now();
     ctxAtPerfStartRef.current = ctx.currentTime;
+
+    // ensure bus reflects current setting
+    applyMetGain(readMetGain());
+
     return ctx;
   }, [makeCtx]);
 
@@ -61,6 +97,8 @@ export default function useMetronome() {
     if (ctx.state !== "running") {
       try { await ctx.resume(); } catch {}
     }
+    // keep in sync
+    applyMetGain(readMetGain());
     return ctx;
   }, [makeCtx]);
 
@@ -181,6 +219,24 @@ export default function useMetronome() {
     ctxRef.current = null;
     perfAtCtxStartRef.current = null;
     ctxAtPerfStartRef.current = null;
+  }, []);
+
+  // Listen for settings changes (both our custom bus and cross-tab storage)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === MET_KEY) applyMetGain(readMetGain());
+    };
+    const onBus = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.which === "metronome") applyMetGain(readMetGain());
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(AUDIO_EVENT, onBus as any);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(AUDIO_EVENT, onBus as any);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return {

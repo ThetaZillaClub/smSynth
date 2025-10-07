@@ -24,6 +24,44 @@ export default function usePhrasePlayer() {
 
   const scheduledStopFns = useRef<Array<() => void>>([]);
 
+  // ---- Settings wiring (keys + helpers) ----
+  const AUDIO_EVENT = "audio:gain-changed";
+  const MET_KEY = "audio:metGain:v1";
+  const PHR_KEY = "audio:phraseGain:v1";
+
+  // Same curve as settings: 0% ≈ -40 dB, easeInSine to 0 dB at 100%
+  const MIN_DB = -40;
+  const MIN_GAIN = Math.pow(10, MIN_DB / 20); // ≈ 0.01
+  const easeInSine = (u01: number) => 1 - Math.cos((Math.max(0, Math.min(1, u01)) * Math.PI) / 2);
+  const sliderToGain = (u01: number) => MIN_GAIN + (1 - MIN_GAIN) * easeInSine(u01);
+  const DEFAULT_GAIN = sliderToGain(0.75);
+
+  const readGain = (key: string) => {
+    try {
+      const raw = localStorage.getItem(key);
+      const n = raw == null ? NaN : Number(raw);
+      return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : DEFAULT_GAIN;
+    } catch {
+      return DEFAULT_GAIN;
+    }
+  };
+
+  const applyMetGain = (g?: number) => {
+    const ctx = ctxRef.current;
+    const bus = metronomeGainRef.current;
+    if (!ctx || !bus) return;
+    const val = g ?? readGain(MET_KEY);
+    bus.gain.setTargetAtTime(Math.max(0, Math.min(1, val)), ctx.currentTime, 0.01);
+  };
+
+  const applyPhraseGain = (g?: number) => {
+    const ctx = ctxRef.current;
+    const bus = noteMasterGainRef.current;
+    if (!ctx || !bus) return;
+    const val = g ?? readGain(PHR_KEY);
+    bus.gain.setTargetAtTime(Math.max(0, Math.min(1, val)), ctx.currentTime, 0.01);
+  };
+
   // Cached gentle harmonic spectrum for musical tone
   const waveRef = useRef<PeriodicWave | null>(null);
   const getPeriodicWave = (ctx: AudioContext) => {
@@ -43,13 +81,15 @@ export default function usePhrasePlayer() {
 
       if (!metronomeGainRef.current) {
         metronomeGainRef.current = ctx.createGain();
-        metronomeGainRef.current.gain.value = 0.5;
+        metronomeGainRef.current.gain.value = 0.5; // temp until settings applied
         metronomeGainRef.current.connect(ctx.destination);
+        applyMetGain(); // ⬅️ set from settings
       }
       if (!noteMasterGainRef.current) {
         noteMasterGainRef.current = ctx.createGain();
-        noteMasterGainRef.current.gain.value = 0.35;
+        noteMasterGainRef.current.gain.value = 0.35; // temp until settings applied
         noteMasterGainRef.current.connect(ctx.destination);
+        applyPhraseGain(); // ⬅️ set from settings
       }
     }
   }, []);
@@ -58,6 +98,9 @@ export default function usePhrasePlayer() {
   const warm = useCallback(async () => {
     await initCtx();
     if (ctxRef.current?.state !== "running") await resumeAudio();
+    // ensure current settings are reflected whenever we warm
+    applyMetGain();
+    applyPhraseGain();
   }, [initCtx]);
 
   const stopAllScheduled = useCallback(() => {
@@ -443,6 +486,26 @@ export default function usePhrasePlayer() {
     },
     [warm, playTick, scheduleNote, stopAllScheduled]
   );
+
+  // Live updates: react to Audio settings changes and cross-tab updates
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === MET_KEY) applyMetGain();
+      if (e.key === PHR_KEY) applyPhraseGain();
+    };
+    const onBus = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.which === "metronome") applyMetGain();
+      if (d?.which === "phrase") applyPhraseGain();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(AUDIO_EVENT, onBus as any);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(AUDIO_EVENT, onBus as any);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return {
     warm,

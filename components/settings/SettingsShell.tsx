@@ -5,6 +5,7 @@ import * as React from "react";
 import ProfileLayout from "./profile/profile-layout";
 import GameplayLayout from "./gameplay/gameplay-layout";
 import VisionLayout from "./vision/vision-layout";
+import AudioLayout from "./audio/audio-layout";
 
 type Bootstrap = {
   uid: string;
@@ -122,14 +123,17 @@ export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
         </aside>
 
         {/* Tab content (same baseline as sidebar) */}
+
         <section className="bg-[#f2f2f2] p-6 min-h-[420px]">
           <div className="max-w-2xl">
             {active === "profile" ? (
               <ProfileLayout bootstrap={bootstrap} />
             ) : active === "gameplay" ? (
-              <GameplayLayout /* baselineBpm={80} */ />
+              <GameplayLayout />
             ) : active === "vision" ? (
               <VisionLayout />
+            ) : active === "audio" ? (
+              <AudioLayout />
             ) : (
               <>
                 <h2 className="text-2xl font-semibold text-[#0f0f0f]">
