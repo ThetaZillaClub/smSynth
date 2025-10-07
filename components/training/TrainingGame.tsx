@@ -28,8 +28,9 @@ import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 import { useGameplaySession } from "@/hooks/gameplay/useGameplaySession";
 import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 
-// NEW: global vision enable/disable
+// Vision settings + calibrated latency
 import { useVisionEnabled } from "@/components/settings/vision/vision-layout";
+import useVisionLatency from "@/hooks/vision/useVisionLatency";
 
 type Props = {
   title?: string;
@@ -150,7 +151,7 @@ export default function TrainingGame({
   const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
 
-  // NEW: global Vision toggle (settings)
+  // Global Vision toggle (settings)
   const { enabled: visionEnabled } = useVisionEnabled();
 
   // Only run vision when required by the exercise AND globally enabled
@@ -193,24 +194,18 @@ export default function TrainingGame({
     playLeadInTicks, secPerBeat,
   });
 
-  const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("vision:latency-ms");
-      const n = raw == null ? NaN : Number(raw);
-      setGestureLatencyMsEff(Number.isFinite(n) && n >= 0 ? Math.round(n) : gestureLatencyMs);
-    } catch { setGestureLatencyMsEff(gestureLatencyMs); }
-  }, [gestureLatencyMs]);
+const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
 
-  const hand = useHandBeat({
-    latencyMs: gestureLatencyMsEff,
-    fireUpEps: 0.004,
-    confirmUpEps: 0.012,
-    downRearmEps: 0.006,
-    refractoryMs: 90,
-    noiseEps: 0.0015,
-    minUpVel: 0.35,
-  });
+// ✅ match setup thresholds
+const hand = useHandBeat({
+  latencyMs: calibratedLatencyMs ?? gestureLatencyMs,
+  fireUpEps: 0.004,
+  confirmUpEps: 0.012,
+  downRearmEps: 0.006,
+  refractoryMs: 90,
+  noiseEps: 0.0015,
+  minUpVel: 0.25,
+});
 
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
   const samplerAnchor: number | null = !pretestActive ? (loop.anchorMs ?? null) : null;
@@ -274,7 +269,10 @@ export default function TrainingGame({
       const usedRhythm = rhythmForTakeRef.current ?? rhythmEffective;
       if (usedPhrase) {
         const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
+        // ⚠️ Gesture latency is already compensated inside useHandBeat via `latencyMs`,
+        // so keep this scoring offset at 0 to avoid double compensation.
         const gestureLagSec = 0;
+
         void scoreTake({
           phrase: usedPhrase,
           bpm, den: ts.den, leadInSec,

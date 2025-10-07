@@ -1,6 +1,18 @@
+// components/vision/stage/hooks/useHandLandmarker.ts
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+import { HandLandmarker } from "@mediapipe/tasks-vision";
+
+/**
+ * Local MediaPipe runtime + model (served from /public), matching useHandBeat.
+ * Ensure these exist:
+ *  - /public/models/mediapie/wasm/vision_wasm_internal.{js,wasm}
+ *  - /public/models/mediapie/models/hand_landmarker_v0.4.0.task
+ */
+const WASM_BASE = "/models/mediapie/wasm";
+const WASM_LOADER = `${WASM_BASE}/vision_wasm_internal.js`;
+const WASM_BINARY = `${WASM_BASE}/vision_wasm_internal.wasm`;
+const HAND_MODEL = "/models/mediapie/models/hand_landmarker_v0.4.0.task";
 
 /**
  * MediaPipe HandLandmarker (VIDEO), forgiving to avoid dropouts.
@@ -25,20 +37,17 @@ export default function useHandLandmarker(onError?: (msg: string) => void) {
 
     (async () => {
       try {
-        const fileset = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        // Create from local files (no CDN)
+        const lm = await HandLandmarker.createFromOptions(
+          { wasmLoaderPath: WASM_LOADER, wasmBinaryPath: WASM_BINARY },
+          {
+            baseOptions: { modelAssetPath: HAND_MODEL, delegate: "GPU" },
+            runningMode: "VIDEO",
+            numHands: 1,
+            minTrackingConfidence: 0.25,
+            minHandPresenceConfidence: 0.25,
+          }
         );
-        if (closed) return;
-        const lm = await HandLandmarker.createFromOptions(fileset, {
-          baseOptions: {
-            modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
-          },
-          runningMode: "VIDEO",
-          numHands: 1,
-          minTrackingConfidence: 0.25,
-          minHandPresenceConfidence: 0.25,
-        });
         if (closed) {
           try { lm.close(); } catch {}
           return;

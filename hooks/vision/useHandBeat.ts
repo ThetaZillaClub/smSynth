@@ -1,13 +1,12 @@
 // hooks/vision/useHandBeat.ts
+"use client";
+
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  HandLandmarker,
-  HandLandmarkerResult,
-} from "@mediapipe/tasks-vision";
+import { HandLandmarker } from "@mediapipe/tasks-vision";
 
 /**
- * Runtime paths (served from /public).
- * Make sure these files exist in your app:
+ * Runtime paths (served from /public) — match VisionStage/useHandLandmarker.
+ * Ensure these exist:
  *  - /public/models/mediapie/wasm/vision_wasm_internal.{js,wasm}
  *  - /public/models/mediapie/models/hand_landmarker_v0.4.0.task
  */
@@ -19,32 +18,32 @@ const HAND_MODEL = "/models/mediapie/models/hand_landmarker_v0.4.0.task";
 export type UseHandBeatOptions = {
   /** Compensate end-to-end gesture latency (ms). Subtracted from event timestamps. */
   latencyMs?: number;
-  /** Ignore per-frame jitter smaller than this |dy| (normalized units). */
+  /** Per-frame |dy| below this is ignored (normalized units). */
   noiseEps?: number;
-  /** Minimum upward speed (normalized units/sec). */
+  /** Minimal instantaneous upward velocity (norm units/sec) to allow EARLY capture. */
   minUpVel?: number;
-  /** Upward travel needed to arm a strike. */
+  /** Upward travel to arm early detection. */
   fireUpEps?: number;
-  /** Extra upward travel needed (>= fireUpEps) before we confirm at reversal. */
+  /** Extra upward travel (>= fireUpEps) to confirm; event uses EARLY time. */
   confirmUpEps?: number;
-  /** Downward travel required after a strike to re-arm. */
+  /** Downward travel to re-arm after a strike. */
   downRearmEps?: number;
-  /** Ignore extra strikes for this long after one fires. */
+  /** Cooldown after a strike (ms). */
   refractoryMs?: number;
-  /** How many hands to track (1 for perf). */
+  /** How many hands to ask the model for (1 for perf). */
   numHands?: number;
   /** Optional callback on each detected beat (ms, perf.now clock, latency-compensated). */
   onBeat?: (tMs: number) => void;
 };
 
 type UseHandBeatReturn = {
-  /** Load the model (idempotent). */
+  /** Preload the hand model (idempotent). */
   preload: () => Promise<void>;
-  /** Start camera + loop; optional anchor (ms) for time zero. */
+  /** Start camera + detection loop; optional anchor (ms) for time zero. */
   start: (anchorMs?: number) => Promise<void>;
-  /** Stop camera + loop. */
+  /** Stop camera + loop, release resources. */
   stop: () => void;
-  /** Clear state and set new anchor (defaults to now). */
+  /** Clear state and set a new anchor (defaults to now). */
   reset: (anchorMs?: number) => void;
   /** Return gesture onsets (seconds) relative to last anchor. */
   snapshotEvents: () => number[];
@@ -53,10 +52,17 @@ type UseHandBeatReturn = {
   error: string | null;
 };
 
+/**
+ * Finger-tap beat detector (index fingertip only) — parity with VisionStage:
+ * - EARLY: cumulative upward delta >= fireUpEps AND upVel >= minUpVel → capture tFirst
+ * - CONFIRM: cumUp >= confirmUpEps → commit event using tFirst (we subtract latencyMs here)
+ * - Re-arm: downward cum >= downRearmEps after refractoryMs
+ * - Every frame; tiny deadband; requestVideoFrameCallback when available
+ */
 export default function useHandBeat({
-  latencyMs = 90,
+  latencyMs = 50,
   noiseEps = 0.0015,
-  minUpVel = 0.35,
+  minUpVel = 0.25,
   fireUpEps = 0.004,
   confirmUpEps = 0.012,
   downRearmEps = 0.006,
@@ -68,16 +74,18 @@ export default function useHandBeat({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
+  const vfcIdRef = useRef<number | null>(null);
 
-  // Motion state
+  // Fingertip state (index tip = 8)
   const lastYRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
-  const lastVyRef = useRef<number>(0); // units/sec
-  const upAccumRef = useRef<number>(0);
-  const downAccumRef = useRef<number>(0);
-  const armedRef = useRef<boolean>(true);
-  const primedRef = useRef<boolean>(false);
-  const lastBeatAtRef = useRef<number>(-1e9);
+  const cumUpRef = useRef(0);
+  const cumDownRef = useRef(0);
+  const armedRef = useRef(true);
+  const lastFireMsRef = useRef<number | null>(null);
+
+  // Two-stage timing (we commit with tFirst)
+  const pendingFirstMsRef = useRef<number | null>(null);
 
   // Timing & events
   const anchorMsRef = useRef<number>(performance.now());
@@ -101,15 +109,16 @@ export default function useHandBeat({
 
   const preload = useCallback(async () => {
     if (landmarkerRef.current) return;
-
     try {
-      // Use the new WasmFileset signature (matches the types you’re seeing).
       const lm = await HandLandmarker.createFromOptions(
         { wasmLoaderPath: WASM_LOADER, wasmBinaryPath: WASM_BINARY },
         {
           baseOptions: { modelAssetPath: HAND_MODEL, delegate: "GPU" },
           runningMode: "VIDEO",
           numHands,
+          // Parity with VisionStage
+          minTrackingConfidence: 0.25,
+          minHandPresenceConfidence: 0.25,
         }
       );
       landmarkerRef.current = lm;
@@ -124,11 +133,11 @@ export default function useHandBeat({
     anchorMsRef.current = anchorMs ?? performance.now();
     lastYRef.current = null;
     lastTsRef.current = null;
-    lastVyRef.current = 0;
-    upAccumRef.current = 0;
-    downAccumRef.current = 0;
+    cumUpRef.current = 0;
+    cumDownRef.current = 0;
     armedRef.current = true;
-    primedRef.current = false;
+    lastFireMsRef.current = null;
+    pendingFirstMsRef.current = null;
     eventsMsRef.current = [];
   }, []);
 
@@ -138,87 +147,117 @@ export default function useHandBeat({
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    if (vfcIdRef.current != null) {
+      try {
+        const v: any = videoRef.current;
+        if (v && typeof v.cancelVideoFrameCallback === "function") {
+          v.cancelVideoFrameCallback(vfcIdRef.current);
+        }
+      } catch {}
+      vfcIdRef.current = null;
+    }
+    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
     streamRef.current = null;
   }, []);
 
-  const loop = useCallback(() => {
-    rafRef.current = requestAnimationFrame(loop);
+  const processFrame = useCallback(() => {
     const landmarker = landmarkerRef.current;
     const video = videoRef.current;
     if (!landmarker || !video || !video.videoWidth || !video.videoHeight) return;
 
     try {
-      const tsNow = performance.now();
-      const res = landmarker.detectForVideo(video, tsNow) as HandLandmarkerResult;
-      const first = res?.landmarks?.[0];
-      if (!first?.length) return;
+      const ts = performance.now();
+      const res = landmarker.detectForVideo(video, ts);
+      const lms = (res as any)?.landmarks?.[0] as Array<{ x: number; y: number }> | undefined;
+      if (!lms || lms.length < 9) return;
 
-      const y = first[0].y; // wrist landmark (index 0)
-      const lastY = lastYRef.current;
-      const lastTs = lastTsRef.current;
+      // Index fingertip (8) — upward is decreasing y, so dyUp = prevY - y
+      const y = lms[8]!.y;
 
-      if (lastY == null || lastTs == null) {
+      const prevY = lastYRef.current;
+      const prevTs = lastTsRef.current;
+
+      if (prevY == null || prevTs == null) {
         lastYRef.current = y;
-        lastTsRef.current = tsNow;
-        lastVyRef.current = 0;
+        lastTsRef.current = ts;
         return;
       }
 
-      const dt = Math.max(1e-6, Math.min(0.2, (tsNow - lastTs) / 1000)); // clamp [~120fps..5fps]
-      let dy = y - lastY;                   // +down, -up
-      let vy = dy / dt;                     // units/sec
+      let dyUp = prevY - y; // >0 going up, <0 going down
+      if (Math.abs(dyUp) < noiseEps) dyUp = 0;
 
-      // noise gate
-      if (Math.abs(dy) < noiseEps) dy = 0;
+      // dt in seconds; guard extremes (parity with VisionStage)
+      const dtSec = Math.min(0.1, Math.max(1 / 240, (ts - prevTs) / 1000));
+      const upVel = dyUp > 0 ? dyUp / dtSec : 0;
 
-      // accumulators
-      if (dy < 0) {                         // moving up
-        upAccumRef.current += -dy;
-        downAccumRef.current = 0;
-      } else if (dy > 0) {                  // moving down
-        downAccumRef.current += dy;
-      }
+      const lastFire = lastFireMsRef.current;
+      const cooling = lastFire != null && ts - lastFire < refractoryMs;
 
-      // detect reversal
-      const prevVy = lastVyRef.current;
-      const reversed = prevVy < 0 && vy >= 0;   // up -> non-up
-      const gated = tsNow - lastBeatAtRef.current >= refractoryMs;
+      if (dyUp > 0) {
+        // Moving UP
+        cumUpRef.current += dyUp;
+        cumDownRef.current = 0;
 
-      if (armedRef.current) {
-        const fastEnough = -vy >= minUpVel;
-        if (!primedRef.current && upAccumRef.current >= fireUpEps && fastEnough) {
-          primedRef.current = true;
+        if (armedRef.current && !cooling) {
+          // EARLY: need distance AND minimal instantaneous upward velocity
+          if (
+            pendingFirstMsRef.current == null &&
+            cumUpRef.current >= fireUpEps &&
+            upVel >= minUpVel
+          ) {
+            pendingFirstMsRef.current = ts; // capture early time
+          }
+
+          // CONFIRM: more distance; commit using EARLY time
+          if (
+            pendingFirstMsRef.current != null &&
+            cumUpRef.current >= confirmUpEps
+          ) {
+            const tFirstMs = pendingFirstMsRef.current!;
+            pendingFirstMsRef.current = null;
+            lastFireMsRef.current = ts;
+            armedRef.current = false;
+
+            // Latency compensation only here (diff vs VisionStage)
+            const tMs = tFirstMs - (latencyMs ?? 0);
+            eventsMsRef.current.push(tMs);
+            try { onBeat?.(tMs); } catch {}
+
+            // Reset accumulators after a strike
+            cumUpRef.current = 0;
+            cumDownRef.current = 0;
+          }
         }
-        const confirmOK = upAccumRef.current >= confirmUpEps;
+      } else if (dyUp < 0) {
+        // Moving DOWN
+        cumDownRef.current += -dyUp;
+        cumUpRef.current = 0;
+        // Cancel EARLY if user bailed
+        pendingFirstMsRef.current = null;
 
-        if (primedRef.current && confirmOK && reversed && gated) {
-          const tMs = tsNow - latencyMs;
-          lastBeatAtRef.current = tMs;
-          eventsMsRef.current.push(tMs);
-          onBeat?.(tMs);
-
-          armedRef.current = false;
-          primedRef.current = false;
-          upAccumRef.current = 0;
-          downAccumRef.current = 0;
+        if (!armedRef.current && !cooling && cumDownRef.current >= downRearmEps) {
+          armedRef.current = true;
+          cumDownRef.current = 0;
         }
       } else {
-        if (downAccumRef.current >= downRearmEps) {
-          armedRef.current = true;
-          primedRef.current = false;
-          upAccumRef.current = 0;
-          downAccumRef.current = 0;
-        }
+        // No significant motion
       }
 
       lastYRef.current = y;
-      lastTsRef.current = tsNow;
-      lastVyRef.current = vy;
+      lastTsRef.current = ts;
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
-  }, [latencyMs, noiseEps, minUpVel, fireUpEps, confirmUpEps, downRearmEps, refractoryMs, onBeat]);
+  }, [
+    latencyMs,
+    noiseEps,
+    minUpVel,
+    fireUpEps,
+    confirmUpEps,
+    downRearmEps,
+    refractoryMs,
+    onBeat,
+  ]);
 
   const start = useCallback(async (anchorMs?: number) => {
     await preload();
@@ -226,8 +265,14 @@ export default function useHandBeat({
 
     const video = ensureVideo();
     try {
+      // Match VisionStage constraints
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 30 },
+        },
         audio: false,
       });
       streamRef.current = stream;
@@ -239,8 +284,24 @@ export default function useHandBeat({
     }
 
     setIsRunning(true);
-    rafRef.current = requestAnimationFrame(loop);
-  }, [preload, loop]);
+
+    const v: any = video;
+    const hasVFC = typeof v.requestVideoFrameCallback === "function";
+
+    if (hasVFC) {
+      const tickVFC = () => {
+        processFrame();
+        vfcIdRef.current = v.requestVideoFrameCallback(tickVFC);
+      };
+      vfcIdRef.current = v.requestVideoFrameCallback(tickVFC);
+    } else {
+      const runLoop = () => {
+        processFrame();
+        rafRef.current = requestAnimationFrame(runLoop);
+      };
+      rafRef.current = requestAnimationFrame(runLoop);
+    }
+  }, [preload, processFrame]);
 
   const snapshotEvents = useCallback((): number[] => {
     const anchor = anchorMsRef.current;
@@ -251,10 +312,8 @@ export default function useHandBeat({
 
   useEffect(() => {
     return () => {
-      try {
-        stop();
-      } finally {
-        landmarkerRef.current?.close();
+      try { stop(); } finally {
+        try { landmarkerRef.current?.close(); } catch {}
         landmarkerRef.current = null;
       }
     };

@@ -25,8 +25,15 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
   [0, 5], [0, 9], [0, 13], [0, 17],
 ];
 
+// 👇 top gap above the video/canvas (safe-area aware)
+// tweak the 40px to taste
+const TOP_GAP_CSS = "calc(env(safe-area-inset-top, 0px) + 40px)";
+
 export default function VisionStage() {
   const stageAreaRef = useRef<HTMLDivElement | null>(null);
+  // NEW: inner viewport that actually hosts video+canvas
+  const stageViewportRef = useRef<HTMLDivElement | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -72,7 +79,8 @@ export default function VisionStage() {
     ready: boolean;
   };
 
-  useCanvasSizer(stageAreaRef, canvasRef, { maxDpr: 2 });
+  // IMPORTANT: size the canvas to the *viewport* (below the top gap), not the whole stage
+  useCanvasSizer(stageViewportRef, canvasRef, { maxDpr: 2 });
 
   const { draw: drawSkeleton, clear: clearSkeleton, pulse } = useSkeletonDrawer(canvasRef, videoRef, {
     connections: HAND_CONNECTIONS,
@@ -89,7 +97,7 @@ export default function VisionStage() {
       downRearmEps: 0.006,
       refractoryMs: 90,
       noiseEps: 0.0015,
-      minUpVel: 0.35,
+      minUpVel: 0.25,
     }),
     []
   );
@@ -180,14 +188,19 @@ export default function VisionStage() {
         const filtered = iqrFilter(deltasMs.filter((d) => Number.isFinite(d)));
         const medAbs = median(filtered.map((d) => Math.abs(d)));
 
-        // 🔧 No fallback — if not finite, we report null (UI already shows "No reliable matches").
         const latency: number | null = Number.isFinite(medAbs) ? Math.round(medAbs) : null;
 
         setMatched(deltasMs.length);
         setResultMs(latency);
+        /* PATCH: persist & broadcast the calibration result */
         try {
           if (latency != null) localStorage.setItem(KEY, String(latency));
           else localStorage.removeItem(KEY);
+
+          // Tell listeners (e.g., TrainingGame) that latency changed
+          window.dispatchEvent(
+            new CustomEvent("vision:latency-changed", { detail: { latencyMs: latency ?? null } })
+          );
         } catch {}
       }, Math.ceil(leadMs + runMs) + 30);
     } catch (e) {
@@ -199,19 +212,27 @@ export default function VisionStage() {
     <div className="w-full h-full flex flex-col bg-transparent" style={{ cursor: "default" }}>
       {/* STAGE AREA (constrained by footer) */}
       <div ref={stageAreaRef} className="relative flex-1 min-h-0 bg-transparent">
-        <StageCamera
-          ref={videoRef}
-          aria-label="Camera preview"
-          className="absolute inset-0 w-full h-full object-contain bg-transparent"
-        />
-        <StageCanvas
-          ref={canvasRef}
-          aria-hidden
-          className={[
-            "absolute inset-0 w-full h-full pointer-events-none transition-opacity",
-            detEnabled && phase === "idle" ? "opacity-100" : "opacity-0",
-          ].join(" ")}
-        />
+        {/* viewport creates blank space above video/canvas */}
+        <div
+          ref={stageViewportRef}
+          className="absolute left-0 right-0 bottom-0"
+          style={{ top: TOP_GAP_CSS }}
+          aria-label="Vision viewport"
+        >
+          <StageCamera
+            ref={videoRef}
+            aria-label="Camera preview"
+            className="absolute inset-0 w-full h-full object-contain bg-transparent"
+          />
+          <StageCanvas
+            ref={canvasRef}
+            aria-hidden
+            className={[
+              "absolute inset-0 w-full h-full pointer-events-none transition-opacity",
+              detEnabled && phase === "idle" ? "opacity-100" : "opacity-0",
+            ].join(" ")}
+          />
+        </div>
       </div>
 
       {/* FOOTER (normal flow, white card) */}
