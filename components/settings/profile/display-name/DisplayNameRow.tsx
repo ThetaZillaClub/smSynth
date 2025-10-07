@@ -74,7 +74,7 @@ export default function DisplayNameRow({ initialName, onChanged }: Props) {
             id="settings-display-name"
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className="h-10 rounded-md bg-[#ebebeb] text-[#0f0f0f] border border-[#d2d2d2] focus:border-[#0f0f0f] focus:ring-0 grow"
+            className="h-10 rounded-md bg-[#f8f8f8] text-[#0f0f0f] border border-[#d2d2d2] focus:border-[#0f0f0f] focus:ring-0 grow"
             readOnly={!editing}
           />
 

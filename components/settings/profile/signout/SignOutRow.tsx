@@ -39,8 +39,8 @@ export default function SignOutRow() {
             className={[
               // match ViewSelect inactive style with same hover to white
               'px-3 py-1.5 rounded-md text-sm',
-              'bg-[#ebebeb] text-[#0f0f0f] border border-[#d2d2d2]',
-              'hover:bg-white',
+              'bg-[#f6f6f6] text-[#0f0f0f] border border-[#d2d2d2]',
+              'hover:bg-[#f9f9f9]',
               // small QoL
               'disabled:opacity-60 disabled:cursor-not-allowed',
             ].join(' ')}
