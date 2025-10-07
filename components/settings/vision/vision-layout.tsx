@@ -11,16 +11,16 @@ export type DetectionResolution = "medium" | "high";
 
 export type VisionSettings = {
   enabled: boolean;
-  fps: number;              // 5..60
-  frames: number;           // keep for now so ApplyRow stays unchanged
-  resolution: DetectionResolution; // NEW
+  fps: number;                 // 5..60
+  frames: number;              // always 1 (kept for ApplyRow display)
+  resolution: DetectionResolution;
 };
 
 const STORAGE_KEY = "vision:settings:v1";
 export const DEFAULT_VISION: VisionSettings = {
   enabled: true,
   fps: 30,
-  frames: 3,
+  frames: 1,                   // ← force parse-every-frame
   resolution: "medium",
 };
 
@@ -34,7 +34,8 @@ function readSettings(): VisionSettings {
     const fps = Number.isFinite(parsed?.fps)
       ? Math.max(5, Math.min(60, Math.round(parsed.fps)))
       : DEFAULT_VISION.fps;
-    const frames = [1, 3, 5].includes(parsed?.frames) ? parsed.frames : DEFAULT_VISION.frames;
+    // frames are always 1 now, regardless of stored value
+    const frames = 1;
     const resolution: DetectionResolution =
       parsed?.resolution === "high" || parsed?.resolution === "medium"
         ? parsed.resolution
@@ -48,7 +49,9 @@ function readSettings(): VisionSettings {
 
 function saveSettings(s: VisionSettings) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    // ensure frames stays 1 on save as well
+    const payload = { ...s, frames: 1 };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {}
 }
 
@@ -74,20 +77,22 @@ export default function VisionLayout() {
   const [draft, setDraftState] = React.useState<VisionSettings>(saved);
 
   const setDraft = (u: Partial<VisionSettings>) =>
-    setDraftState((d) => ({ ...d, ...u }));
+    setDraftState((d) => ({ ...d, ...u, frames: 1 })); // keep frames locked to 1
 
   const isDirty =
     saved.enabled !== draft.enabled ||
     saved.fps !== draft.fps ||
-    saved.frames !== draft.frames ||            // keep existing behavior
-    saved.resolution !== draft.resolution;      // NEW
+    saved.frames !== draft.frames ||            // remains stable (1 === 1) unless older saved state differs
+    saved.resolution !== draft.resolution;
 
   const apply = () => {
-    saveSettings(draft);
-    setSaved(draft);
+    const next = { ...draft, frames: 1 };
+    saveSettings(next);
+    setSaved(next);
+    setDraftState(next);
   };
 
-  const resetToSaved = () => setDraftState(saved);
+  const resetToSaved = () => setDraftState({ ...saved, frames: 1 });
 
   const value: Ctx = { saved, draft, setDraft, isDirty, apply, resetToSaved };
 

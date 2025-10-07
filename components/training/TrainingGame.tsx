@@ -36,12 +36,12 @@ type DetectionResolution = "medium" | "high";
 type VisionSettingsLS = {
   enabled: boolean;
   fps: number; // 5..60 for vision inference
-  // `frames` is still present in storage for ApplyRow compatibility (ignored here)
+  // `frames` is retained for backward compat but is always 1 now.
   frames?: number | null | undefined;
   resolution: DetectionResolution;
 };
 const VISION_KEY = "vision:settings:v1";
-const VISION_DEFAULT: VisionSettingsLS = { enabled: true, fps: 30, frames: 3, resolution: "medium" };
+const VISION_DEFAULT: VisionSettingsLS = { enabled: true, fps: 30, frames: 1, resolution: "medium" };
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
@@ -61,7 +61,8 @@ function readVisionSettings(): VisionSettingsLS {
       parsed?.resolution === "high" || parsed?.resolution === "medium"
         ? parsed.resolution
         : VISION_DEFAULT.resolution;
-    return { enabled, fps, frames: parsed?.frames ?? 3, resolution };
+    // Force frames to 1 regardless of what might be in storage
+    return { enabled, fps, frames: 1, resolution };
   } catch {
     return VISION_DEFAULT;
   }
@@ -111,11 +112,11 @@ export default function TrainingGame({
   });
 
   // ⬇️ Hydrate & live-sync Vision settings from localStorage (single atomic key)
-  const [vision, setVision] = useState<VisionSettingsLS>(VISSION_INIT_READ());
-  function VISSION_INIT_READ() {
+  function VISION_INIT_READ() {
     // helper so initial state reads localStorage synchronously
     return readVisionSettings();
   }
+  const [vision, setVision] = useState<VisionSettingsLS>(VISION_INIT_READ());
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === VISION_KEY) setVision(readVisionSettings());
