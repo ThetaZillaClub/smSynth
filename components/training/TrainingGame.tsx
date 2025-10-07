@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useRef, useState, useEffect, useMemo } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
@@ -13,7 +13,6 @@ import {
   beatsToSeconds,
   barsToBeats,
   noteValueToBeats,
-  noteValueToSeconds,
 } from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/stage";
 import { type SessionConfig, DEFAULT_SESSION_CONFIG } from "./session";
@@ -26,48 +25,11 @@ import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import useScoringAlignment from "@/hooks/gameplay/useScoringAlignment";
 import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
-
-// ⬇️ NEW:
 import { useGameplaySession } from "@/hooks/gameplay/useGameplaySession";
 import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 
-/* ----------------- Vision settings (from Settings tab) ----------------- */
-type DetectionResolution = "medium" | "high";
-type VisionSettingsLS = {
-  enabled: boolean;
-  fps: number; // 5..60 for vision inference
-  // `frames` is retained for backward compat but is always 1 now.
-  frames?: number | null | undefined;
-  resolution: DetectionResolution;
-};
-const VISION_KEY = "vision:settings:v1";
-const VISION_DEFAULT: VisionSettingsLS = { enabled: true, fps: 30, frames: 1, resolution: "medium" };
-
-function clamp(n: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, n));
-}
-function readVisionSettings(): VisionSettingsLS {
-  try {
-    const raw = localStorage.getItem(VISION_KEY);
-    if (!raw) return VISION_DEFAULT;
-    const parsed = JSON.parse(raw);
-    const enabled = typeof parsed?.enabled === "boolean" ? parsed.enabled : VISION_DEFAULT.enabled;
-    const fps = clamp(
-      Number.isFinite(parsed?.fps) ? Math.round(parsed.fps) : VISION_DEFAULT.fps,
-      5,
-      60
-    );
-    const resolution: DetectionResolution =
-      parsed?.resolution === "high" || parsed?.resolution === "medium"
-        ? parsed.resolution
-        : VISION_DEFAULT.resolution;
-    // Force frames to 1 regardless of what might be in storage
-    return { enabled, fps, frames: 1, resolution };
-  } catch {
-    return VISION_DEFAULT;
-  }
-}
-/* ---------------------------------------------------------------------- */
+// NEW: global vision enable/disable
+import { useVisionEnabled } from "@/components/settings/vision/vision-layout";
 
 type Props = {
   title?: string;
@@ -104,37 +66,13 @@ export default function TrainingGame({
     { rangeLowLabel, rangeHighLabel }
   );
 
-  // 🚀 Derive effective session from Gameplay settings
+  // Effective session from settings + range
   const { session: sessionEff } = useGameplaySession({
     sessionConfig,
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
   });
 
-  // ⬇️ Hydrate & live-sync Vision settings from localStorage (single atomic key)
-  function VISION_INIT_READ() {
-    // helper so initial state reads localStorage synchronously
-    return readVisionSettings();
-  }
-  const [vision, setVision] = useState<VisionSettingsLS>(VISION_INIT_READ());
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === VISION_KEY) setVision(readVisionSettings());
-    };
-    window.addEventListener("storage", onStorage);
-    // one-time freshness if Settings wrote before this mounted
-    setVision(readVisionSettings());
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  // Map resolution → camera constraints
-  const cam = useMemo(() => {
-    return vision.resolution === "high"
-      ? { width: 1280, height: 720 }
-      : { width: 640, height: 480 };
-  }, [vision.resolution]);
-
-  // Game session derived values
   const step: "play" = "play";
   const {
     bpm, ts, leadBars, restBars, noteValue, noteDurSec, view,
@@ -151,7 +89,6 @@ export default function TrainingGame({
   const MAX_SESSION_SEC = 15 * 60;
 
   // IO + generation
-  // (Pitch detection: keep independent; Vision FPS controls handbeat, not audio F0)
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
   });
@@ -174,11 +111,11 @@ export default function TrainingGame({
   const genNoteDurSec =
     typeof noteValue === "string"
       ? beatsToSeconds(noteValueToBeats(noteValue, ts.den), bpm, ts.den)
-      : noteDurSec ?? secPerBeat;
+      : (noteDurSec ?? secPerBeat);
 
   const fallbackPhraseSec = fabric.fallbackPhraseSec ?? genNoteDurSec * 8;
   const phraseSec =
-    phrase?.notes?.length ? phrase.durationSec ?? fallbackPhraseSec : fallbackPhraseSec;
+    phrase?.notes?.length ? (phrase.durationSec ?? fallbackPhraseSec) : fallbackPhraseSec;
   const lastEndSec = phrase?.notes?.length
     ? phrase.notes.reduce((mx, n) => Math.max(mx, n.startSec + n.durSec), 0)
     : phraseSec;
@@ -208,13 +145,17 @@ export default function TrainingGame({
   const pretestActive = pretestRequired && pretest.status !== "done";
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
+  // Rhythm visibility + detection flags (from session config)
   const rhythmCfgAny = (sessionEff.rhythm ?? {}) as any;
   const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
 
-  // Original needVision; now also gated by Vision.enabled setting:
-  const wantVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
-  const needVision = wantVision && !!vision.enabled;
+  // NEW: global Vision toggle (settings)
+  const { enabled: visionEnabled } = useVisionEnabled();
+
+  // Only run vision when required by the exercise AND globally enabled
+  const needVision =
+    exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled && visionEnabled;
 
   const { isRecording, start: startRec, stop: stopRec, startedAtMs, warm: warmRecorder } =
     useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
@@ -252,16 +193,15 @@ export default function TrainingGame({
     playLeadInTicks, secPerBeat,
   });
 
-  const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(sessionEff.gestureLatencyMs ?? 90);
+  const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("vision:latency-ms");
       const n = raw == null ? NaN : Number(raw);
-      setGestureLatencyMsEff(Number.isFinite(n) && n >= 0 ? Math.round(n) : (sessionEff.gestureLatencyMs ?? 90));
-    } catch { setGestureLatencyMsEff(sessionEff.gestureLatencyMs ?? 90); }
-  }, [sessionEff.gestureLatencyMs]);
+      setGestureLatencyMsEff(Number.isFinite(n) && n >= 0 ? Math.round(n) : gestureLatencyMs);
+    } catch { setGestureLatencyMsEff(gestureLatencyMs); }
+  }, [gestureLatencyMs]);
 
-  // 👋 Hand beat — now parameterized by Vision settings (fps + resolution)
   const hand = useHandBeat({
     latencyMs: gestureLatencyMsEff,
     fireUpEps: 0.004,
@@ -270,18 +210,20 @@ export default function TrainingGame({
     refractoryMs: 90,
     noiseEps: 0.0015,
     minUpVel: 0.35,
-    numHands: 1,
-    targetFps: vision.fps, // throttle to Vision FPS
-    videoConstraints: { width: cam.width, height: cam.height, facingMode: "user" }, // Vision resolution
   });
 
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
-  const samplerAnchor: number | null = !pretestActive ? loop.anchorMs ?? null : null;
+  const samplerAnchor: number | null = !pretestActive ? (loop.anchorMs ?? null) : null;
   const sampler = usePitchSampler({ active: samplerActive, anchorMs: samplerAnchor, hz: liveHz, confidence, fps: 60 });
 
-  useEffect(() => { (async () => { try { await warmPlayer(); } catch {} try { await warmRecorder(); } catch {} })(); }, [warmPlayer, warmRecorder]);
+  useEffect(() => {
+    (async () => {
+      try { await warmPlayer(); } catch {}
+      try { await warmRecorder(); } catch {}
+    })();
+  }, [warmPlayer, warmRecorder]);
 
-  // Start/stop vision pipeline based on needVision + pretest status + settings
+  // Start/stop vision loop respecting the global toggle
   useEffect(() => {
     if (!needVision || pretestActive) { hand.stop(); return; }
     (async () => {
@@ -290,12 +232,9 @@ export default function TrainingGame({
         if (!hand.isRunning) await hand.start(performance.now());
       } catch {}
     })();
-    return () => {
-      if (!needVision || pretestActive) hand.stop();
-    };
-  }, [needVision, pretestActive, hand, vision.fps, cam.width, cam.height]);
+    return () => { if (!needVision || pretestActive) hand.stop(); };
+  }, [needVision, pretestActive, hand]);
 
-  // Reset gesture & pitch samplers at lead-in
   useEffect(() => {
     if (pretestActive || !needVision) return;
     if (loop.loopPhase === "lead-in") {
@@ -356,7 +295,20 @@ export default function TrainingGame({
         ]);
       }
     }
-  }, [loop.loopPhase, pretestActive, phrase, bpm, ts.den, leadInSec, loopingMode, alignForScoring, sampler, hand, rhythmEffective, scoreTake]);
+  }, [
+    loop.loopPhase,
+    pretestActive,
+    phrase,
+    bpm,
+    ts.den,
+    leadInSec,
+    loopingMode,
+    alignForScoring,
+    sampler,
+    hand,
+    rhythmEffective,
+    scoreTake,
+  ]);
 
   const showLyrics = step === "play" && !!fabric.words?.length;
   const readinessError =
@@ -368,21 +320,26 @@ export default function TrainingGame({
   const startAtMs = showExercise ? loop.anchorMs : null;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
 
-  const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
+  const uiRunning = pretestActive ? running : (loop.loopPhase !== "rest" ? running : false);
   const onToggleExercise = () => {
-    if (!( !pretestRequired || pretest.status === "done")) return;
-    // review panel is handled upstream; keep as-is
+    if (!(!pretestRequired || pretest.status === "done")) return;
     loop.toggle();
   };
 
   const showFooterSessionPanel = !!phrase && !pretestActive;
   const completedTakes = loop.takeCount ?? 0;
   const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
-  const footerSessionPanel = showFooterSessionPanel ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES } : undefined;
+  const footerSessionPanel = showFooterSessionPanel
+    ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES }
+    : undefined;
 
   const currentPretestKind =
     (callResponseSequence?.[pretest.modeIndex]?.kind as
-      | "single_tonic" | "derived_tonic" | "guided_arpeggio" | "internal_arpeggio" | undefined) ?? undefined;
+      | "single_tonic"
+      | "derived_tonic"
+      | "guided_arpeggio"
+      | "internal_arpeggio"
+      | undefined) ?? undefined;
 
   const sidePanel = {
     pretest: {
@@ -421,7 +378,7 @@ export default function TrainingGame({
       uiRunning={uiRunning}
       onToggle={onToggleExercise}
       phrase={phrase ?? undefined}
-      lyrics={showLyrics ? fabric.words ?? undefined : undefined}
+      lyrics={showLyrics ? (fabric.words ?? undefined) : undefined}
       livePitchHz={liveHz}
       confidence={confidence}
       confThreshold={CONF_THRESHOLD}

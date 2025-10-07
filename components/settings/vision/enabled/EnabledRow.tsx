@@ -1,10 +1,10 @@
 // components/settings/vision/enabled/EnabledRow.tsx
 "use client";
 import * as React from "react";
-import { useVisionDraft } from "../vision-layout";
+import { useVisionEnabled } from "../vision-layout";
 
 export default function EnabledRow() {
-  const { draft, setDraft } = useVisionDraft();
+  const { enabled, setEnabled } = useVisionEnabled();
 
   const segBase = "px-3 py-1.5 text-sm transition";
   const selected = "bg-[#fdfdfd] active:bg-[#fcfcfc] font-medium";
@@ -16,15 +16,17 @@ export default function EnabledRow() {
       <div className="inline-flex rounded-md overflow-hidden border border-[#dcdcdc]">
         <button
           type="button"
-          onClick={() => setDraft({ enabled: false })}
-          className={[segBase, draft.enabled ? idle : selected].join(" ")}
+          onClick={() => setEnabled(false)}
+          className={[segBase, enabled ? idle : selected].join(" ")}
+          aria-pressed={!enabled}
         >
           Disabled
         </button>
         <button
           type="button"
-          onClick={() => setDraft({ enabled: true })}
-          className={[segBase, "border-l border-[#dcdcdc]", draft.enabled ? selected : idle].join(" ")}
+          onClick={() => setEnabled(true)}
+          className={[segBase, "border-l border-[#dcdcdc]", enabled ? selected : idle].join(" ")}
+          aria-pressed={enabled}
         >
           Enabled
         </button>
