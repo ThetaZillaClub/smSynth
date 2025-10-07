@@ -3,6 +3,7 @@
 
 import * as React from "react";
 import EnabledRow from "./enabled/EnabledRow";
+import LatencyRow from "./latency/LatencyRow"; // ⬅️ NEW
 
 // Simple, single-boolean vision setting
 const ENABLED_KEY = "vision:enabled:v1";
@@ -28,11 +29,6 @@ function writeEnabled(next: boolean) {
 type Ctx = { enabled: boolean; setEnabled: (next: boolean) => void };
 const VisionCtx = React.createContext<Ctx | null>(null);
 
-/**
- * Works both inside and outside the provider.
- * If there’s no provider (e.g., TrainingGame route), it falls back to
- * localStorage + a window event bus so state is shared app-wide.
- */
 export function useVisionEnabled(): Ctx {
   const ctx = React.useContext(VisionCtx);
 
@@ -41,7 +37,7 @@ export function useVisionEnabled(): Ctx {
   );
 
   React.useEffect(() => {
-    if (ctx) return; // provider handles reactivity
+    if (ctx) return;
     const onChange = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       setFallbackEnabled(!!detail?.enabled);
@@ -79,6 +75,7 @@ export default function VisionLayout() {
     <VisionCtx.Provider value={value}>
       <div className="space-y-8">
         <EnabledRow />
+        <LatencyRow /> {/* ⬅️ NEW row */}
       </div>
     </VisionCtx.Provider>
   );
