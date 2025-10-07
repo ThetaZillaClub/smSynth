@@ -85,7 +85,7 @@ export default function PasswordRow() {
       </div>
 
       {/* Actions row: left column only, Save first then Cancel */}
-      <div className={ROW}>
+      <div className={`${ROW} mt-3 sm:mt-4`} >
         <div className="inline-flex gap-2">
           <Button type="submit" disabled={isSaving || !isDirty || !isValid} className={BTN}>
             {isSaving ? "Saving…" : "Save"}
