@@ -6,6 +6,7 @@ import ProfileLayout from "./profile/profile-layout";
 import GameplayLayout from "./gameplay/gameplay-layout";
 import VisionLayout from "./vision/vision-layout";
 import AudioLayout from "./audio/audio-layout";
+import AccountLayout from "./account/account-layout";
 
 type Bootstrap = {
   uid: string;
@@ -124,31 +125,34 @@ export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
 
         {/* Tab content (same baseline as sidebar) */}
 
-        <section className="bg-[#f2f2f2] p-6 min-h-[420px]">
-          <div className="max-w-2xl">
-            {active === "profile" ? (
-              <ProfileLayout bootstrap={bootstrap} />
-            ) : active === "gameplay" ? (
-              <GameplayLayout />
-            ) : active === "vision" ? (
-              <VisionLayout />
-            ) : active === "audio" ? (
-              <AudioLayout />
-            ) : (
-              <>
-                <h2 className="text-2xl font-semibold text-[#0f0f0f]">
-                  {ROWS.find((r) => r.key === active)?.label}
-                </h2>
-                <p className="mt-2 text-[#373737]">
-                  Content for <span className="font-medium">{active}</span> will appear here.
-                </p>
-                <div className="mt-6 rounded-lg border border-[#dcdcdc] bg-[#fcfcfc] p-4 text-sm text-[#0f0f0f]">
-                  Placeholder — we’ll wire up each section (Profile, Audio, Vision, Gameplay, Account, Membership) next.
-                </div>
-              </>
-            )}
-          </div>
-        </section>
+<section className="bg-[#f2f2f2] p-6 min-h-[420px]">
+  <div className="max-w-2xl">
+    {active === "profile" ? (
+      <ProfileLayout bootstrap={bootstrap} />
+    ) : active === "gameplay" ? (
+      <GameplayLayout />
+    ) : active === "vision" ? (
+      <VisionLayout />
+    ) : active === "audio" ? (
+      <AudioLayout />
+    ) : active === "account" ? (
+  <AccountLayout bootstrap={bootstrap} />
+    ) : (
+      // (membership placeholder unchanged)
+      <>
+        <h2 className="text-2xl font-semibold text-[#0f0f0f]">
+          {ROWS.find((r) => r.key === active)?.label}
+        </h2>
+        <p className="mt-2 text-[#373737]">
+          Content for <span className="font-medium">{active}</span> will appear here.
+        </p>
+        <div className="mt-6 rounded-lg border border-[#dcdcdc] bg-[#fcfcfc] p-4 text-sm text-[#0f0f0f]">
+          Placeholder — we’ll wire up each section (Profile, Audio, Vision, Gameplay, Account, Membership) next.
+        </div>
+      </>
+    )}
+  </div>
+</section>
       </div>
     </div>
   );

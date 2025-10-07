@@ -5,8 +5,6 @@ import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { getImageUrlCached } from '@/lib/client-cache';
 import AvatarRow from './avatar/AvatarRow';
-import DisplayNameRow from './display-name/DisplayNameRow';
-import SignOutRow from './signout/SignOutRow';
 
 type Bootstrap = {
   uid: string;
@@ -27,37 +25,39 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
     let cancel = false;
     (async () => {
       try {
-        // Prefer fresh fetch of the latest image_path (cheap)
         const { data: { session } } = await supabase.auth.getSession();
         const user = session?.user;
         if (!user) return;
 
         const { data: latest } = await supabase
           .from('models')
-          .select('image_path')
+          .select('image_path, creator_display_name')
           .eq('uid', user.id)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
         const imgPath = latest?.image_path ?? bootstrap.studentImagePath ?? null;
-        if (!imgPath) {
-          if (!cancel) setAvatarUrl(null);
-          return;
+        const name = latest?.creator_display_name ?? bootstrap.displayName;
+
+        if (imgPath) {
+          const url = await getImageUrlCached(supabase, imgPath);
+          if (!cancel) {
+            setAvatarPath(imgPath);
+            setAvatarUrl(url ?? null);
+            try { localStorage.setItem('ptp:studentImagePath', imgPath); } catch {}
+          }
+        } else if (!cancel) {
+          setAvatarUrl(null);
         }
 
-        const url = await getImageUrlCached(supabase, imgPath);
-        if (!cancel) {
-          setAvatarPath(imgPath);
-          setAvatarUrl(url ?? null);
-          try { localStorage.setItem('ptp:studentImagePath', imgPath); } catch {}
-        }
+        if (!cancel) setDisplayName(name);
       } catch {
         if (!cancel) setAvatarUrl(null);
       }
     })();
     return () => { cancel = true; };
-  }, [supabase, bootstrap.studentImagePath]);
+  }, [supabase, bootstrap.studentImagePath, bootstrap.displayName]);
 
   React.useEffect(() => { setUid(bootstrap.uid); }, [bootstrap.uid]);
   React.useEffect(() => { setAvatarPath(bootstrap.avatarPath); }, [bootstrap.avatarPath]);
@@ -74,10 +74,6 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
           setAvatarPath(path);
         }}
       />
-      {/* onChanged updates our local state immediately after update succeeds */}
-      <DisplayNameRow initialName={displayName} onChanged={setDisplayName} />
-      {/* Sign out action */}
-      <SignOutRow />
     </div>
   );
 }
