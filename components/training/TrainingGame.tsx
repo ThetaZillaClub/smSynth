@@ -31,6 +31,43 @@ import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 import { useGameplaySession } from "@/hooks/gameplay/useGameplaySession";
 import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 
+/* ----------------- Vision settings (from Settings tab) ----------------- */
+type DetectionResolution = "medium" | "high";
+type VisionSettingsLS = {
+  enabled: boolean;
+  fps: number; // 5..60 for vision inference
+  // `frames` is still present in storage for ApplyRow compatibility (ignored here)
+  frames?: number | null | undefined;
+  resolution: DetectionResolution;
+};
+const VISION_KEY = "vision:settings:v1";
+const VISION_DEFAULT: VisionSettingsLS = { enabled: true, fps: 30, frames: 3, resolution: "medium" };
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, n));
+}
+function readVisionSettings(): VisionSettingsLS {
+  try {
+    const raw = localStorage.getItem(VISION_KEY);
+    if (!raw) return VISION_DEFAULT;
+    const parsed = JSON.parse(raw);
+    const enabled = typeof parsed?.enabled === "boolean" ? parsed.enabled : VISION_DEFAULT.enabled;
+    const fps = clamp(
+      Number.isFinite(parsed?.fps) ? Math.round(parsed.fps) : VISION_DEFAULT.fps,
+      5,
+      60
+    );
+    const resolution: DetectionResolution =
+      parsed?.resolution === "high" || parsed?.resolution === "medium"
+        ? parsed.resolution
+        : VISION_DEFAULT.resolution;
+    return { enabled, fps, frames: parsed?.frames ?? 3, resolution };
+  } catch {
+    return VISION_DEFAULT;
+  }
+}
+/* ---------------------------------------------------------------------- */
+
 type Props = {
   title?: string;
   studentId?: string | null;
@@ -66,13 +103,37 @@ export default function TrainingGame({
     { rangeLowLabel, rangeHighLabel }
   );
 
-  // 🚀 One line to derive the full effective session from Settings + range
+  // 🚀 Derive effective session from Gameplay settings
   const { session: sessionEff } = useGameplaySession({
     sessionConfig,
     lowHz: lowHz ?? null,
     highHz: highHz ?? null,
   });
 
+  // ⬇️ Hydrate & live-sync Vision settings from localStorage (single atomic key)
+  const [vision, setVision] = useState<VisionSettingsLS>(VISSION_INIT_READ());
+  function VISSION_INIT_READ() {
+    // helper so initial state reads localStorage synchronously
+    return readVisionSettings();
+  }
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === VISION_KEY) setVision(readVisionSettings());
+    };
+    window.addEventListener("storage", onStorage);
+    // one-time freshness if Settings wrote before this mounted
+    setVision(readVisionSettings());
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Map resolution → camera constraints
+  const cam = useMemo(() => {
+    return vision.resolution === "high"
+      ? { width: 1280, height: 720 }
+      : { width: 640, height: 480 };
+  }, [vision.resolution]);
+
+  // Game session derived values
   const step: "play" = "play";
   const {
     bpm, ts, leadBars, restBars, noteValue, noteDurSec, view,
@@ -89,6 +150,7 @@ export default function TrainingGame({
   const MAX_SESSION_SEC = 15 * 60;
 
   // IO + generation
+  // (Pitch detection: keep independent; Vision FPS controls handbeat, not audio F0)
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
     enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
   });
@@ -148,7 +210,10 @@ export default function TrainingGame({
   const rhythmCfgAny = (sessionEff.rhythm ?? {}) as any;
   const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
-  const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
+
+  // Original needVision; now also gated by Vision.enabled setting:
+  const wantVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled;
+  const needVision = wantVision && !!vision.enabled;
 
   const { isRecording, start: startRec, stop: stopRec, startedAtMs, warm: warmRecorder } =
     useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
@@ -186,16 +251,28 @@ export default function TrainingGame({
     playLeadInTicks, secPerBeat,
   });
 
-  const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(gestureLatencyMs);
+  const [gestureLatencyMsEff, setGestureLatencyMsEff] = useState<number>(sessionEff.gestureLatencyMs ?? 90);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("vision:latency-ms");
       const n = raw == null ? NaN : Number(raw);
-      setGestureLatencyMsEff(Number.isFinite(n) && n >= 0 ? Math.round(n) : gestureLatencyMs);
-    } catch { setGestureLatencyMsEff(gestureLatencyMs); }
-  }, [gestureLatencyMs]);
+      setGestureLatencyMsEff(Number.isFinite(n) && n >= 0 ? Math.round(n) : (sessionEff.gestureLatencyMs ?? 90));
+    } catch { setGestureLatencyMsEff(sessionEff.gestureLatencyMs ?? 90); }
+  }, [sessionEff.gestureLatencyMs]);
 
-  const hand = useHandBeat({ latencyMs: gestureLatencyMsEff, fireUpEps: 0.004, confirmUpEps: 0.012, downRearmEps: 0.006, refractoryMs: 90, noiseEps: 0.0015, minUpVel: 0.35 });
+  // 👋 Hand beat — now parameterized by Vision settings (fps + resolution)
+  const hand = useHandBeat({
+    latencyMs: gestureLatencyMsEff,
+    fireUpEps: 0.004,
+    confirmUpEps: 0.012,
+    downRearmEps: 0.006,
+    refractoryMs: 90,
+    noiseEps: 0.0015,
+    minUpVel: 0.35,
+    numHands: 1,
+    targetFps: vision.fps, // throttle to Vision FPS
+    videoConstraints: { width: cam.width, height: cam.height, facingMode: "user" }, // Vision resolution
+  });
 
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
   const samplerAnchor: number | null = !pretestActive ? loop.anchorMs ?? null : null;
@@ -203,12 +280,21 @@ export default function TrainingGame({
 
   useEffect(() => { (async () => { try { await warmPlayer(); } catch {} try { await warmRecorder(); } catch {} })(); }, [warmPlayer, warmRecorder]);
 
+  // Start/stop vision pipeline based on needVision + pretest status + settings
   useEffect(() => {
     if (!needVision || pretestActive) { hand.stop(); return; }
-    (async () => { try { await hand.preload(); if (!hand.isRunning) await hand.start(performance.now()); } catch {} })();
-    return () => { if (!needVision || pretestActive) hand.stop(); };
-  }, [needVision, pretestActive, hand]);
+    (async () => {
+      try {
+        await hand.preload();
+        if (!hand.isRunning) await hand.start(performance.now());
+      } catch {}
+    })();
+    return () => {
+      if (!needVision || pretestActive) hand.stop();
+    };
+  }, [needVision, pretestActive, hand, vision.fps, cam.width, cam.height]);
 
+  // Reset gesture & pitch samplers at lead-in
   useEffect(() => {
     if (pretestActive || !needVision) return;
     if (loop.loopPhase === "lead-in") {
@@ -259,7 +345,14 @@ export default function TrainingGame({
           rhythmOnsetsSec: makeOnsetsFromRhythm(usedRhythm, bpm, ts.den),
           align: alignForScoring,
         });
-        setTakeSnapshots((xs) => [...xs, { phrase: usedPhrase, rhythm: usedRhythm ?? null, melodyRhythm: melodyRhythmForTakeRef.current ?? null }]);
+        setTakeSnapshots((xs) => [
+          ...xs,
+          {
+            phrase: usedPhrase,
+            rhythm: usedRhythm ?? null,
+            melodyRhythm: melodyRhythmForTakeRef.current ?? null,
+          },
+        ]);
       }
     }
   }, [loop.loopPhase, pretestActive, phrase, bpm, ts.den, leadInSec, loopingMode, alignForScoring, sampler, hand, rhythmEffective, scoreTake]);

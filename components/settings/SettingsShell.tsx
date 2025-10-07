@@ -4,6 +4,7 @@
 import * as React from "react";
 import ProfileLayout from "./profile/profile-layout";
 import GameplayLayout from "./gameplay/gameplay-layout";
+import VisionLayout from "./vision/vision-layout";
 
 type Bootstrap = {
   uid: string;
@@ -127,6 +128,8 @@ export default function SettingsShell({ bootstrap }: { bootstrap: Bootstrap }) {
               <ProfileLayout bootstrap={bootstrap} />
             ) : active === "gameplay" ? (
               <GameplayLayout /* baselineBpm={80} */ />
+            ) : active === "vision" ? (
+              <VisionLayout />
             ) : (
               <>
                 <h2 className="text-2xl font-semibold text-[#0f0f0f]">

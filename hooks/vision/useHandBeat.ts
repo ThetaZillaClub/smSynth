@@ -35,6 +35,15 @@ export type UseHandBeatOptions = {
   numHands?: number;
   /** Optional callback on each detected beat (ms, perf.now clock, latency-compensated). */
   onBeat?: (tMs: number) => void;
+
+  /** ⬇ NEW: throttle inference to this FPS (5..60) */
+  targetFps?: number;
+  /** ⬇ NEW: camera constraints (width/height apply via getUserMedia) */
+  videoConstraints?: {
+    width?: number;
+    height?: number;
+    facingMode?: "user" | "environment";
+  };
 };
 
 type UseHandBeatReturn = {
@@ -63,6 +72,8 @@ export default function useHandBeat({
   refractoryMs = 90,
   numHands = 1,
   onBeat,
+  targetFps = 30,
+  videoConstraints,
 }: UseHandBeatOptions = {}): UseHandBeatReturn {
   const landmarkerRef = useRef<HandLandmarker | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -82,6 +93,7 @@ export default function useHandBeat({
   // Timing & events
   const anchorMsRef = useRef<number>(performance.now());
   const eventsMsRef = useRef<number[]>([]);
+  const lastInferAtRef = useRef<number>(0);
 
   // UI state
   const [isReady, setIsReady] = useState(false);
@@ -150,6 +162,15 @@ export default function useHandBeat({
 
     try {
       const tsNow = performance.now();
+
+      // ⏱ throttle to targetFps
+      const fps = Math.max(5, Math.min(60, Math.round(targetFps || 30)));
+      const minIntervalMs = 1000 / fps;
+      if (tsNow - lastInferAtRef.current < minIntervalMs) {
+        return; // skip this frame
+      }
+      lastInferAtRef.current = tsNow;
+
       const res = landmarker.detectForVideo(video, tsNow) as HandLandmarkerResult;
       const first = res?.landmarks?.[0];
       if (!first?.length) return;
@@ -218,7 +239,17 @@ export default function useHandBeat({
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
-  }, [latencyMs, noiseEps, minUpVel, fireUpEps, confirmUpEps, downRearmEps, refractoryMs, onBeat]);
+  }, [
+    latencyMs,
+    noiseEps,
+    minUpVel,
+    fireUpEps,
+    confirmUpEps,
+    downRearmEps,
+    refractoryMs,
+    onBeat,
+    targetFps,
+  ]);
 
   const start = useCallback(async (anchorMs?: number) => {
     await preload();
@@ -227,7 +258,11 @@ export default function useHandBeat({
     const video = ensureVideo();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: {
+          facingMode: videoConstraints?.facingMode ?? "user",
+          ...(videoConstraints?.width ? { width: { ideal: videoConstraints.width } } : {}),
+          ...(videoConstraints?.height ? { height: { ideal: videoConstraints.height } } : {}),
+        },
         audio: false,
       });
       streamRef.current = stream;
@@ -240,7 +275,7 @@ export default function useHandBeat({
 
     setIsRunning(true);
     rafRef.current = requestAnimationFrame(loop);
-  }, [preload, loop]);
+  }, [preload, loop, videoConstraints]);
 
   const snapshotEvents = useCallback((): number[] => {
     const anchor = anchorMsRef.current;
