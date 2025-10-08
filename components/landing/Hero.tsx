@@ -29,7 +29,7 @@ export default function Hero() {
       className="flex flex-col items-center justify-center text-center py-24 text-[#0f0f0f]
                  w-full bg-gradient-to-b from-[#f0f0f0] to-[#ebebeb]"
     >
-      <h1 ref={titleRef} className="text-5xl md:text-7xl font-bold mb-4">Sing Smarter, Faster</h1>
+      <h1 ref={titleRef} className="text-5xl md:text-7xl font-bold mb-4">Sing Better, Faster</h1>
       <p ref={copyRef} className="text-xl md:text-2xl mb-8 max-w-2xl">
         Build confident pitch, steady time, and dependable range with drills shaped to your singer profile. Minutes a day, real progress.
       </p>
