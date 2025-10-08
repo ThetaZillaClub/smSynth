@@ -1,6 +1,6 @@
 import { SignUpForm } from "@/components/auth/sign-up-form";
 import Link from 'next/link';
-import AuthHeader from "@/components/header/AuthHeader";
+import AuthHeader from "@/components/auth/AuthHeader";
 
 export default function Page() {
   return (

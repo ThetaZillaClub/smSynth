@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/auth/card";
-import AuthHeader from "@/components/header/AuthHeader";
+import AuthHeader from "@/components/auth/AuthHeader";
 
 export default async function Page({
   searchParams,

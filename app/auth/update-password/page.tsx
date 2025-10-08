@@ -1,5 +1,5 @@
 import { UpdatePasswordForm } from "@/components/auth/update-password-form";
-import AuthHeader from "@/components/header/AuthHeader";
+import AuthHeader from "@/components/auth/AuthHeader";
 
 export default function Page() {
   return (

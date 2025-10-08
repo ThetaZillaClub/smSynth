@@ -2,7 +2,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import Logo from '@/components/header/Logo'
+import Logo from '@/components/auth/Logo'
 
 export default function Footer({ className = '' }: { className?: string }) {
   const pathname = usePathname()

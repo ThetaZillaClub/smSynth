@@ -1,5 +1,5 @@
 import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
-import AuthHeader from "@/components/header/AuthHeader";
+import AuthHeader from "@/components/auth/AuthHeader";
 
 export default function Page() {
   return (

@@ -3,7 +3,7 @@
 
 import { useLayoutEffect, useRef } from 'react';
 import { gsap } from 'gsap';
-import BeginJourneyButton from '@/components/header/BeginJourneyButton';
+import BeginJourneyButton from '@/components/landing/BeginJourneyButton';
 
 export default function Hero() {
   const scope = useRef<HTMLDivElement | null>(null);

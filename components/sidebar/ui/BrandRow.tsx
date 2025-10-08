@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import Logo from '@/components/header/Logo';
+import Logo from '@/components/auth/Logo';
 
 export default function BrandRow({
   authed,
