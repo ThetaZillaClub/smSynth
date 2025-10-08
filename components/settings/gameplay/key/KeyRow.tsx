@@ -2,7 +2,8 @@
 "use client";
 
 import * as React from "react";
-import useStudentRange from "@/hooks/students/useStudentRange";
+import { createClient } from "@/lib/supabase/client";
+import { ensureSessionReady, getCurrentStudentRowCached } from "@/lib/client-cache";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 
 type Choice = "random" | number; // number = tonicPc (0..11)
@@ -10,7 +11,30 @@ type Choice = "random" | number; // number = tonicPc (0..11)
 const STORE_KEY = "gameplay:keyChoice";
 const PC_SHARPS = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"] as const;
 
-function read(): Choice {
+/** Parse labels like C3, F#4, Db4 into Hz. */
+function noteLabelToHz(label: string | null | undefined): number | null {
+  if (!label) return null;
+  const m = /^([A-Ga-g])([#b]?)(\d{1,2})$/.exec(label.trim());
+  if (!m) return null;
+  const name = m[1].toUpperCase();
+  const acc = m[2];
+  const oct = Number(m[3]);
+
+  // map to semitone (C=0)
+  const base: Record<string, number> = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+  let pc = base[name];
+  if (pc == null) return null;
+  if (acc === "#") pc += 1;
+  if (acc === "b") pc -= 1;
+  // wrap into 0..11
+  pc = ((pc % 12) + 12) % 12;
+
+  const midi = (oct + 1) * 12 + pc;        // MIDI 0 = C-1
+  const hz = 440 * Math.pow(2, (midi - 69) / 12); // A4=440
+  return hz;
+}
+
+function readChoice(): Choice {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw === "random" || raw == null) return "random";
@@ -22,15 +46,33 @@ function read(): Choice {
 }
 
 export default function KeyRow() {
-  // Filter keys by saved range (tonic to tonic+octave must fit).
-  const { lowHz, highHz } = useStudentRange(null, { rangeLowLabel: null, rangeHighLabel: null });
+  const supabase = React.useMemo(() => createClient(), []);
+  const [choice, setChoice] = React.useState<Choice>(readChoice());
+  const [lowHz, setLowHz] = React.useState<number | null>(null);
+  const [highHz, setHighHz] = React.useState<number | null>(null);
 
-  const [choice, setChoice] = React.useState<Choice>(read());
+  // Load the current student row ONCE via cached endpoint; no /range call.
+  React.useEffect(() => {
+    let cancel = false;
+    (async () => {
+      await ensureSessionReady(supabase, 2000);
+      const row = await getCurrentStudentRowCached(supabase);
+      if (cancel) return;
+
+      const lo = noteLabelToHz(row?.range_low);
+      const hi = noteLabelToHz(row?.range_high);
+      setLowHz(lo);
+      setHighHz(hi);
+    })();
+    return () => { cancel = true; };
+  }, [supabase]);
+
   const set = (v: Choice) => {
     setChoice(v);
     try { localStorage.setItem(STORE_KEY, String(v)); } catch {}
   };
 
+  // Build allowed tonic pitch-classes (tonic..tonic+12 must fit inside range)
   const allowed = React.useMemo(() => {
     if (lowHz == null || highHz == null) return new Set<number>();
     const loM = Math.round(hzToMidi(Math.min(lowHz, highHz)));

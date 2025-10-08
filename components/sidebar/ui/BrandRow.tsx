@@ -26,10 +26,11 @@ export default function BrandRow({
 
   return (
     <Link
-      href={authed ? '/home' : '/'}
+      href="/"            // ✅ Stable on server & client to avoid hydration mismatch
       prefetch={false}
       className={baseRow}
       onClick={(e) => {
+        // After hydration, route to /home if authed
         if (authed) {
           e.preventDefault();
           goHome();

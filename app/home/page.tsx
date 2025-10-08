@@ -1,5 +1,4 @@
 // app/home/page.tsx
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import HomeHeader from '@/components/home/HomeHeader'
 import StatsBento from '@/components/home/StatsBento'
@@ -26,10 +25,10 @@ function pickAvatarUrl(user: { user_metadata?: unknown }): string | null {
 export default async function HomePage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/auth/login')
+  // Middleware already guards this route; no need to redirect again.
 
-  const displayName = pickDisplayName(user)
-  const avatarUrl = pickAvatarUrl(user)
+  const displayName = user ? pickDisplayName(user) : ''
+  const avatarUrl = user ? pickAvatarUrl(user) : null
 
   return (
     <div className="min-h-dvh bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">

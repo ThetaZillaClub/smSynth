@@ -1,3 +1,4 @@
+// components/sidebar/Sidebar.tsx
 'use client';
 
 import * as React from 'react';
@@ -14,25 +15,31 @@ import { CoursesIcon, SetupIcon, PremiumIcon, ChevronRightIcon } from './svg/Ico
 export default function Sidebar() {
   const pathname = usePathname() || '/';
   const router = useRouter();
-
   const isAuthRoute = pathname.startsWith('/auth');
 
   const setSidebarWidth = useCSSSidebarWidth();
-  const { collapsed, toggle } = useCollapsed();
+  const { collapsed, toggle } = useCollapsed(false); // always start open (no collapsed FOUC)
 
-  // Keep CSS var in sync with route + collapsed state
-  React.useEffect(() => {
-    if (isAuthRoute) {
-      setSidebarWidth('0px');
-      return;
-    }
-    setSidebarWidth(collapsed ? '64px' : '240px');
-  }, [collapsed, isAuthRoute, setSidebarWidth]);
+  // Track hydration so SSR HTML is auth-agnostic (prevents mismatch)
+  const [hydrated, setHydrated] = React.useState(false);
+  React.useEffect(() => setHydrated(true), []);
 
   const { authed, displayName, studentImgUrl } = useSidebarBootstrap({
     isAuthRoute,
     setSidebarWidth,
   });
+
+  // Logged-out: open; no collapse control
+  const effectiveCollapsed = authed ? collapsed : false;
+
+  // Keep CSS var in sync
+  React.useEffect(() => {
+    if (isAuthRoute) {
+      setSidebarWidth('0px');
+      return;
+    }
+    setSidebarWidth(effectiveCollapsed ? '64px' : '240px');
+  }, [effectiveCollapsed, isAuthRoute, setSidebarWidth]);
 
   const go = React.useCallback((href: string) => router.push(href), [router]);
 
@@ -44,14 +51,15 @@ export default function Sidebar() {
 
   if (isAuthRoute) return <aside style={{ display: 'none' }} aria-hidden />;
 
-  const showLoggedOutCTAs = !authed;
+  // Only decide "locked" after hydration so SSR markup is stable
+  const showLoggedOutCTAs = hydrated && !authed;
 
   return (
     <aside className={['sticky top-0 h-svh', 'bg-[#f4f4f4]', 'flex flex-col justify-between'].join(' ')}>
       <div>
         <BrandRow
-          authed={authed}
-          collapsed={collapsed}
+          authed={hydrated ? authed : false}
+          collapsed={effectiveCollapsed}
           brand={BRAND}
           goHome={() => go('/home')}
         />
@@ -59,16 +67,25 @@ export default function Sidebar() {
         <nav>
           {items.map((it) => {
             const active = it.match(pathname);
-            const disabled = it.requireAuth && !authed;
+            const locked = hydrated ? (it.requireAuth && !authed) : false;
+
+            const handleClick = () => {
+              if (locked) {
+                go('/auth/login');
+              } else {
+                go(it.href);
+              }
+            };
+
             return (
               <NavButton
                 key={it.href}
                 active={active}
-                disabled={disabled}
-                onClick={() => !disabled && go(it.href)}
+                onClick={handleClick}
                 icon={it.icon}
                 label={it.label}
-                collapsed={collapsed}
+                collapsed={effectiveCollapsed}
+                locked={locked}
               />
             );
           })}
@@ -80,29 +97,31 @@ export default function Sidebar() {
       </div>
 
       <div>
-        {/* Collapse toggle */}
-        <button
-          type="button"
-          onClick={toggle}
-          className={[
-            'flex items-stretch w-full select-none transition',
-            'hover:bg-[#e8e8e8] active:bg-[#e0e0e0]',
-            'text-[#0f0f0f]',
-            'py-3',
-          ].join(' ')}
-        >
-          <div className="w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center">
-            <ChevronRightIcon />
-          </div>
-          {!collapsed && <div className="flex-1 flex items-center px-3 text-base font-medium">Collapse</div>}
-        </button>
+        {/* Collapse toggle: only when authed (and only after hydration to avoid SSR/client diff) */}
+        {hydrated && authed && (
+          <button
+            type="button"
+            onClick={toggle}
+            className={[
+              'flex items-stretch w-full select-none transition',
+              'hover:bg-[#e8e8e8] active:bg-[#e0e0e0]',
+              'text-[#0f0f0f]',
+              'py-3',
+            ].join(' ')}
+          >
+            <div className="w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center">
+              <ChevronRightIcon />
+            </div>
+            {!effectiveCollapsed && <div className="flex-1 flex items-center px-3 text-base font-medium">Collapse</div>}
+          </button>
+        )}
 
-        {/* Avatar + DisplayName (logged in) → opens /settings */}
-        {authed && (
+        {/* Avatar row: only after hydration to prevent server/client mismatch */}
+        {hydrated && authed && (
           <AvatarSettingsButton
             displayName={displayName}
             imgUrl={studentImgUrl}
-            collapsed={collapsed}
+            collapsed={effectiveCollapsed}
             onClick={() => go('/settings')}
           />
         )}

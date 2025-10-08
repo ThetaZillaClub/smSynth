@@ -32,7 +32,7 @@ const AuthHeader: FC = (): JSX.Element => (
             text-[#0f0f0f]
           "
         >
-          smSynth
+          PitchTime.Pro
         </span>
       </Link>
     </div>

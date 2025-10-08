@@ -22,6 +22,25 @@ type Entry<T> = {
 const modelCache = new Map<string, Entry<ModelRow>>();
 const imageCache = new Map<string, Entry<string | null>>();
 
+// NEW: current student + current range caches (dedupe & TTL)
+export type CurrentStudentRow = {
+  id?: string;
+  creator_display_name?: string;
+  image_path?: string | null;
+  gender?: Gender;
+  range_low?: string | null;
+  range_high?: string | null;
+  updated_at?: string;
+} | null;
+
+export type CurrentRangeRow = {
+  range_low: string | null;
+  range_high: string | null;
+} | null;
+
+const currentStudentCache: Entry<CurrentStudentRow> = { exp: 0 };
+const currentRangeCache: Entry<CurrentRangeRow> = { exp: 0 };
+
 const now = () => Date.now();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -53,7 +72,10 @@ export async function ensureSessionReady(
     const timer = setTimeout(() => finish(false), timeoutMs);
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user && (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
+      if (
+        session?.user &&
+        (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED")
+      ) {
         clearTimeout(timer);
         sub.subscription.unsubscribe();
         finish(true);
@@ -98,12 +120,8 @@ export async function getModelCached(
 
     // If null and we still didn't have a session, do a one-shot grace retry.
     if (value === null && !hadSessionInitially && !readyNow) {
-      // small grace window to let the session land
       const retryReady = await ensureSessionReady(supabase, 1500);
-      if (!retryReady) {
-        // some setups emit session a tick later—give it one micro backoff then re-check
-        await sleep(150);
-      }
+      if (!retryReady) await sleep(150);
       if (await hasSession(supabase)) {
         value = await fetchOnce();
       }
@@ -113,21 +131,20 @@ export async function getModelCached(
     const stillNoSession = !(await hasSession(supabase));
     const expiry =
       value === null && (!hadSessionInitially || !readyNow) && stillNoSession
-        ? now() + 900 // ~0.9s — encourages quick re-try after auth finishes
+        ? now() + 900
         : now() + ttlMs;
 
     modelCache.set(id, { v: value, exp: expiry });
     return value;
   })();
 
-  // mark inflight for dedupe
   modelCache.set(id, { exp: now() + ttlMs, inflight: task });
 
   try {
     return await task;
   } finally {
     const cur = modelCache.get(id);
-    if (cur) modelCache.set(id, { v: cur.v, exp: cur.exp }); // clear inflight
+    if (cur) modelCache.set(id, { v: cur.v, exp: cur.exp });
   }
 }
 
@@ -175,5 +192,76 @@ export async function getImageUrlCached(
   } finally {
     const cur = imageCache.get(imagePath);
     if (cur) imageCache.set(imagePath, { v: cur.v, exp: cur.exp });
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   NEW: Cached helpers to collapse duplicate /api calls
+   ────────────────────────────────────────────────────────────── */
+
+/** One in-memory, inflight-deduped read of /api/students/current (TTL default 30s). */
+export async function getCurrentStudentRowCached(
+  supabase: SupabaseClient,
+  ttlMs = 30_000
+): Promise<CurrentStudentRow> {
+  const valid = currentStudentCache.exp > now();
+  if (valid) return currentStudentCache.v ?? null;
+  if (currentStudentCache.inflight) return currentStudentCache.inflight;
+
+  const task: Promise<CurrentStudentRow> = (async () => {
+    // Wait for session so we don't get a spurious 401 from fetch()
+    await ensureSessionReady(supabase, 2500);
+
+    try {
+      const res = await fetch("/api/students/current", { credentials: "include", cache: "no-store" });
+      const data = res.ok ? ((await res.json().catch(() => null)) as CurrentStudentRow) : null;
+      currentStudentCache.v = data ?? null;
+      currentStudentCache.exp = now() + ttlMs;
+      return currentStudentCache.v;
+    } catch {
+      currentStudentCache.v = null;
+      currentStudentCache.exp = now() + 1500; // quick retry window
+      return null;
+    }
+  })();
+
+  currentStudentCache.inflight = task;
+  try {
+    return await task;
+  } finally {
+    currentStudentCache.inflight = undefined;
+  }
+}
+
+/** One in-memory, inflight-deduped read of /api/students/current/range (TTL default 30s). */
+export async function getCurrentRangeCached(
+  supabase: SupabaseClient,
+  ttlMs = 30_000
+): Promise<CurrentRangeRow> {
+  const valid = currentRangeCache.exp > now();
+  if (valid) return currentRangeCache.v ?? null;
+  if (currentRangeCache.inflight) return currentRangeCache.inflight;
+
+  const task: Promise<CurrentRangeRow> = (async () => {
+    await ensureSessionReady(supabase, 2500);
+
+    try {
+      const res = await fetch("/api/students/current/range", { credentials: "include", cache: "no-store" });
+      const data = res.ok ? ((await res.json().catch(() => null)) as CurrentRangeRow) : null;
+      currentRangeCache.v = data ?? null;
+      currentRangeCache.exp = now() + ttlMs;
+      return currentRangeCache.v;
+    } catch {
+      currentRangeCache.v = null;
+      currentRangeCache.exp = now() + 1500;
+      return null;
+    }
+  })();
+
+  currentRangeCache.inflight = task;
+  try {
+    return await task;
+  } finally {
+    currentRangeCache.inflight = undefined;
   }
 }

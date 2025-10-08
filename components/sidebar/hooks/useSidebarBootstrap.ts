@@ -3,9 +3,20 @@
 
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { ensureSessionReady, getImageUrlCached } from '@/lib/client-cache';
-import { fetchJsonNoStore } from '../fetch/noStore';
+import {
+  ensureSessionReady,
+  getImageUrlCached,
+  getCurrentStudentRowCached,
+} from '@/lib/client-cache';
 import { STUDENT_IMAGE_HINT_KEY, pickDisplayName, pickAuthAvatarUrl } from '../types';
+
+function readAuthedCookie(): boolean {
+  try {
+    return (document.cookie.match(/(?:^|; )ptp_a=([^;]+)/)?.[1] === '1');
+  } catch {
+    return false;
+  }
+}
 
 export function useSidebarBootstrap(opts: {
   isAuthRoute: boolean;
@@ -13,15 +24,36 @@ export function useSidebarBootstrap(opts: {
 }) {
   const { isAuthRoute, setSidebarWidth } = opts;
 
-  const [authed, setAuthed] = React.useState(false);
+  // Seed initial authed from the readable cookie for instant correct UI
+  const [authed, setAuthed] = React.useState<boolean>(() => (typeof document !== 'undefined' ? readAuthedCookie() : false));
   const [displayName, setDisplayName] = React.useState('You');
   const [studentImgUrl, setStudentImgUrl] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
+    const supabase = createClient();
+
+    // Subscribe to auth changes for instant UI swap on logout/login
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (cancelled) return;
+
+      const isAuthed = !!session?.user && event !== 'SIGNED_OUT';
+      setAuthed(isAuthed);
+
+      if (!isAuthed) {
+        // Immediately switch to logged-out UI & width
+        setDisplayName('You');
+        setStudentImgUrl(null);
+        try { localStorage.removeItem(STUDENT_IMAGE_HINT_KEY); } catch {}
+        if (!isAuthRoute) setSidebarWidth('240px');
+        return;
+      }
+
+      // When signed in, open on first paint; we resolve details below
+      if (!isAuthRoute) setSidebarWidth('240px');
+    });
 
     (async () => {
-      const supabase = createClient();
       await ensureSessionReady(supabase, 2500);
       const { data: { session } } = await supabase.auth.getSession();
 
@@ -43,23 +75,20 @@ export function useSidebarBootstrap(opts: {
 
       const user = session!.user;
 
-      // Load name (prefer API row, else email prefix)
-      const row = await fetchJsonNoStore<{ creator_display_name?: string; image_path?: string }>(
-        '/api/students/current'
-      );
+      // Load name + image from a single cached call (dedupes across app)
+      const row = await getCurrentStudentRowCached(supabase);
 
       const nameFromModel = (row?.creator_display_name || '').trim();
       setDisplayName(nameFromModel || pickDisplayName(user));
 
       // Image priority:
       // 1) LocalStorage hint of models.image_path
-      // 2) /api row.image_path
+      // 2) /api row.image_path (via cached row above)
       // 3) auth user_metadata avatar (GitHub/Google/etc)
       let hintedPath: string | null = null;
       try { hintedPath = localStorage.getItem(STUDENT_IMAGE_HINT_KEY); } catch {}
 
       const imagePath = hintedPath || (row?.image_path ?? null);
-
       const authAvatar = pickAuthAvatarUrl(user);
 
       if (imagePath) {
@@ -67,18 +96,23 @@ export function useSidebarBootstrap(opts: {
           const url = await getImageUrlCached(supabase, imagePath);
           if (!cancelled) setStudentImgUrl(url ?? authAvatar ?? null);
           try {
-            if (!hintedPath) localStorage.setItem(STUDENT_IMAGE_HINT_KEY, imagePath);
+            if (!hintedPath && row?.image_path) localStorage.setItem(STUDENT_IMAGE_HINT_KEY, row.image_path);
           } catch {}
         } catch {
           if (!cancelled) setStudentImgUrl(authAvatar ?? null);
         }
       } else {
-        // No storage image — fall back to the auth provider avatar (if any)
         setStudentImgUrl(authAvatar ?? null);
       }
+
+      // Always ensure open width (no collapsed-on-load)
+      if (!isAuthRoute) setSidebarWidth('240px');
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      sub?.subscription?.unsubscribe?.();
+    };
   }, [isAuthRoute, setSidebarWidth]);
 
   return { authed, displayName, studentImgUrl, setStudentImgUrl };

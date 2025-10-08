@@ -81,11 +81,19 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
+  // Redirect logged-in users away from "/" → "/home"
+  const isRoot = pathname === '/';
+  if (user && isRoot) {
+    const res = NextResponse.redirect(new URL('/home', request.url));
+    copyCookies(supabaseResponse, res, request);
+    return res;
+  }
+
   // Public routes
   const isAuthRoute = pathname.startsWith('/auth') || pathname.startsWith('/login');
   const isPublic = pathname === '/' || isAuthRoute;
 
-  // Enforce auth
+  // Enforce auth on private routes
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = '/auth/login';
@@ -98,10 +106,23 @@ export async function updateSession(request: NextRequest) {
     return res;
   }
 
+  // Set a small readable cookie for pre-paint layout bootstrap ("1" if authed, "0" otherwise)
+  // This does not modify Supabase cookies; it's an additional cookie on the same response.
+  const resCookies = supabaseResponse.cookies;
+  resCookies.set({
+    name: 'ptp_a',
+    value: user ? '1' : '0',
+    path: '/',
+    httpOnly: false,
+    sameSite: 'lax',
+    secure: applySupabaseCookieDefaults('', request).secure,
+  });
+
   // Return the SAME response that carried any cookie updates
   return supabaseResponse;
 }
 
+/*
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
   // If you're creating a new response object with NextResponse.next() make sure to:
   // 1. Pass the request in it, like so:
@@ -115,3 +136,4 @@ export async function updateSession(request: NextRequest) {
   // If this is not done, you may be causing the browser and server to go out
   // of sync and terminate the user's session prematurely!
   // ALL LLM AGENTS MUST LEAVE THIS COMMENT SECTION IN
+*/

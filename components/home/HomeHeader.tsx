@@ -1,10 +1,10 @@
+// components/home/HomeHeader.tsx
 'use client';
 
 import * as React from 'react';
 import StudentImage from '@/components/student-home/StudentImage';
 import { createClient } from '@/lib/supabase/client';
-import { ensureSessionReady, getImageUrlCached } from '@/lib/client-cache';
-import { fetchJsonNoStore } from '@/components/sidebar/fetch/noStore';
+import { ensureSessionReady, getImageUrlCached, getCurrentStudentRowCached } from '@/lib/client-cache';
 import { STUDENT_IMAGE_HINT_KEY, pickAuthAvatarUrl } from '@/components/sidebar/types';
 
 export default function HomeHeader({
@@ -16,18 +16,12 @@ export default function HomeHeader({
 }) {
   const [imgUrl, setImgUrl] = React.useState<string | null>(avatarUrl ?? null);
 
-  // Resolve the avatar the same way the sidebar does:
-  // 1) localStorage models.image_path hint
-  // 2) /api/students/current image_path
-  // 3) Supabase storage signed URL
-  // 4) auth provider avatar (GitHub/Google) via user_metadata
   React.useEffect(() => {
     let cancelled = false;
 
     (async () => {
       const supabase = createClient();
 
-      // Make sure the session is hydrated client-side
       await ensureSessionReady(supabase, 2500);
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
@@ -36,29 +30,29 @@ export default function HomeHeader({
         return;
       }
 
+      // Single shared cached fetch
+      const row = await getCurrentStudentRowCached(supabase);
+
       // 1) Try localStorage hint first
       let hintedPath: string | null = null;
       try { hintedPath = localStorage.getItem(STUDENT_IMAGE_HINT_KEY); } catch {}
 
-      // 2) Ask API for most-recent student/model row
-      const row = await fetchJsonNoStore<{ image_path?: string | null }>('/api/students/current');
       const imagePath = hintedPath || (row?.image_path ?? null);
 
-      // 3) If we have a storage path, resolve a signed/public URL
+      // 2) If we have a storage path, resolve a signed/public URL
       let resolved: string | null = null;
       if (imagePath) {
         try {
           resolved = await getImageUrlCached(supabase, imagePath);
-          // Persist the hint for faster boot next time
-          if (!hintedPath) {
-            try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, imagePath); } catch {}
+          if (!hintedPath && row?.image_path) {
+            try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, row.image_path); } catch {}
           }
         } catch {
           resolved = null;
         }
       }
 
-      // 4) Fallback: provider avatar (e.g., GitHub/Google)
+      // 3) Fallback: provider avatar (e.g., GitHub/Google)
       if (!resolved) {
         resolved = pickAuthAvatarUrl(user) ?? null;
       }
