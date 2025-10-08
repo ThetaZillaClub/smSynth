@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useMemo, useState, useCallback } from "react";
-import RangeCapture from "@/components/range/RangeCapture";
+import RangeCapture from "@/components/setup/range/RangeCapture";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import RangeFooter from "./RangeFooter";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";

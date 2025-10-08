@@ -6,8 +6,8 @@ import useAppMode, { type ExerciseId } from "./hooks/useAppMode";
 import CurriculumMenu from "./CurriculumMenu";
 import TrainingGame from "@/components/training/TrainingGame";
 import TrainingCurriculum from "@/components/training/TrainingCurriculum";
-import RangeSetup from "@/components/range/RangeSetup";
-import VisionSetup from "@/components/vision/VisionSetup";
+import RangeSetup from "@/components/setup/range/RangeSetup";
+import VisionSetup from "@/components/setup/vision/VisionSetup";
 import {
   DEFAULT_SESSION_CONFIG,
   type SessionConfig,
