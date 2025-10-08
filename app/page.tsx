@@ -2,7 +2,7 @@
 import Hero from "@/components/landing/Hero";
 import Features from "@/components/landing/Features";
 import FaqSection from "@/components/landing/FaqSection";
-import Footer from "@/components/home/Footer";
+import Footer from "@/components/landing/Footer";
 
 export default function Home() {
   return (
