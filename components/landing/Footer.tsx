@@ -39,13 +39,13 @@ export default function Footer({ className = '' }: { className?: string }) {
 
             <p className="text-xl font-semibold">Sing in tune, on time.</p>
             <p className="text-base">
-              Personalized practice uses your singer profile to build pitch accuracy, music-space timing, and a bigger usable range.
+              Train with courses composed in your vocal range to build pitch perfect accuracy and rhythmic precision.
             </p>
 
             <ul className="mt-8 flex gap-6 text-lg">
               <li>
                 <a href="https://pitchtime.pro" className="underline-offset-4 hover:underline transition">
-                  PitchTime.pro
+                  PitchTime.Pro
                 </a>
               </li>
               <li>
