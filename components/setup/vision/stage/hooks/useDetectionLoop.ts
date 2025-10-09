@@ -1,37 +1,31 @@
+// components/vision/stage/hooks/useDetectionLoop.ts
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { HandLandmarker } from "@mediapipe/tasks-vision";
+import type { HandLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision";
 
-/**
- * Two-stage fingertip flick detection with a fast velocity gate:
- * - EARLY: cumulative upward delta >= fireUpEps AND instantaneous upVel >= minUpVel → capture tFirst
- * - CONFIRM: cumulative upward delta >= confirmUpEps → commit using tFirst (visual pulse happens here)
- * - Re-arm on downward cumulative delta >= downRearmEps after cooldown
- * - No knuckle/velocity thresholds for confirm; we only gate EARLY with minUpVel to kill drift/tremor
- * - Every frame; tiny deadband; fingertip-only (index tip = 8)
- */
 export type DetectionConfig = {
-  fireUpEps: number;      // early trigger upward cumulative delta (0..1 norm)
-  confirmUpEps: number;   // confirmation upward cumulative delta (must be > fireUpEps)
-  downRearmEps: number;   // downward cumulative delta to re-arm
-  refractoryMs: number;   // cooldown
-  noiseEps: number;       // per-frame |dy| below this ignored
-  minUpVel: number;       // minimal instantaneous upward velocity (norm units per second) to allow EARLY
+  fireUpEps: number;
+  confirmUpEps: number;
+  downRearmEps: number;
+  refractoryMs: number;
+  noiseEps: number;
+  minUpVel: number;
 };
+
+type Point = { x: number; y: number };
 
 type Props = {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   landmarkerRef: React.RefObject<HandLandmarker | null>;
   anchorMs: number | null;
-  drawSkeleton?: (lms: Array<{ x: number; y: number }>) => void;
+  drawSkeleton?: (lms: Array<Point>) => void;
   config: DetectionConfig;
   onError?: (msg: string) => void;
   recording?: boolean;
-  detectEveryN?: number; // ignored (we process every frame)
   maxEvents?: number;
   drawEnabled?: boolean;
-  onBeat?: (tSec: number) => void; // called at CONFIRM with tFirst (early) time
+  onBeat?: (tSec: number) => void;
   enabled?: boolean;
 };
 
@@ -44,7 +38,6 @@ export default function useDetectionLoop({
   config,
   onError,
   recording = false,
-  detectEveryN,
   maxEvents = 128,
   drawEnabled = true,
   onBeat,
@@ -61,7 +54,7 @@ export default function useDetectionLoop({
   const lastFireMsRef = useRef<number | null>(null);
 
   // two-stage timing
-  const pendingFirstMsRef = useRef<number | null>(null); // EARLY timestamp
+  const pendingFirstMsRef = useRef<number | null>(null);
 
   const vfcIdRef = useRef<number | null>(null);
   const rafIdRef = useRef<number | null>(null);
@@ -86,13 +79,12 @@ export default function useDetectionLoop({
     lastTsRef.current = null;
     cumUpRef.current = 0;
     cumDownRef.current = 0;
-    armedRef.current = true;          // start primed
+    armedRef.current = true;
     lastFireMsRef.current = null;
     pendingFirstMsRef.current = null;
   }, [anchorMs]);
 
   useEffect(() => {
-    // If disabled, clear once and bail.
     const canvas = canvasRef.current;
     if (!enabled) {
       if (canvas) {
@@ -116,11 +108,12 @@ export default function useDetectionLoop({
       try {
         const ts = performance.now();
         const res = lm.detectForVideo(video, ts);
-        const lms = res?.landmarks?.[0];
+        const lms = (res?.landmarks?.[0] ?? []) as NormalizedLandmark[] | undefined;
 
         // Draw overlay
         if (drawEnabled && lms && lms.length >= 21) {
-          drawSkeleton?.(lms as any);
+          const pts: Point[] = lms.map(({ x, y }) => ({ x, y }));
+          drawSkeleton?.(pts);
           didDrawRef.current = true;
         } else if (didDrawRef.current && !drawEnabled) {
           const g = canvas.getContext("2d");
@@ -145,33 +138,26 @@ export default function useDetectionLoop({
           let dy = prevY - y; // >0 up, <0 down
           if (Math.abs(dy) < config.noiseEps) dy = 0;
 
-          // dt in seconds; guard extremes
           const dtSec = Math.min(0.1, Math.max(1 / 240, (ts - prevTs) / 1000));
-          const upVel = dy > 0 ? (dy / dtSec) : 0; // normalized units per second
+          const upVel = dy > 0 ? dy / dtSec : 0;
 
           const lastFire = lastFireMsRef.current;
-          const cooling = lastFire != null && (ts - lastFire) < config.refractoryMs;
+          const cooling = lastFire != null && ts - lastFire < config.refractoryMs;
 
           if (dy > 0) {
-            // moving UP
             cumUpRef.current += dy;
             cumDownRef.current = 0;
 
             if (armedRef.current && !cooling) {
-              // EARLY gate: need both distance AND minimal instantaneous velocity
               if (
                 pendingFirstMsRef.current == null &&
                 cumUpRef.current >= config.fireUpEps &&
                 upVel >= config.minUpVel
               ) {
-                pendingFirstMsRef.current = ts; // capture early time
+                pendingFirstMsRef.current = ts; // EARLY timestamp
               }
 
-              // CONFIRM on extra distance (visual pulse + commit using EARLY time)
-              if (
-                pendingFirstMsRef.current != null &&
-                cumUpRef.current >= config.confirmUpEps
-              ) {
+              if (pendingFirstMsRef.current != null && cumUpRef.current >= config.confirmUpEps) {
                 const tFirstMs = pendingFirstMsRef.current;
                 pendingFirstMsRef.current = null;
                 lastFireMsRef.current = ts;
@@ -180,7 +166,9 @@ export default function useDetectionLoop({
                 const base = anchorMs ?? performance.now();
                 const tSec = Math.max(0, (tFirstMs - base) / 1000);
 
-                try { onBeat?.(tSec); } catch {}
+                try {
+                  onBeat?.(tSec);
+                } catch {}
 
                 if (recording) {
                   const arr = eventsSecRef.current;
@@ -193,17 +181,14 @@ export default function useDetectionLoop({
               }
             }
           } else if (dy < 0) {
-            // moving DOWN
             cumDownRef.current += -dy;
             cumUpRef.current = 0;
-            pendingFirstMsRef.current = null; // cancel early if user bails
+            pendingFirstMsRef.current = null;
 
             if (!armedRef.current && !cooling && cumDownRef.current >= config.downRearmEps) {
               armedRef.current = true;
               cumDownRef.current = 0;
             }
-          } else {
-            // no significant motion
           }
 
           lastYRef.current = y;
@@ -223,24 +208,31 @@ export default function useDetectionLoop({
       rafIdRef.current = requestAnimationFrame(runLoop);
     };
 
-    const v: any = video;
+    // Feature-detect requestVideoFrameCallback safely
+    type VideoWithVFC = HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number;
+      cancelVideoFrameCallback?: (handle: number) => void;
+    };
+    const v = video as VideoWithVFC;
     const hasVFC = typeof v.requestVideoFrameCallback === "function";
 
     if (hasVFC) {
       const tickVFC = () => {
         processFrame();
-        vfcIdRef.current = v.requestVideoFrameCallback(tickVFC);
+        vfcIdRef.current = v.requestVideoFrameCallback?.(tickVFC) ?? null;
       };
-      vfcIdRef.current = v.requestVideoFrameCallback(tickVFC);
+      vfcIdRef.current = v.requestVideoFrameCallback?.(tickVFC) ?? null;
     } else {
       rafIdRef.current = requestAnimationFrame(runLoop);
     }
 
     return () => {
-      const hasCancel = typeof (video as any).cancelVideoFrameCallback === "function";
-      try {
-        if (vfcIdRef.current != null && hasCancel) (video as any).cancelVideoFrameCallback(vfcIdRef.current);
-      } catch {}
+      canceled = true;
+      if (vfcIdRef.current != null && typeof v.cancelVideoFrameCallback === "function") {
+        try {
+          v.cancelVideoFrameCallback(vfcIdRef.current);
+        } catch {}
+      }
       if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
       vfcIdRef.current = null;
       rafIdRef.current = null;
@@ -263,6 +255,8 @@ export default function useDetectionLoop({
     onBeat,
   ]);
 
-  const resetEvents = () => { eventsSecRef.current = []; };
+  const resetEvents = () => {
+    eventsSecRef.current = [];
+  };
   return { eventsSecRef, resetEvents };
 }

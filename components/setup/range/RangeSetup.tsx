@@ -1,7 +1,7 @@
 // components/range/RangeSetup.tsx
 "use client";
 
-import React, { useMemo } from "react";
+import React from "react";
 import useRangeSteps from "@/components/setup/range/useRangeSteps";
 import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRangeUpdater from "@/hooks/students/useStudentRangeUpdater";
@@ -15,11 +15,13 @@ export default function RangeSetup({ studentId = null }: { studentId?: string | 
   const { step, setStep, confirmLow, confirmHigh } = useRangeSteps({ updateRange, a4Hz: 440 });
 
   const onConfirmLow = (hz: number, label: string) => {
-    confirmLow(hz); // persists label inside hook; we pass hz to keep signatures simple
+    void label; // label not needed here; consumed inside hook
+    confirmLow(hz);
     setStep("high");
   };
 
   const onConfirmHigh = (hz: number, label: string) => {
+    void label; // label not needed here; consumed inside hook
     confirmHigh(hz);
     // stays in "play" internally; the stage will show "done"
   };

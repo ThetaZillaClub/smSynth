@@ -82,10 +82,18 @@ export default function TrainingCurriculum({
       }
     });
 
-    setCfg((c) => ({
-      ...c,
-      scale: { ...(c.scale ?? { name: "major" }), tonicPc: bestPc } as any,
-    }));
+    // Build a fully-typed ScaleConfig without using `any`
+    type ScaleFromSession = NonNullable<SessionConfig["scale"]>;
+    setCfg((c) => {
+      const newScale: ScaleFromSession = {
+        tonicPc: bestPc,
+        name: c.scale?.name ?? "major",
+        maxPerDegree: c.scale?.maxPerDegree,
+        seed: c.scale?.seed,
+        randomTonic: c.scale?.randomTonic,
+      };
+      return { ...c, scale: newScale };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [haveRange, allowedTonicPcs, lowHz, highHz]);
 
@@ -146,9 +154,9 @@ export default function TrainingCurriculum({
       }
       let nextTonicMidis: number[] | null = null;
       if (windows.length) {
-        // NEW: use the first element of preferredOctaveIndices (array),
-        // with a legacy fallback to preferredOctaveIndex if present.
-        const legacyIdx = (cfg as any).preferredOctaveIndex;
+        // Read deprecated single index safely, without `any`
+        type LegacyCfg = { preferredOctaveIndex?: number };
+        const legacyIdx = (cfg as LegacyCfg).preferredOctaveIndex;
         const rawIdx =
           Array.isArray(cfg.preferredOctaveIndices) && cfg.preferredOctaveIndices.length
             ? cfg.preferredOctaveIndices[0]!

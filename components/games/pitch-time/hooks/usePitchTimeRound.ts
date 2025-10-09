@@ -162,7 +162,17 @@ export function usePitchTimeRound({
       setCanProceed(false);
       setShowReview(true);
     }
-  }, [engaged, step, running, gateRoot.passed, gateRoot.failed, gateRoot.heldSec, gateRoot.lastCents, rootMidi, callArpeggio, stopPlayback, rootHoldReq]);
+  }, [
+    engaged,
+    step,
+    running,
+    rootMidi,
+    callArpeggio,
+    stopPlayback,
+    rootHoldReq,
+    // exhaustive-deps: we use methods & fields from gateRoot
+    gateRoot,
+  ]);
 
   // Step 1 transitions (arpeggio)
   useEffect(() => {
@@ -187,7 +197,17 @@ export function usePitchTimeRound({
       setCanProceed(false);
       setShowReview(true);
     }
-  }, [engaged, step, running, gateArp.passed, gateArp.failed, gateRoot.heldSec, gateRoot.lastCents, arpCorrect, stopPlayback, rootHoldReq]);
+  }, [
+    engaged,
+    step,
+    running,
+    arpCorrect,
+    stopPlayback,
+    rootHoldReq,
+    // exhaustive-deps: we use methods & fields from gates
+    gateArp,
+    gateRoot,
+  ]);
 
   // Success → review (can proceed)
   useEffect(() => {

@@ -23,7 +23,7 @@ function writeEnabled(next: boolean) {
   try {
     localStorage.setItem(ENABLED_KEY, next ? "1" : "0");
   } catch {}
-  window.dispatchEvent(new CustomEvent(BUS_EVENT, { detail: { enabled: next } }));
+  window.dispatchEvent(new CustomEvent<{ enabled: boolean }>(BUS_EVENT, { detail: { enabled: next } }));
 }
 
 type Ctx = { enabled: boolean; setEnabled: (next: boolean) => void };
@@ -38,12 +38,14 @@ export function useVisionEnabled(): Ctx {
 
   React.useEffect(() => {
     if (ctx) return;
-    const onChange = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
+
+    const onChange: EventListener = (e) => {
+      const detail = (e as CustomEvent<{ enabled: boolean }>).detail;
       setFallbackEnabled(!!detail?.enabled);
     };
-    window.addEventListener(BUS_EVENT, onChange as any);
-    return () => window.removeEventListener(BUS_EVENT, onChange as any);
+
+    window.addEventListener(BUS_EVENT, onChange);
+    return () => window.removeEventListener(BUS_EVENT, onChange);
   }, [ctx]);
 
   const setEnabled = React.useCallback(
@@ -75,7 +77,7 @@ export default function VisionLayout() {
     <VisionCtx.Provider value={value}>
       <div className="space-y-8">
         <EnabledRow />
-        <LatencyRow /> {/* ⬅️ NEW row */}
+        <LatencyRow />
       </div>
     </VisionCtx.Provider>
   );

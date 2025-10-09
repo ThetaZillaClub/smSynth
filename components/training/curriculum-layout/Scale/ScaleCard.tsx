@@ -1,7 +1,7 @@
 // components/training/curriculum-layout/Scale/ScaleCard.tsx
 "use client";
 import React, { useMemo } from "react";
-import type { SessionConfig } from "../../session/types";
+import type { SessionConfig, RhythmConfig, ScaleConfig } from "../../session/types";
 import type { ScaleName } from "@/utils/phrase/scales";
 import Field from "../Field";
 import { SCALE_OPTIONS } from "../Options";
@@ -72,21 +72,24 @@ export default function ScaleCard({
     [allowedTonicPcs, rangeHint]
   );
 
-  const scaleCfg =
-    cfg.scale ??
-    ({ tonicPc: 0, name: "major" as ScaleName, maxPerDegree: 2, randomTonic: false } as const);
+  // Strongly-typed scale defaults
+  const scaleCfg: ScaleConfig =
+    cfg.scale ?? { tonicPc: 0, name: "major", maxPerDegree: 2, randomTonic: false };
 
   const PC_LABELS_FLAT = useMemo(
     () => ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],
     []
   );
 
-  // —— Rhythm content (melody) rest controls — read from cfg.rhythm
-  const rhythmCfg = useMemo(() => (cfg.rhythm ?? {}) as any, [cfg.rhythm]);
+  // Rhythm config used for *melody/content* rest controls (typed; no `any`)
+  const rhythmCfg: RhythmConfig = useMemo(
+    () => cfg.rhythm ?? { mode: "random" },
+    [cfg.rhythm]
+  );
   const contentAllowRests: boolean = rhythmCfg.contentAllowRests !== false;
   const contentRestProb: number = rhythmCfg.contentRestProb ?? 0.3;
 
-  // ——— Random-key preferred octaves (MULTI-SELECT) ———
+  // Random-key preferred octaves (MULTI-SELECT)
   const selectedOctIdx = useMemo(() => {
     const raw = cfg.preferredOctaveIndices ?? [1];
     const clean = Array.from(new Set(raw.map((i) => Math.max(0, Math.floor(i)))));
@@ -123,7 +126,7 @@ export default function ScaleCard({
         <Field label="Random key (in range)">
           <FancyCheckbox
             checked={!!scaleCfg.randomTonic}
-            onChange={(next) => onChange({ scale: { ...scaleCfg, randomTonic: next } as any })}
+            onChange={(next) => onChange({ scale: { ...scaleCfg, randomTonic: next } })}
             label={<span>{scaleCfg.randomTonic ? "On" : "Off"}</span>}
           />
         </Field>
@@ -138,7 +141,7 @@ export default function ScaleCard({
                 scale: {
                   ...scaleCfg,
                   tonicPc: Math.max(0, Math.min(11, Number(e.target.value) || 0)),
-                } as any,
+                },
               })
             }
           >
@@ -180,17 +183,21 @@ export default function ScaleCard({
                 scale: {
                   ...scaleCfg,
                   maxPerDegree: Math.max(1, Math.floor(Number(e.target.value) || 1)),
-                } as any,
+                },
               })
             }
           />
         </Field>
 
-        {/* Melody/content rest controls (added back) */}
+        {/* Melody/content rest controls */}
         <Field label="Melody: allow rests">
           <FancyCheckbox
             checked={contentAllowRests}
-            onChange={(next) => onChange({ rhythm: { ...rhythmCfg, contentAllowRests: next } as any })}
+            onChange={(next) =>
+              onChange({
+                rhythm: { ...rhythmCfg, contentAllowRests: next },
+              })
+            }
             label={<span>{contentAllowRests ? "Enabled" : "Disabled"}</span>}
           />
         </Field>
@@ -210,7 +217,7 @@ export default function ScaleCard({
                 rhythm: {
                   ...rhythmCfg,
                   contentRestProb: Math.max(0, Math.min(0.95, Number(e.target.value) || 0)),
-                } as any,
+                },
               })
             }
           />
@@ -232,7 +239,9 @@ export default function ScaleCard({
                       const set = new Set(selectedOctIdx);
                       if (set.has(i)) set.delete(i);
                       else set.add(i);
-                      onChange({ preferredOctaveIndices: Array.from(set).sort((a, b) => a - b) });
+                      onChange({
+                        preferredOctaveIndices: Array.from(set).sort((a, b) => a - b),
+                      });
                     }}
                     className={[
                       "inline-flex items-center justify-center w-7 h-7 rounded border text-xs",

@@ -32,13 +32,16 @@ import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 import { useVisionEnabled } from "@/components/settings/vision/vision-layout";
 import useVisionLatency from "@/hooks/vision/useVisionLatency";
 
+// Narrow type for rhythm config to avoid `any`.
+type RhythmConfig = {
+  lineEnabled?: boolean;
+  detectEnabled?: boolean;
+};
+
 type Props = {
   title?: string;
-  studentId?: string | null;
   sessionConfig?: SessionConfig;
   studentRowId?: string | null;
-  studentName?: string | null;
-  genderLabel?: "male" | "female" | null;
   rangeLowLabel?: string | null;
   rangeHighLabel?: string | null;
 };
@@ -54,11 +57,8 @@ type TakeSnapshot = {
 
 export default function TrainingGame({
   title = "Training",
-  studentId = null,
   sessionConfig = DEFAULT_SESSION_CONFIG,
   studentRowId = null,
-  studentName = null,
-  genderLabel = null,
   rangeLowLabel = null,
   rangeHighLabel = null,
 }: Props) {
@@ -74,7 +74,8 @@ export default function TrainingGame({
     highHz: highHz ?? null,
   });
 
-  const step: "play" = "play";
+  // prefer-as-const: literal assertion instead of explicit string literal type
+  const step = "play" as const;
   const {
     bpm, ts, leadBars, restBars, noteValue, noteDurSec, view,
     callResponseSequence, exerciseLoops, regenerateBetweenTakes,
@@ -146,10 +147,10 @@ export default function TrainingGame({
   const pretestActive = pretestRequired && pretest.status !== "done";
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
-  // Rhythm visibility + detection flags (from session config)
-  const rhythmCfgAny = (sessionEff.rhythm ?? {}) as any;
-  const rhythmLineEnabled = rhythmCfgAny.lineEnabled !== false;
-  const rhythmDetectEnabled = rhythmCfgAny.detectEnabled !== false;
+  // Rhythm visibility + detection flags (from session config) — avoid `any` usage
+  const rhythmCfg = (sessionEff.rhythm ?? {}) as RhythmConfig;
+  const rhythmLineEnabled = rhythmCfg.lineEnabled !== false;
+  const rhythmDetectEnabled = rhythmCfg.detectEnabled !== false;
 
   // Global Vision toggle (settings)
   const { enabled: visionEnabled } = useVisionEnabled();
@@ -160,8 +161,6 @@ export default function TrainingGame({
 
   const { isRecording, start: startRec, stop: stopRec, startedAtMs, warm: warmRecorder } =
     useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
-
-  const [reviewVisible, setReviewVisible] = useState(false);
 
   const loop = usePracticeLoop({
     step, lowHz: lowHz ?? null, highHz: highHz ?? null, phrase, words: fabric.words,
@@ -174,16 +173,8 @@ export default function TrainingGame({
     autoContinue: !!loopingMode,
     onRestComplete: () => {
       if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
-      if (!loopingMode) setReviewVisible(true);
     },
   });
-
-  const startPretestSafe = async () => {
-    loop.clearAll();
-    stopPlayback();
-    await stopRec().catch(() => {});
-    pretest.start();
-  };
 
   const shouldRecord = (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
   useRecorderAutoSync({ enabled: step === "play", shouldRecord, isRecording, startRec, stopRec });
@@ -194,18 +185,18 @@ export default function TrainingGame({
     playLeadInTicks, secPerBeat,
   });
 
-const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
+  const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
 
-// ✅ match setup thresholds
-const hand = useHandBeat({
-  latencyMs: calibratedLatencyMs ?? gestureLatencyMs,
-  fireUpEps: 0.004,
-  confirmUpEps: 0.012,
-  downRearmEps: 0.006,
-  refractoryMs: 90,
-  noiseEps: 0.0015,
-  minUpVel: 0.25,
-});
+  // ✅ match setup thresholds
+  const hand = useHandBeat({
+    latencyMs: calibratedLatencyMs ?? gestureLatencyMs,
+    fireUpEps: 0.004,
+    confirmUpEps: 0.012,
+    downRearmEps: 0.006,
+    refractoryMs: 90,
+    noiseEps: 0.0015,
+    minUpVel: 0.25,
+  });
 
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
   const samplerAnchor: number | null = !pretestActive ? (loop.anchorMs ?? null) : null;
@@ -385,7 +376,7 @@ const hand = useHandBeat({
       isReady={isReady && (!!phrase || pretestActive)}
       step={step}
       loopPhase={pretestActive ? "call" : loop.loopPhase}
-      rhythm={(rhythmEffective ?? undefined) as any}
+      rhythm={rhythmEffective ?? undefined}
       melodyRhythm={fabric.melodyRhythm ?? undefined}
       bpm={bpm}
       den={ts.den}

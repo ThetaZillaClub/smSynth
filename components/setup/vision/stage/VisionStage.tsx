@@ -25,13 +25,10 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
   [0, 5], [0, 9], [0, 13], [0, 17],
 ];
 
-// 👇 top gap above the video/canvas (safe-area aware)
-// tweak the 40px to taste
 const TOP_GAP_CSS = "calc(env(safe-area-inset-top, 0px) + 40px)";
 
 export default function VisionStage() {
   const stageAreaRef = useRef<HTMLDivElement | null>(null);
-  // NEW: inner viewport that actually hosts video+canvas
   const stageViewportRef = useRef<HTMLDivElement | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -79,16 +76,20 @@ export default function VisionStage() {
     ready: boolean;
   };
 
-  // IMPORTANT: size the canvas to the *viewport* (below the top gap), not the whole stage
   useCanvasSizer(stageViewportRef, canvasRef, { maxDpr: 2 });
 
-  const { draw: drawSkeleton, clear: clearSkeleton, pulse } = useSkeletonDrawer(canvasRef, videoRef, {
-    connections: HAND_CONNECTIONS,
-    drawEveryN: 1,
-    tipIndex: 8,
-    objectContain: true,
-    pulseMs: 140,
-  } as any);
+  const { draw: drawSkeleton, clear: clearSkeleton, pulse } = useSkeletonDrawer(
+    canvasRef,
+    videoRef,
+    {
+      connections: HAND_CONNECTIONS,
+      drawEveryN: 1,
+      tipIndex: 8,
+      objectContain: true,
+      pulseMs: 140,
+      mirrorX: false,
+    }
+  );
 
   const detectionConfig: DetectionConfig = useMemo(
     () => ({
@@ -115,18 +116,23 @@ export default function VisionStage() {
     config: detectionConfig,
     onError: setError,
     recording,
-    detectEveryN: 1,
     maxEvents: 128,
     drawEnabled,
     enabled: detEnabled,
-    onBeat: () => { if (drawEnabled) pulse(); },
+    onBeat: () => {
+      if (drawEnabled) pulse();
+    },
   });
 
   const uiBeat = useUiBeatCounter(phase, anchorMs, secPerBeat, leadBeats, runBeats);
   const { playLeadInTicks } = usePhrasePlayer();
 
   useEffect(() => {
-    return () => { try { clearSkeleton(); } catch {} };
+    return () => {
+      try {
+        clearSkeleton();
+      } catch {}
+    };
   }, [clearSkeleton]);
 
   const startCalibration = useCallback(async () => {
@@ -169,14 +175,18 @@ export default function VisionStage() {
         // greedy 1-1 match with 400ms bound
         const maxMs = 400;
         const used = new Set<number>();
-        const deltasMs: number[] = []; // (detected - expected) in ms (signed)
+        const deltasMs: number[] = [];
 
         for (const tExp of expected) {
-          let bestJ = -1, bestErr = Infinity;
+          let bestJ = -1,
+            bestErr = Infinity;
           for (let j = 0; j < detected.length; j++) {
             if (used.has(j)) continue;
             const errMs = Math.abs((detected[j] - tExp) * 1000);
-            if (errMs < bestErr) { bestErr = errMs; bestJ = j; }
+            if (errMs < bestErr) {
+              bestErr = errMs;
+              bestJ = j;
+            }
           }
           if (bestJ >= 0 && bestErr <= maxMs) {
             used.add(bestJ);
@@ -184,7 +194,6 @@ export default function VisionStage() {
           }
         }
 
-        // Robust center: IQR filter, then median ABS error
         const filtered = iqrFilter(deltasMs.filter((d) => Number.isFinite(d)));
         const medAbs = median(filtered.map((d) => Math.abs(d)));
 
@@ -192,12 +201,9 @@ export default function VisionStage() {
 
         setMatched(deltasMs.length);
         setResultMs(latency);
-        /* PATCH: persist & broadcast the calibration result */
         try {
           if (latency != null) localStorage.setItem(KEY, String(latency));
           else localStorage.removeItem(KEY);
-
-          // Tell listeners (e.g., TrainingGame) that latency changed
           window.dispatchEvent(
             new CustomEvent("vision:latency-changed", { detail: { latencyMs: latency ?? null } })
           );
@@ -210,9 +216,8 @@ export default function VisionStage() {
 
   return (
     <div className="w-full h-full flex flex-col bg-transparent" style={{ cursor: "default" }}>
-      {/* STAGE AREA (constrained by footer) */}
+      {/* STAGE AREA */}
       <div ref={stageAreaRef} className="relative flex-1 min-h-0 bg-transparent">
-        {/* viewport creates blank space above video/canvas */}
         <div
           ref={stageViewportRef}
           className="absolute left-0 right-0 bottom-0"
@@ -235,7 +240,7 @@ export default function VisionStage() {
         </div>
       </div>
 
-      {/* FOOTER (normal flow, white card) */}
+      {/* FOOTER */}
       <StageFooter
         phase={phase}
         uiBeat={uiBeat}

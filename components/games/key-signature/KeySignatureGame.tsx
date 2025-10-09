@@ -7,8 +7,6 @@ import useStudentRange from "@/hooks/students/useStudentRange";
 import usePhrasePlayer from "@/hooks/audio/usePhrasePlayer";
 import { midiToNoteName } from "@/utils/pitch/pitchMath";
 import { DEFAULT_SESSION_CONFIG } from "@/components/training/session";
-import type { NoteValue } from "@/utils/time/tempo";
-import { noteValueToSeconds } from "@/utils/time/tempo";
 import { useKeySignatureKey } from "./hooks/useKeySignatureKey";
 import { useKeySignaturePhrase } from "./hooks/useKeySignaturePhrase";
 import { useTonicGate } from "./hooks/useTonicGate";
@@ -52,7 +50,6 @@ export default function KeySignatureGame({
   const liveHz = typeof liveHzRaw === "number" ? liveHzRaw : null;
 
   const bpm = DEFAULT_SESSION_CONFIG.bpm;
-  const eighthSec = noteValueToSeconds("eighth" as NoteValue, bpm, DEFAULT_SESSION_CONFIG.ts.den);
 
   // --- Tonic & key selection
   const {

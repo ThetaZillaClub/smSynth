@@ -14,6 +14,10 @@ export const PHR_KEY = "audio:phraseGain:v1";
 const DEFAULT_SLIDER = 1.0;
 const DEFAULT_GAIN = sliderToGain(DEFAULT_SLIDER);
 
+type AudioWhich = "metronome" | "phrase";
+type AudioGainEventDetail = { which: AudioWhich; gain: number };
+type AudioGainCustomEvent = CustomEvent<AudioGainEventDetail>;
+
 type AudioCtx = {
   metGain: number;
   setMetGain: (g: number) => void;
@@ -33,13 +37,11 @@ function readGain(key: string, fallback = DEFAULT_GAIN): number {
   }
 }
 
-function writeGain(key: string, gain: number, which: "metronome" | "phrase") {
+function writeGain(key: string, gain: number, which: AudioWhich) {
   try {
     localStorage.setItem(key, String(gain));
   } catch {}
-  window.dispatchEvent(
-    new CustomEvent(AUDIO_EVENT, { detail: { which, gain } })
-  );
+  window.dispatchEvent(new CustomEvent<AudioGainEventDetail>(AUDIO_EVENT, { detail: { which, gain } }));
 }
 
 export function useAudioGains(): AudioCtx {
@@ -55,39 +57,49 @@ export function useAudioGains(): AudioCtx {
 
   React.useEffect(() => {
     if (ctx) return;
+
     const onStorage = (e: StorageEvent) => {
       if (e.key === MET_KEY) setMetGainState(readGain(MET_KEY, metGain));
       if (e.key === PHR_KEY) setPhraseGainState(readGain(PHR_KEY, phraseGain));
     };
-    const onBus = (e: Event) => {
-      const d = (e as CustomEvent).detail;
+
+    const onBus: EventListener = (ev: Event) => {
+      const d = (ev as AudioGainCustomEvent).detail;
       if (d?.which === "metronome") setMetGainState(readGain(MET_KEY, metGain));
       if (d?.which === "phrase") setPhraseGainState(readGain(PHR_KEY, phraseGain));
     };
+
     window.addEventListener("storage", onStorage);
-    window.addEventListener(AUDIO_EVENT, onBus as any);
+    window.addEventListener(AUDIO_EVENT, onBus);
+
     return () => {
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener(AUDIO_EVENT, onBus as any);
+      window.removeEventListener(AUDIO_EVENT, onBus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
-  const setMetGain = React.useCallback((g: number) => {
-    if (ctx) ctx.setMetGain(g);
-    else {
-      setMetGainState(g);
-      writeGain(MET_KEY, g, "metronome");
-    }
-  }, [ctx]);
+  const setMetGain = React.useCallback(
+    (g: number) => {
+      if (ctx) ctx.setMetGain(g);
+      else {
+        setMetGainState(g);
+        writeGain(MET_KEY, g, "metronome");
+      }
+    },
+    [ctx]
+  );
 
-  const setPhraseGain = React.useCallback((g: number) => {
-    if (ctx) ctx.setPhraseGain(g);
-    else {
-      setPhraseGainState(g);
-      writeGain(PHR_KEY, g, "phrase");
-    }
-  }, [ctx]);
+  const setPhraseGain = React.useCallback(
+    (g: number) => {
+      if (ctx) ctx.setPhraseGain(g);
+      else {
+        setPhraseGainState(g);
+        writeGain(PHR_KEY, g, "phrase");
+      }
+    },
+    [ctx]
+  );
 
   return ctx ?? { metGain, setMetGain, phraseGain, setPhraseGain };
 }

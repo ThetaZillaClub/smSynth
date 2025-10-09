@@ -22,18 +22,36 @@ export default function DisplayNameRow({ initialName, onChanged }: Props) {
   const [err, setErr] = React.useState<string | null>(null);
   const isDirty = value.trim() && value.trim() !== (initialName ?? '').trim();
 
-  React.useEffect(() => { setValue(initialName ?? ''); }, [initialName]);
+  React.useEffect(() => {
+    setValue(initialName ?? '');
+  }, [initialName]);
 
   const onSave = async () => {
     setErr(null);
     setLoading(true);
+
     try {
       const next = value.trim();
-      if (!next) throw new Error("Display name can't be empty.");
+      if (!next) {
+        setErr("Display name can't be empty.");
+        return;
+      }
 
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: authErr,
+      } = await supabase.auth.getSession();
+
+      if (authErr) {
+        setErr(authErr.message);
+        return;
+      }
+
       const uid = session?.user?.id;
-      if (!uid) throw new Error('Not signed in');
+      if (!uid) {
+        setErr('Not signed in');
+        return;
+      }
 
       const { data: latest, error: findErr } = await supabase
         .from('models')
@@ -43,20 +61,27 @@ export default function DisplayNameRow({ initialName, onChanged }: Props) {
         .limit(1)
         .maybeSingle();
 
-      if (findErr) throw findErr;
-      if (!latest?.id) throw new Error('No model row to update.');
+      if (findErr) {
+        setErr(findErr.message);
+        return;
+      }
+      if (!latest?.id) {
+        setErr('No model row to update.');
+        return;
+      }
 
       const { error: updErr } = await supabase
         .from('models')
         .update({ creator_display_name: next })
         .eq('id', latest.id);
 
-      if (updErr) throw updErr;
+      if (updErr) {
+        setErr(updErr.message);
+        return;
+      }
 
       onChanged(next);
       setEditing(false);
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to update display name.');
     } finally {
       setLoading(false);
     }
@@ -95,7 +120,11 @@ export default function DisplayNameRow({ initialName, onChanged }: Props) {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => { setEditing(false); setValue(initialName ?? ''); setErr(null); }}
+                onClick={() => {
+                  setEditing(false);
+                  setValue(initialName ?? '');
+                  setErr(null);
+                }}
                 disabled={loading}
                 className={BTN}
               >

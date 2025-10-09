@@ -1,7 +1,7 @@
 // components/training/curriculum-layout/Rhythm/RhythmCard.tsx
 "use client";
 import React, { useMemo } from "react";
-import type { SessionConfig } from "../../session/types";
+import type { SessionConfig, RhythmConfig } from "../../session/types";
 import Field from "../Field";
 
 function FancyCheckbox({
@@ -95,21 +95,26 @@ export default function RhythmCard({
   cfg: SessionConfig;
   onChange: (patch: Partial<SessionConfig>) => void;
 }) {
-  // This card controls the blue “rhythm line” only (not the melody content rhythm).
-  // TrainingGame reads these via (rhythm as any).lineEnabled / allowRests / restProb.
-  const rhythmCfg = useMemo(
-    () =>
-      (cfg.rhythm ?? {
-        lineEnabled: true,
-        allowRests: true,
-        restProb: 0.3,
-        detectEnabled: true,
-      }) as any,
+  // Keep whatever lives on cfg.rhythm, typed, with a minimal default
+  const rawRhythm: RhythmConfig = useMemo(
+    () => cfg.rhythm ?? { mode: "random" },
     [cfg.rhythm]
   );
 
-  const lineEnabled: boolean = rhythmCfg.lineEnabled !== false;
-  const detectEnabled: boolean = rhythmCfg.detectEnabled !== false;
+  // Apply UI defaults on top of existing values
+  const rhythmCfg: RhythmConfig = useMemo(
+    () => ({
+      lineEnabled: true,
+      detectEnabled: true,
+      allowRests: true,
+      restProb: 0.3,
+      ...rawRhythm,
+    }),
+    [rawRhythm]
+  );
+
+  const lineEnabled = rhythmCfg.lineEnabled !== false;
+  const detectEnabled = rhythmCfg.detectEnabled !== false;
 
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
@@ -121,7 +126,9 @@ export default function RhythmCard({
         <FancyCheckbox
           checked={lineEnabled}
           onChange={(next) =>
-            onChange({ rhythm: { ...rhythmCfg, lineEnabled: next } as any })
+            onChange({
+              rhythm: { ...rawRhythm, lineEnabled: next },
+            })
           }
           label={<span>{lineEnabled ? "Shown" : "Hidden"}</span>}
         />
@@ -132,24 +139,27 @@ export default function RhythmCard({
           checked={detectEnabled}
           onChange={(next) =>
             onChange({
-              rhythm: { ...rhythmCfg, detectEnabled: next } as any,
+              rhythm: { ...rawRhythm, detectEnabled: next },
             })
           }
-          label={
-            <span>{detectEnabled ? "On (uses camera)" : "Off"}</span>
-          }
+          label={<span>{detectEnabled ? "On (uses camera)" : "Off"}</span>}
         />
       </Field>
+
       {lineEnabled ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
           <RestControls
             allowRests={rhythmCfg.allowRests !== false}
-            restProb={rhythmCfg.restProb ?? 0.3}
+            restProb={typeof rhythmCfg.restProb === "number" ? rhythmCfg.restProb : 0.3}
             onAllowChange={(next) =>
-              onChange({ rhythm: { ...rhythmCfg, allowRests: next } as any })
+              onChange({
+                rhythm: { ...rawRhythm, allowRests: next },
+              })
             }
             onProbChange={(next) =>
-              onChange({ rhythm: { ...rhythmCfg, restProb: next } as any })
+              onChange({
+                rhythm: { ...rawRhythm, restProb: next },
+              })
             }
           />
         </div>

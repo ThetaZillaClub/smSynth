@@ -3,9 +3,9 @@
 import { cn } from '@/lib/utils'
 import { type UseSupabaseUploadReturn } from '@/hooks/setup/use-supabase-upload'
 import { Button } from '@/components/auth/button'
-import { CheckCircle, File, Loader2, Upload, X } from 'lucide-react'
+import { CheckCircle, File, Loader2, X } from 'lucide-react'
 import Image from 'next/image'
-import { createContext, type PropsWithChildren, useCallback, useContext } from 'react'
+import { createContext, type PropsWithChildren, useCallback, useContext, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 export const formatBytes = (
   bytes: number,
@@ -61,7 +61,7 @@ const Dropzone = ({
           role: 'button',
           tabIndex: 0,
           onClick: triggerFile,
-          onKeyDown: (e: any) => {
+          onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
               triggerFile()

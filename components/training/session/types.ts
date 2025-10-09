@@ -23,39 +23,36 @@ export type ScaleConfig = {
   randomTonic?: boolean;
 };
 
+/** Fields shared by all rhythm modes + UI/game toggles used by RhythmCard/TrainingGame */
+type RhythmCommon = {
+  available?: NoteValue[];
+  restProb?: number;
+  allowRests?: boolean;
+  contentRestProb?: number;
+  contentAllowRests?: boolean;
+  lengthBars?: number;
+  seed?: number;
+
+  /** Show the blue rhythm guide line under the view */
+  lineEnabled?: boolean;
+
+  /** Enable camera-based rhythm detection */
+  detectEnabled?: boolean;
+};
+
 export type RhythmConfig =
-  | {
+  | ({
       mode: "sequence";
       pattern: "asc" | "desc" | "asc-desc" | "desc-asc";
-      restProb?: number;
-      allowRests?: boolean;
-      contentRestProb?: number;
-      contentAllowRests?: boolean;
-      available?: NoteValue[];
-      lengthBars?: number;
-      seed?: number;
-    }
-  | {
+    } & RhythmCommon)
+  | ({
       mode: "random";
-      available?: NoteValue[];
-      restProb?: number;
-      allowRests?: boolean;
-      contentRestProb?: number;
-      contentAllowRests?: boolean;
-      lengthBars?: number;
-      seed?: number;
-    }
-  | {
+    } & RhythmCommon)
+  | ({
       mode: "interval";
-      available?: NoteValue[];
-      restProb?: number;
-      allowRests?: boolean;
-      contentRestProb?: number;
-      contentAllowRests?: boolean;
       intervals: number[];
       numIntervals: number;
-      seed?: number;
-    };
+    } & RhythmCommon);
 
 export type ViewMode = "piano" | "sheet";
 
@@ -144,6 +141,9 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
     contentAllowRests: true,
     lengthBars: 2,
     seed: 0xA5F3D7,
+    // Optional UI defaults (explicit for clarity; card also defaults these)
+    lineEnabled: true,
+    detectEnabled: true,
   },
 
   customPhrase: null,

@@ -29,12 +29,15 @@ export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): Return
 
   const canPlay = useMemo(() => lowHz != null && highHz != null, [lowHz, highHz]);
 
-  const snapToEqualTempered = (hz: number) => {
-    const m = Math.round(hzToMidi(hz, a4Hz));
-    const snappedHz = a4Hz * Math.pow(2, (m - 69) / 12);
-    const { name, octave } = midiToNoteName(m, { useSharps: true, octaveAnchor: "C" });
-    return { label: `${name}${octave}`, snappedHz };
-  };
+  const snapToEqualTempered = useCallback(
+    (hz: number) => {
+      const m = Math.round(hzToMidi(hz, a4Hz));
+      const snappedHz = a4Hz * Math.pow(2, (m - 69) / 12);
+      const { name, octave } = midiToNoteName(m, { useSharps: true, octaveAnchor: "C" });
+      return { label: `${name}${octave}`, snappedHz };
+    },
+    [a4Hz]
+  );
 
   const confirmLow = useCallback(
     (hz: number) => {
@@ -43,7 +46,7 @@ export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): Return
       void updateRange("low", label);
       setStep("high");
     },
-    [a4Hz, updateRange] // a4Hz is stable but include for completeness
+    [snapToEqualTempered, updateRange]
   );
 
   const confirmHigh = useCallback(
@@ -53,7 +56,7 @@ export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): Return
       void updateRange("high", label);
       setStep("play");
     },
-    [a4Hz, updateRange]
+    [snapToEqualTempered, updateRange]
   );
 
   return { step, setStep, lowHz, highHz, canPlay, confirmLow, confirmHigh };

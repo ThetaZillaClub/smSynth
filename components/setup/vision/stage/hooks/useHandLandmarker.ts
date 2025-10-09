@@ -27,17 +27,20 @@ export default function useHandLandmarker(onError?: (msg: string) => void) {
     const originalError = console.error;
     const NOISY_RE =
       /^(INFO:\s+Created TensorFlow Lite .* delegate|INFO:\s+Metal delegate|INFO:\s+WebNN delegate)\b/i;
-    console.error = (...args: any[]) => {
+
+    // Mute noisy INFO logs from MediaPipe
+    console.error = ((...args: unknown[]) => {
       try {
         const first = args?.[0];
         if (typeof first === "string" && NOISY_RE.test(first)) return;
       } catch {}
-      return (originalError as any)(...args);
-    };
+      return (originalError as (...a: Parameters<typeof console.error>) => void)(
+        ...(args as Parameters<typeof console.error>)
+      );
+    }) as typeof console.error;
 
     (async () => {
       try {
-        // Create from local files (no CDN)
         const lm = await HandLandmarker.createFromOptions(
           { wasmLoaderPath: WASM_LOADER, wasmBinaryPath: WASM_BINARY },
           {
@@ -49,7 +52,9 @@ export default function useHandLandmarker(onError?: (msg: string) => void) {
           }
         );
         if (closed) {
-          try { lm.close(); } catch {}
+          try {
+            lm.close();
+          } catch {}
           return;
         }
         landmarkerRef.current = lm;
@@ -61,9 +66,13 @@ export default function useHandLandmarker(onError?: (msg: string) => void) {
 
     return () => {
       closed = true;
-      try { landmarkerRef.current?.close(); } catch {}
+      try {
+        landmarkerRef.current?.close();
+      } catch {}
       landmarkerRef.current = null;
-      try { console.error = originalError; } catch {}
+      try {
+        console.error = originalError;
+      } catch {}
       setReady(false);
     };
   }, [onError]);

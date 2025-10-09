@@ -16,7 +16,7 @@ export default function LessonClient({
   lessonTitle: string;
   lessonConfig: Partial<SessionConfig>;
 }) {
-  const { studentRowId, studentName, genderLabel, rangeLowLabel, rangeHighLabel } =
+  const { studentRowId, rangeLowLabel, rangeHighLabel } =
     useStudentRow({ studentIdFromQuery: null });
 
   const { lowHz, highHz } = useStudentRange(studentRowId, {
@@ -35,8 +35,6 @@ export default function LessonClient({
       title={`${courseTitle} — ${lessonTitle}`}
       sessionConfig={sessionConfig}
       studentRowId={studentRowId}
-      studentName={studentName}
-      genderLabel={genderLabel}
       rangeLowLabel={rangeLowLabel}
       rangeHighLabel={rangeHighLabel}
     />

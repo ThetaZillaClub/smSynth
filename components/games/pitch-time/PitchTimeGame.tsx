@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import GameLayout from "@/components/training/layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useStudentRange from "@/hooks/students/useStudentRange";
@@ -54,7 +54,7 @@ export default function PitchTimeGame({
   const leadInSec = (ts.num * 60) / bpm;
 
   // Root selection / preload
-  const { rootMidi, setRootMidi, pickRoot, rootHz, rootLabel } = usePitchTimeRoot({
+  const { rootMidi, setRootMidi, pickRoot, rootLabel } = usePitchTimeRoot({
     lowHz,
     highHz,
     engaged,
@@ -177,11 +177,12 @@ export default function PitchTimeGame({
             return playMidiList(seqMidis, quarterSec);
           }}
           onStop={stopPlayback}
-          onNext={round.nextRound}
           score={round.lastScore}
-          sessionScores={round.sessionScores}
-          canProceed={round.canProceed}
-          onRetry={round.retry}
+          phrase={phrase ?? null}
+          bpm={bpm}
+          den={ts.den}
+          tsNum={ts.num}
+          tonicPc={DEFAULT_SESSION_CONFIG.scale?.tonicPc ?? 0}
         />
       )}
     </GameLayout>

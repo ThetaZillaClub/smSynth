@@ -35,6 +35,7 @@ export default function useCameraStream({
   useEffect(() => {
     let cancelled = false;
     let s: MediaStream | null = null;
+    const videoEl = videoRef.current; // capture once for cleanup symmetry
 
     (async () => {
       try {
@@ -45,13 +46,12 @@ export default function useCameraStream({
         });
         if (cancelled) return;
         streamRef.current = s;
-        const v = videoRef.current;
-        if (v) {
-          v.srcObject = s;
-          v.playsInline = true;
-          v.muted = true;
+        if (videoEl) {
+          videoEl.srcObject = s;
+          videoEl.playsInline = true;
+          videoEl.muted = true;
           // Do NOT await play() — prevent race with a later pause() on cleanup.
-          const p = v.play();
+          const p = videoEl.play();
           if (p && typeof p.catch === "function") p.catch(() => {});
         }
       } catch (e) {
@@ -61,14 +61,13 @@ export default function useCameraStream({
 
     return () => {
       cancelled = true;
-      const v = videoRef.current;
       try {
         s?.getTracks().forEach((t) => t.stop());
       } catch {}
       try {
-        if (v) {
-          v.pause();
-          v.srcObject = null;
+        if (videoEl) {
+          videoEl.pause();
+          videoEl.srcObject = null;
         }
       } catch {}
       streamRef.current = null;

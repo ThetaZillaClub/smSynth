@@ -10,25 +10,19 @@ import { Dropzone, DropzoneContent, DropzoneEmptyState } from '@/components/auth
 type Props = {
   name: string;
   uid: string | null;                         // provided by parent; avoids another getSession() call
-  initialAvatarPath?: string | null;          // (unused as SSoT) - kept for compatibility
+  initialAvatarPath?: string | null;          // kept for compatibility (not used internally)
   initialAvatarUrl?: string | null;           // already-signed (or public) URL ready to render
   onAvatarChanged?: (url: string | null, path: string | null) => void;
 };
 
-export default function AvatarRow({
-  name,
-  uid,
-  initialAvatarPath = null,
-  initialAvatarUrl = null,
-  onAvatarChanged,
-}: Props) {
+export default function AvatarRow(props: Props) {
+  const { name, uid, initialAvatarUrl = null, onAvatarChanged } = props;
+
   const supabase = React.useMemo(() => createClient(), []);
-  const [avatarPath, setAvatarPath] = React.useState<string | null>(initialAvatarPath);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(initialAvatarUrl);
   const [err, setErr] = React.useState<string | null>(null);
 
   // Keep internal state in sync if parent updates props (e.g., after bootstrap finishes)
-  React.useEffect(() => { setAvatarPath(initialAvatarPath ?? null); }, [initialAvatarPath]);
   React.useEffect(() => { setAvatarUrl(initialAvatarUrl ?? null); }, [initialAvatarUrl]);
 
   // Dropzone is only relevant when authenticated
@@ -78,12 +72,12 @@ export default function AvatarRow({
         if (error) throw error;
 
         const url = data?.signedUrl ?? null;
-        setAvatarPath(path);
         setAvatarUrl(url);
         try { localStorage.setItem('ptp:studentImagePath', path); } catch {}
         onAvatarChanged?.(url, path);
-      } catch (e: any) {
-        setErr(e?.message || 'Failed to save new avatar.');
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : 'Failed to save new avatar.';
+        setErr(message);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,8 +113,6 @@ export default function AvatarRow({
       <div className="min-w-0">
         <h3 className="text-2xl font-semibold text-[#0f0f0f] truncate">{name}</h3>
         {err && <p className="text-sm text-red-600 mt-1">{err}</p>}
-        {/* Optional: show the path for debugging */}
-        {/* <p className="text-xs text-[#555] mt-1">{avatarPath || 'no avatar'}</p> */}
       </div>
     </div>
   );

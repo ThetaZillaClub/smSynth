@@ -5,11 +5,9 @@ import * as React from 'react';
 
 export default function SetupLayout({
   title = 'Setup',
-  subtitle,
   children,
 }: {
   title?: string;
-  subtitle?: string;
   children: React.ReactNode;
 }) {
   // Make THIS page the ONLY scroll container (match courses-layout behavior)

@@ -4,7 +4,7 @@ import React, { useMemo } from "react";
 import type { SessionConfig } from "../../session/types";
 import Field from "../Field";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
-import { isInScale, scaleSemitones, type ScaleName } from "@/utils/phrase/scales";
+import { scaleSemitones, type ScaleName } from "@/utils/phrase/scales";
 
 function FancyCheckbox({
   checked,
@@ -52,6 +52,13 @@ function FancyCheckbox({
   );
 }
 
+/** Narrow type guard for the rhythm shape without using `any` or `unknown`. */
+function isRandomMode(rhythm: SessionConfig["rhythm"] | null | undefined): boolean {
+  if (!rhythm) return false;
+  const r = rhythm as { mode?: string };
+  return r.mode === "random";
+}
+
 export default function RangeCard({
   cfg,
   lowHz,
@@ -73,8 +80,6 @@ export default function RangeCard({
     return { loM, hiM };
   }, [lowHz, highHz]);
 
-  const inScale = (m: number) => isInScale((((m % 12) + 12) % 12), tonicPc, scaleName);
-
   // ---- Available tonic windows inside saved range ----
   const { candidates, labels } = useMemo(() => {
     if (!loHiM) return { candidates: [] as number[], labels: [] as string[] };
@@ -93,9 +98,9 @@ export default function RangeCard({
 
   const selectedWindows = new Set<number>((cfg.tonicMidis ?? []) as number[]);
 
-  // --- Degree list (scale-aware: diatonic/pentatonic = length of scaleSemitones; chromatic = 12) ---
+  // --- Degree list (scale-aware) ---
   const degreeCount = useMemo(() => {
-    const semis = scaleSemitones(scaleName) ?? [0,2,4,5,7,9,11];
+    const semis = scaleSemitones(scaleName) ?? [0, 2, 4, 5, 7, 9, 11];
     return semis.length;
   }, [scaleName]);
 
@@ -164,7 +169,7 @@ export default function RangeCard({
         </div>
       ) : null}
 
-      {/* NEW: Degree picker (modular & key-agnostic) */}
+      {/* Degree picker */}
       <div className="mt-3 grid grid-cols-1 gap-2">
         <Field label="Scale degrees (applies to all octaves)">
           <div className="flex flex-wrap gap-2">
@@ -184,7 +189,7 @@ export default function RangeCard({
       </div>
 
       {/* Random-mode extended options (kept; degrees still apply) */}
-      {(cfg.rhythm as any)?.mode === "random" ? (
+      {isRandomMode(cfg.rhythm) ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
           <Field label="Also include notes UNDER lowest selected tonic (random mode)">
             <FancyCheckbox

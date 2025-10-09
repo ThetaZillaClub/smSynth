@@ -1,7 +1,7 @@
-// components\training\curriculum-layout\SequenceMode\SequenceModeCard.tsx
+// components/training/curriculum-layout/SequenceMode/SequenceModeCard.tsx
 "use client";
 import React, { useMemo } from "react";
-import type { SessionConfig } from "../../session/types";
+import type { SessionConfig, RhythmConfig } from "../../session/types";
 import type { NoteValue } from "@/utils/time/tempo";
 import Field from "../Field";
 import { NOTE_VALUE_OPTIONS } from "../Options";
@@ -77,9 +77,14 @@ function NoteLengthPicker({
   const allowed = NOTE_VALUE_OPTIONS.filter((o) =>
     [
       "whole",
-      "dotted-half", "half",
-      "dotted-quarter", "triplet-quarter", "quarter",
-      "dotted-eighth", "triplet-eighth", "eighth",
+      "dotted-half",
+      "half",
+      "dotted-quarter",
+      "triplet-quarter",
+      "quarter",
+      "dotted-eighth",
+      "triplet-eighth",
+      "eighth",
       "sixteenth",
     ].includes(o.value)
   );
@@ -100,6 +105,17 @@ function NoteLengthPicker({
   );
 }
 
+// --- Type guards for RhythmConfig branches ---
+function isSequence(r: RhythmConfig): r is Extract<RhythmConfig, { mode: "sequence" }> {
+  return r.mode === "sequence";
+}
+function isRandom(r: RhythmConfig): r is Extract<RhythmConfig, { mode: "random" }> {
+  return r.mode === "random";
+}
+function isInterval(r: RhythmConfig): r is Extract<RhythmConfig, { mode: "interval" }> {
+  return r.mode === "interval";
+}
+
 export default function SequenceModeCard({
   cfg,
   onChange,
@@ -107,9 +123,10 @@ export default function SequenceModeCard({
   cfg: SessionConfig;
   onChange: (patch: Partial<SessionConfig>) => void;
 }) {
-  const rhythmCfg = useMemo(
+  // Strongly-typed rhythm with defaults
+  const rhythmCfg: RhythmConfig = useMemo(
     () =>
-      (cfg.rhythm ?? {
+      cfg.rhythm ?? {
         mode: "random",
         available: ["quarter"],
         restProb: 0.3,
@@ -117,10 +134,24 @@ export default function SequenceModeCard({
         contentRestProb: 0.3,
         contentAllowRests: true,
         lengthBars: cfg.exerciseBars ?? 2, // legacy fallback
-      }) as any,
+      },
     [cfg.rhythm, cfg.exerciseBars]
   );
+
   const selected = new Set<NoteValue>(rhythmCfg.available ?? ["quarter"]);
+
+  // Common fields we want to preserve when switching modes
+  const makeCommon = (r: RhythmConfig) => ({
+    available: r.available ?? ["quarter" as NoteValue],
+    restProb: r.restProb ?? 0.3,
+    allowRests: r.allowRests ?? true,
+    contentRestProb: r.contentRestProb ?? 0.3,
+    contentAllowRests: r.contentAllowRests ?? true,
+    lengthBars: r.lengthBars ?? (cfg.exerciseBars ?? 2),
+    seed: r.seed,
+    lineEnabled: r.lineEnabled,
+    detectEnabled: r.detectEnabled,
+  });
 
   return (
     <div className="rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
@@ -133,28 +164,40 @@ export default function SequenceModeCard({
         <Field label="Mode">
           <select
             className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
-            value={(rhythmCfg.mode as "sequence" | "random" | "interval") ?? "random"}
+            value={rhythmCfg.mode}
             onChange={(e) => {
               const mode = e.target.value as "sequence" | "random" | "interval";
-              let patch: any = {
-                mode,
-                available: rhythmCfg.available ?? ["quarter"],
-                restProb: rhythmCfg.restProb ?? 0.3,
-                allowRests: rhythmCfg.allowRests ?? true,
-                contentRestProb: rhythmCfg.contentRestProb ?? 0.3,
-                contentAllowRests: rhythmCfg.contentAllowRests ?? true,
-              };
+              const common = makeCommon(rhythmCfg);
+
+              let next: RhythmConfig;
               if (mode === "sequence") {
-                patch.pattern = rhythmCfg.pattern ?? "asc";
-                patch.lengthBars = rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2);
+                const pattern =
+                  (isSequence(rhythmCfg) && rhythmCfg.pattern) || "asc";
+                next = {
+                  mode: "sequence",
+                  pattern,
+                  ...common,
+                };
               } else if (mode === "random") {
-                patch.lengthBars = rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2);
-              } else if (mode === "interval") {
-                // ✅ No octaves/preference; Range/Tonic windows control octaves now.
-                patch.intervals = rhythmCfg.intervals ?? [3, 5];
-                patch.numIntervals = rhythmCfg.numIntervals ?? 8;
+                next = {
+                  mode: "random",
+                  ...common,
+                };
+              } else {
+                // interval
+                const intervals =
+                  (isInterval(rhythmCfg) && rhythmCfg.intervals) || [3, 5];
+                const numIntervals =
+                  (isInterval(rhythmCfg) && rhythmCfg.numIntervals) || 8;
+                next = {
+                  mode: "interval",
+                  intervals,
+                  numIntervals,
+                  ...common,
+                };
               }
-              onChange({ rhythm: patch as any });
+
+              onChange({ rhythm: next });
             }}
           >
             <option value="random">Random</option>
@@ -164,14 +207,23 @@ export default function SequenceModeCard({
         </Field>
 
         {/* Sequence-only pattern */}
-        {rhythmCfg.mode === "sequence" ? (
+        {isSequence(rhythmCfg) ? (
           <Field label="Sequence pattern">
             <select
               className="w-full rounded-md border border-[#d2d2d2] bg-white px-2 py-1 text-sm"
               value={rhythmCfg.pattern ?? "asc"}
-              onChange={(e) =>
-                onChange({ rhythm: { ...rhythmCfg, pattern: e.target.value } as any })
-              }
+              onChange={(e) => {
+                const pattern = e.target.value as
+                  | "asc"
+                  | "desc"
+                  | "asc-desc"
+                  | "desc-asc";
+                const next: Extract<RhythmConfig, { mode: "sequence" }> = {
+                  ...rhythmCfg,
+                  pattern,
+                };
+                onChange({ rhythm: next });
+              }}
             >
               <option value="asc">Ascending</option>
               <option value="desc">Descending</option>
@@ -185,7 +237,7 @@ export default function SequenceModeCard({
       </div>
 
       {/* Random-only: length bars */}
-      {rhythmCfg.mode === "random" ? (
+      {isRandom(rhythmCfg) ? (
         <div className="grid grid-cols-1 gap-2 mt-3">
           <Field label="Length (bars)">
             <input
@@ -195,26 +247,30 @@ export default function SequenceModeCard({
               min={1}
               step={1}
               value={Math.max(1, Number(rhythmCfg.lengthBars ?? (cfg.exerciseBars ?? 2)))}
-              onChange={(e) =>
-                onChange({
-                  rhythm: {
-                    ...rhythmCfg,
-                    lengthBars: Math.max(1, Math.floor(Number(e.target.value) || 1)),
-                  } as any,
-                })
-              }
+              onChange={(e) => {
+                const lengthBars = Math.max(
+                  1,
+                  Math.floor(Number(e.target.value) || 1)
+                );
+                const next: Extract<RhythmConfig, { mode: "random" }> = {
+                  ...rhythmCfg,
+                  lengthBars,
+                };
+                onChange({ rhythm: next });
+              }}
             />
           </Field>
         </div>
       ) : null}
 
       {/* Interval Training */}
-      {rhythmCfg.mode === "interval" && (
+      {isInterval(rhythmCfg) && (
         <div className="mt-3">
           <Field label="Intervals">
             <div className="flex flex-wrap gap-2">
               {INTERVAL_OPTIONS.map((o) => {
-                const isOn = (rhythmCfg.intervals ?? [3, 5]).includes(o.value);
+                const current = rhythmCfg.intervals ?? [3, 5];
+                const isOn = current.includes(o.value);
                 return (
                   <FancyCheckbox
                     key={o.value}
@@ -222,8 +278,15 @@ export default function SequenceModeCard({
                     onChange={(next) => {
                       const curr = [...(rhythmCfg.intervals ?? [3, 5])];
                       if (next && !curr.includes(o.value)) curr.push(o.value);
-                      else if (!next) curr.splice(curr.indexOf(o.value), 1);
-                      onChange({ rhythm: { ...rhythmCfg, intervals: curr.sort((a, b) => a - b) } as any });
+                      else if (!next) {
+                        const idx = curr.indexOf(o.value);
+                        if (idx >= 0) curr.splice(idx, 1);
+                      }
+                      const nextCfg: Extract<RhythmConfig, { mode: "interval" }> = {
+                        ...rhythmCfg,
+                        intervals: curr.sort((a, b) => a - b),
+                      };
+                      onChange({ rhythm: nextCfg });
                     }}
                     label={o.label}
                   />
@@ -232,7 +295,6 @@ export default function SequenceModeCard({
             </div>
           </Field>
 
-          {/* Removed: Extra octaves + Root preference */}
           <Field label="Number of intervals">
             <input
               type="number"
@@ -241,11 +303,17 @@ export default function SequenceModeCard({
               min={1}
               step={1}
               value={rhythmCfg.numIntervals ?? 8}
-              onChange={(e) =>
-                onChange({
-                  rhythm: { ...rhythmCfg, numIntervals: Math.max(1, Math.floor(Number(e.target.value) || 8)) } as any,
-                })
-              }
+              onChange={(e) => {
+                const numIntervals = Math.max(
+                  1,
+                  Math.floor(Number(e.target.value) || 8)
+                );
+                const nextCfg: Extract<RhythmConfig, { mode: "interval" }> = {
+                  ...rhythmCfg,
+                  numIntervals,
+                };
+                onChange({ rhythm: nextCfg });
+              }}
             />
           </Field>
         </div>
@@ -260,7 +328,18 @@ export default function SequenceModeCard({
               const nextSet = new Set(selected);
               if (next) nextSet.add(v);
               else nextSet.delete(v);
-              onChange({ rhythm: { ...rhythmCfg, available: Array.from(nextSet) } as any });
+              const available = Array.from(nextSet);
+
+              let updated: RhythmConfig;
+              if (isSequence(rhythmCfg)) {
+                updated = { ...rhythmCfg, available };
+              } else if (isRandom(rhythmCfg)) {
+                updated = { ...rhythmCfg, available };
+              } else {
+                // interval
+                updated = { ...rhythmCfg, available };
+              }
+              onChange({ rhythm: updated });
             }}
           />
         </Field>
