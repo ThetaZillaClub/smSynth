@@ -37,7 +37,7 @@ export default function BrandRow({
         }
       }}
     >
-      <div className={col1}><Logo className="w-6 h-6" /></div>
+      <div className={col1}><Logo style={{ width: 'var(--sidebar-icon, 36px)', height: 'var(--sidebar-icon, 36px)' }} /></div>
       {!collapsed && <div className={col2}>{brand}</div>}
     </Link>
   );
