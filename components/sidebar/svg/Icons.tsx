@@ -5,12 +5,12 @@ import * as React from 'react';
 // Courses: blue + indigo
 // Setup:   green + purple
 // Premium: red  + darkorange
-const COURSES_ST0 = 'var(--icon-courses-a, indigo)';
-const COURSES_ST1 = 'var(--icon-courses-b, indigo)';
-const SETUP_ST0   = 'var(--icon-setup-a, indigo)';
-const SETUP_ST1   = 'var(--icon-setup-b, indigo)';
-const PREMIUM_ST0 = 'var(--icon-premium-a, indigo)';
-const PREMIUM_ST1 = 'var(--icon-premium-b, indigo)';
+const COURSES_ST0 = 'var(--icon-courses-a, black)';
+const COURSES_ST1 = 'var(--icon-courses-b, black)';
+const SETUP_ST0   = 'var(--icon-setup-a, black)';
+const SETUP_ST1   = 'var(--icon-setup-b, black)';
+const PREMIUM_ST0 = 'var(--icon-premium-a, black)';
+const PREMIUM_ST1 = 'var(--icon-premium-b, black)';
 
 /** COURSES — duotone: blue (st0) + indigo (st1) */
 export const CoursesIcon = (props: React.SVGProps<SVGSVGElement>) => (

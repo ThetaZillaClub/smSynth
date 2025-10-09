@@ -20,12 +20,14 @@ function readAuthedCookie(): boolean {
 
 export function useSidebarBootstrap(opts: {
   isAuthRoute: boolean;
-  setSidebarWidth: (w: '0px'|'64px'|'240px') => void;
+  setSidebarWidth: (w: '0px' | '64px' | '240px') => void;
 }) {
   const { isAuthRoute, setSidebarWidth } = opts;
 
   // Seed initial authed from the readable cookie for instant correct UI
-  const [authed, setAuthed] = React.useState<boolean>(() => (typeof document !== 'undefined' ? readAuthedCookie() : false));
+  const [authed, setAuthed] = React.useState<boolean>(() =>
+    typeof document !== 'undefined' ? readAuthedCookie() : false
+  );
   const [displayName, setDisplayName] = React.useState('You');
   const [studentImgUrl, setStudentImgUrl] = React.useState<string | null>(null);
 
@@ -37,26 +39,26 @@ export function useSidebarBootstrap(opts: {
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return;
 
-      // ── IMPORTANT ─────────────────────────────────────────────────────────────
-      // Don't let a null INITIAL_SESSION clobber the optimistic cookie seed.
-      // Only flip to false on SIGNED_OUT.
-      // Flip to true on SIGNED_IN / TOKEN_REFRESHED, or INITIAL_SESSION *with* a user.
-      // For INITIAL_SESSION with no session: ignore; let the getSession() path decide.
-      // ─────────────────────────────────────────────────────────────────────────
+      // Only DOWNGRADE to logged-out on SIGNAED_OUT.
       if (event === 'SIGNED_OUT') {
         setAuthed(false);
-        // Immediately switch to logged-out UI & width
         setDisplayName('You');
         setStudentImgUrl(null);
-        try { localStorage.removeItem(STUDENT_IMAGE_HINT_KEY); } catch {}
+        try {
+          localStorage.removeItem(STUDENT_IMAGE_HINT_KEY);
+        } catch {}
+        // While logged out (and not on /auth), keep sidebar open for CTAs.
         if (!isAuthRoute) setSidebarWidth('240px');
         return;
       }
 
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session?.user) {
+      // UPGRADE to authed on these events when a user exists.
+      if (
+        (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') &&
+        session?.user
+      ) {
         setAuthed(true);
-        // When signed in, open on first paint; we resolve details below
-        if (!isAuthRoute) setSidebarWidth('240px');
+        // Do NOT touch width here; let Sidebar's collapsed state control it.
         return;
       }
 
@@ -65,25 +67,24 @@ export function useSidebarBootstrap(opts: {
 
     (async () => {
       await ensureSessionReady(supabase, 2500);
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (cancelled) return;
 
-      const isAuthed = !!session?.user;
-      setAuthed(isAuthed);
+      const user = session?.user ?? null;
 
-      // While logged out (and not on /auth), force the sidebar open so CTAs are visible.
-      if (!isAuthed && !isAuthRoute) {
-        setSidebarWidth('240px');
-      }
-
-      if (!isAuthed) {
+      // Never DOWNGRADE here; if we have no user, keep current state.
+      if (!user) {
+        if (!isAuthRoute) setSidebarWidth('240px'); // show CTAs while logged out
         setStudentImgUrl(null);
         setDisplayName('You');
         return;
       }
 
-      const user = session!.user;
+      // We definitively have a user → ensure authed (upgrade only)
+      setAuthed(true);
 
       // Load name + image from a single cached call (dedupes across app)
       const row = await getCurrentStudentRowCached(supabase);
@@ -96,7 +97,9 @@ export function useSidebarBootstrap(opts: {
       // 2) /api row.image_path (via cached row above)
       // 3) auth user_metadata avatar (GitHub/Google/etc)
       let hintedPath: string | null = null;
-      try { hintedPath = localStorage.getItem(STUDENT_IMAGE_HINT_KEY); } catch {}
+      try {
+        hintedPath = localStorage.getItem(STUDENT_IMAGE_HINT_KEY);
+      } catch {}
 
       const imagePath = hintedPath || (row?.image_path ?? null);
       const authAvatar = pickAuthAvatarUrl(user);
@@ -115,8 +118,7 @@ export function useSidebarBootstrap(opts: {
         setStudentImgUrl(authAvatar ?? null);
       }
 
-      // Always ensure open width (no collapsed-on-load)
-      if (!isAuthRoute) setSidebarWidth('240px');
+      // Do NOT force width here; Sidebar manages it via collapsed state.
     })();
 
     return () => {
