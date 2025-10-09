@@ -2,10 +2,10 @@
 "use client";
 
 import React, { useMemo } from "react";
-import useRangeSteps from "@/components/range/useRangeSteps";
+import useRangeSteps from "@/components/setup/range/useRangeSteps";
 import useStudentRow from "@/hooks/students/useStudentRow";
 import useStudentRangeUpdater from "@/hooks/students/useStudentRangeUpdater";
-import RangeStage from "@/components/range/stage/RangeStage";
+import RangeStage from "@/components/setup/range/stage/RangeStage";
 
 export default function RangeSetup({ studentId = null }: { studentId?: string | null }) {
   const { studentRowId } = useStudentRow({ studentIdFromQuery: studentId ?? null });

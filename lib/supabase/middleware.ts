@@ -81,6 +81,20 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
+  // Set a small readable cookie for pre-paint layout bootstrap ("1" if authed, "0" otherwise)
+  // Do this *before* any redirects so the first HTML gets the cookie.
+  {
+    const resCookies = supabaseResponse.cookies;
+    resCookies.set({
+      name: 'ptp_a',
+      value: user ? '1' : '0',
+      path: '/',
+      httpOnly: false,
+      sameSite: 'lax',
+      secure: applySupabaseCookieDefaults('', request).secure,
+    });
+  }
+
   // Redirect logged-in users away from "/" → "/home"
   const isRoot = pathname === '/';
   if (user && isRoot) {
@@ -105,18 +119,6 @@ export async function updateSession(request: NextRequest) {
     copyCookies(supabaseResponse, res, request);
     return res;
   }
-
-  // Set a small readable cookie for pre-paint layout bootstrap ("1" if authed, "0" otherwise)
-  // This does not modify Supabase cookies; it's an additional cookie on the same response.
-  const resCookies = supabaseResponse.cookies;
-  resCookies.set({
-    name: 'ptp_a',
-    value: user ? '1' : '0',
-    path: '/',
-    httpOnly: false,
-    sameSite: 'lax',
-    secure: applySupabaseCookieDefaults('', request).secure,
-  });
 
   // Return the SAME response that carried any cookie updates
   return supabaseResponse;

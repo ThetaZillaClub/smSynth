@@ -3,7 +3,7 @@
 
 import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import RangeSetup from "@/components/range/RangeSetup";
+import RangeSetup from "@/components/setup/range/RangeSetup";
 import { primeAudioOnce } from "@/lib/training/primeAudio";
 
 export default function RangeSetupPage() {

@@ -37,10 +37,14 @@ export function useSidebarBootstrap(opts: {
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return;
 
-      const isAuthed = !!session?.user && event !== 'SIGNED_OUT';
-      setAuthed(isAuthed);
-
-      if (!isAuthed) {
+      // ── IMPORTANT ─────────────────────────────────────────────────────────────
+      // Don't let a null INITIAL_SESSION clobber the optimistic cookie seed.
+      // Only flip to false on SIGNED_OUT.
+      // Flip to true on SIGNED_IN / TOKEN_REFRESHED, or INITIAL_SESSION *with* a user.
+      // For INITIAL_SESSION with no session: ignore; let the getSession() path decide.
+      // ─────────────────────────────────────────────────────────────────────────
+      if (event === 'SIGNED_OUT') {
+        setAuthed(false);
         // Immediately switch to logged-out UI & width
         setDisplayName('You');
         setStudentImgUrl(null);
@@ -49,8 +53,14 @@ export function useSidebarBootstrap(opts: {
         return;
       }
 
-      // When signed in, open on first paint; we resolve details below
-      if (!isAuthRoute) setSidebarWidth('240px');
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') && session?.user) {
+        setAuthed(true);
+        // When signed in, open on first paint; we resolve details below
+        if (!isAuthRoute) setSidebarWidth('240px');
+        return;
+      }
+
+      // Otherwise (INITIAL_SESSION with no session), do nothing here.
     });
 
     (async () => {
