@@ -44,7 +44,7 @@ type Props = {
 };
 
 const CONF_THRESHOLD = 0.5;
-const DEFAULT_PITCH_LATENCY_MS = 120;
+const DEFAULT_PITCH_LATENCY_MS = 20;
 
 type TakeSnapshot = {
   phrase: Phrase;
