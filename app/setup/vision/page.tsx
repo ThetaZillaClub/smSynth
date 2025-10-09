@@ -1,5 +1,8 @@
 // app/setup/vision/page.tsx
-import VisionSetup from "@/components/setup/vision/VisionSetup";
+"use client";
+
+import dynamic from "next/dynamic";
+const VisionSetup = dynamic(() => import("@/components/setup/vision/VisionSetup"), { ssr: false });
 
 export default function VisionSetupPage() {
   return <VisionSetup />;

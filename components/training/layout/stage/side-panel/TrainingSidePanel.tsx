@@ -202,7 +202,6 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
         phrase={effectivePhrase}
         bpm={bpm}
         den={den}
-        tsNum={tsNum}
         tonicPc={tonicPc}
         scaleName={scaleName as SolfegeScaleName}
       />

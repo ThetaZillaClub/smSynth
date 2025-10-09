@@ -18,7 +18,6 @@ export default function PitchReview({
   scaleName: SolfegeScaleName;
 }) {
   const per = score.pitch.perNote;
-  const notes = phrase?.notes ?? [];
 
   type Acc = {
     key: string;        // label|solf
@@ -31,6 +30,7 @@ export default function PitchReview({
   };
 
   const groups = React.useMemo(() => {
+    const notes = phrase?.notes ?? [];
     const m = new Map<string, Acc>();
 
     for (let i = 0; i < notes.length; i++) {
@@ -55,7 +55,7 @@ export default function PitchReview({
     }
 
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
-  }, [notes, per, tonicPc, scaleName]);
+  }, [phrase, per, tonicPc, scaleName]);
 
   return (
     <div className="flex flex-col gap-2">

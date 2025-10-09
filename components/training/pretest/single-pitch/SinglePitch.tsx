@@ -1,7 +1,6 @@
-// components/training/pretest/single-pitch/SinglePitch.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
@@ -76,10 +75,11 @@ export default function SinglePitch({
 
   // Delayed auto-advance (digest/rest)
   const advanceTimeoutRef = useRef<number | null>(null);
-  const queueAdvance = () => {
+  const queueAdvance = useCallback(() => {
     if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
     advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
-  };
+  }, [onContinue]);
+
   useEffect(
     () => () => {
       if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
@@ -87,7 +87,7 @@ export default function SinglePitch({
     []
   );
 
-  // Auto-advance when passed (no UI "Continue" button) — with 1s delay
+  // Auto-advance when passed (with 1s delay)
   const passLatch = useRef(false);
   useEffect(() => {
     if (!running) passLatch.current = false;
@@ -98,7 +98,7 @@ export default function SinglePitch({
       queueAdvance();
     }
     if (!gate.passed) passLatch.current = false;
-  }, [running, inResponse, gate.passed]);
+  }, [running, inResponse, gate.passed, queueAdvance]);
 
   const help = useMemo(() => {
     if (tonicMidi == null) return "Waiting for your saved range…";
@@ -119,13 +119,12 @@ export default function SinglePitch({
       onStart(); // first click starts the pretest
       return;
     }
-    // subsequent clicks just replay the target
     await playTarget();
   };
 
   return (
     <div className="mt-2 grid gap-3 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-      {/* Header row: only status text now */}
+      {/* Header row */}
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold">{statusText}</div>
       </div>
@@ -154,17 +153,16 @@ export default function SinglePitch({
         </div>
       </div>
 
-      {/* Footer controls: single round Play button */}
+      {/* Footer controls */}
       <div className="mt-1 flex items-center justify-end">
         <RoundIconButton title={running ? "Play target" : "Start pre-test"} ariaLabel="Play" onClick={onFooterPlay} disabled={running && tonicMidi == null}>
-          {/* Play triangle */}
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
             <path d="M8 5v14l11-7L8 5z" fill="currentColor" />
           </svg>
         </RoundIconButton>
       </div>
 
-      {/* timing hints (QA) */}
+      {/* timing hints */}
       <div className="text-[11px] text-[#6b6b6b]">
         (Lead-in {leadInSec.toFixed(2)}s • quarter {quarterSec.toFixed(2)}s)
       </div>
@@ -172,7 +170,6 @@ export default function SinglePitch({
   );
 }
 
-/** Round icon button matching the side-panel footer visual language. */
 function RoundIconButton({
   children,
   title,

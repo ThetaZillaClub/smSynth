@@ -23,7 +23,6 @@ export default function TakeReview({
   phrase,
   bpm,
   den,
-  tsNum,
   tonicPc = 0,
   scaleName = "major",
 }: {
@@ -37,7 +36,6 @@ export default function TakeReview({
   phrase?: Phrase | null;
   bpm: number;
   den: number;
-  tsNum: number;
   tonicPc?: number;
   scaleName?: SolfegeScaleName;
 }) {

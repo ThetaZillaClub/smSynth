@@ -24,7 +24,6 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
   const {
     studentRowId,
     studentName,
-    genderLabel,
     rangeLowLabel,
     rangeHighLabel,
   } = useStudentRow({ studentIdFromQuery: studentId ?? null });
@@ -89,12 +88,9 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
           <TrainingGame
             title="Training"
             // keep for downstream query param compatibility if needed
-            studentId={studentId ?? null}
             sessionConfig={sessionCfg}
             // pass everything so the child won't fetch
             studentRowId={studentRowId}
-            studentName={studentName}
-            genderLabel={genderLabel}
             rangeLowLabel={rangeLowLabel}
             rangeHighLabel={rangeHighLabel}
           />
@@ -118,7 +114,6 @@ export default function CurriculumRouter({ studentId = null }: { studentId?: str
     launchWith,
     studentRowId,
     studentName,
-    genderLabel,
     rangeLowLabel,
     rangeHighLabel,
   ]);

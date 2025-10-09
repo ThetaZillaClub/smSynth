@@ -181,7 +181,6 @@ export default function PitchTimeGame({
           phrase={phrase ?? null}
           bpm={bpm}
           den={ts.den}
-          tsNum={ts.num}
           tonicPc={DEFAULT_SESSION_CONFIG.scale?.tonicPc ?? 0}
         />
       )}

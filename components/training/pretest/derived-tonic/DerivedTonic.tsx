@@ -1,7 +1,6 @@
-// components/training/pretest/derived-tonic/DerivedTonic.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
@@ -76,10 +75,11 @@ export default function DerivedTonic({
 
   // Delayed auto-advance (digest/rest)
   const advanceTimeoutRef = useRef<number | null>(null);
-  const queueAdvance = () => {
+  const queueAdvance = useCallback(() => {
     if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
     advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
-  };
+  }, [onContinue]);
+
   useEffect(
     () => () => {
       if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
@@ -98,7 +98,7 @@ export default function DerivedTonic({
       queueAdvance();
     }
     if (!gate.passed) passLatch.current = false;
-  }, [running, inResponse, gate.passed]);
+  }, [running, inResponse, gate.passed, queueAdvance]);
 
   const help = useMemo(() => {
     if (!running) return "Press Play to hear A440. Then derive the tonic and hold it.";
@@ -156,7 +156,7 @@ export default function DerivedTonic({
         </div>
       </div>
 
-      {/* Footer: single Play button (start / replay A440) */}
+      {/* Footer */}
       <div className="mt-1 flex items-center justify-end">
         <RoundIconButton title={running ? "Play A440" : "Start pre-test"} ariaLabel="Play" onClick={onFooterPlay}>
           <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
@@ -165,7 +165,6 @@ export default function DerivedTonic({
         </RoundIconButton>
       </div>
 
-      {/* timing hints (QA) */}
       <div className="text-[11px] text-[#6b6b6b]">
         (Lead-in {leadInSec.toFixed(2)}s • quarter {quarterSec.toFixed(2)}s)
       </div>
@@ -173,7 +172,6 @@ export default function DerivedTonic({
   );
 }
 
-/** Round icon button matching the side-panel footer visual language. */
 function RoundIconButton({
   children,
   title,

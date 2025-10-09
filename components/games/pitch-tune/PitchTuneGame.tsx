@@ -142,28 +142,26 @@ export default function PitchTuneGame({
         ) : null}
       </div>
 
-{round.showReview && (
-  <TakeReview
-    haveRhythm={false}
-    onPlayMelody={() => {
-      if (targetMidi == null) return;
-      return playMidiList([targetMidi], Math.min(quarterSec, requiredHoldSec));
-    }}
-    onPlayRhythm={() => {}}
-    onPlayBoth={() => {
-      if (targetMidi == null) return;
-      return playMidiList([targetMidi], Math.min(quarterSec, requiredHoldSec));
-    }}
-    onStop={stopPlayback}
-    score={round.lastScore}
-    phrase={phrase ?? null}
-    bpm={bpm}
-    den={ts.den}
-    tsNum={ts.num}
-    tonicPc={DEFAULT_SESSION_CONFIG.scale?.tonicPc ?? 0}
-  />
-)}
-
+      {round.showReview && (
+        <TakeReview
+          haveRhythm={false}
+          onPlayMelody={() => {
+            if (targetMidi == null) return;
+            return playMidiList([targetMidi], Math.min(quarterSec, requiredHoldSec));
+          }}
+          onPlayRhythm={() => {}}
+          onPlayBoth={() => {
+            if (targetMidi == null) return;
+            return playMidiList([targetMidi], Math.min(quarterSec, requiredHoldSec));
+          }}
+          onStop={stopPlayback}
+          score={round.lastScore}
+          phrase={phrase ?? null}
+          bpm={bpm}
+          den={ts.den}
+          tonicPc={DEFAULT_SESSION_CONFIG.scale?.tonicPc ?? 0}
+        />
+      )}
     </GameLayout>
   );
 }

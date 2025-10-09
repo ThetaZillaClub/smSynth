@@ -112,7 +112,11 @@ export default function GameStage({
   const [sheetW, setSheetW] = useState<number>(0);
   const [systems, setSystems] = useState<SystemLayout[] | null>(null);
 
+  // ✅ Fix: do not depend on `sheetHostRef.current`
+  // Re-run when the sheet view is active (mount/switch), and manage the observer from there.
   useLayoutEffect(() => {
+    if (view !== "sheet") return;
+
     const el = sheetHostRef.current;
     if (!el) return;
 
@@ -133,7 +137,7 @@ export default function GameStage({
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [sheetHostRef.current]);
+  }, [view]);
 
   const handleLayout = useCallback((m: { systems: SystemLayout[] }) => {
     setSystems(m.systems ?? null);

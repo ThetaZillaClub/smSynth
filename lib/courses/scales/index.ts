@@ -1,5 +1,6 @@
 // lib/courses/scales/index.ts
 import type { CourseDef } from "../types";
+import type { NoteValue } from "@/utils/time/tempo";
 
 export const SCALES_COURSE: CourseDef = {
   slug: "scales",
@@ -16,9 +17,9 @@ export const SCALES_COURSE: CourseDef = {
         rhythm: {
           mode: "sequence",
           pattern: "asc-desc",
-          available: ["quarter"],
+          available: ["quarter"] as NoteValue[],
           lengthBars: 2,
-        } as any,
+        },
         callResponse: false,
         loopingMode: true,
       },
@@ -32,10 +33,10 @@ export const SCALES_COURSE: CourseDef = {
         preferredOctaveIndices: [1],
         rhythm: {
           mode: "random",
-          available: ["quarter"],
+          available: ["quarter"] as NoteValue[],
           lengthBars: 2,
           contentAllowRests: false,
-        } as any,
+        },
         callResponse: false,
       },
     },
@@ -49,9 +50,9 @@ export const SCALES_COURSE: CourseDef = {
         rhythm: {
           mode: "sequence",
           pattern: "asc-desc",
-          available: ["quarter"],
+          available: ["quarter"] as NoteValue[],
           lengthBars: 2,
-        } as any,
+        },
       },
     },
     {
@@ -62,7 +63,11 @@ export const SCALES_COURSE: CourseDef = {
         scale: { name: "major", tonicPc: 7 },
         allowedDegrees: [0, 2, 4],
         preferredOctaveIndices: [1],
-        rhythm: { mode: "random", available: ["quarter"], lengthBars: 2 } as any,
+        rhythm: {
+          mode: "random",
+          available: ["quarter"] as NoteValue[],
+          lengthBars: 2,
+        },
       },
     },
     {
@@ -74,13 +79,13 @@ export const SCALES_COURSE: CourseDef = {
         preferredOctaveIndices: [1],
         rhythm: {
           mode: "random",
-          available: ["eighth", "quarter"],
+          available: ["eighth", "quarter"] as NoteValue[],
           lengthBars: 2,
           lineEnabled: true,
           detectEnabled: true,
           contentAllowRests: true,
           contentRestProb: 0.15,
-        } as any,
+        },
       },
     },
     {
@@ -93,8 +98,8 @@ export const SCALES_COURSE: CourseDef = {
           mode: "interval",
           intervals: [3, 4, 7, 12],
           numIntervals: 8,
-          available: ["quarter"],
-        } as any,
+          available: ["quarter"] as NoteValue[],
+        },
         callResponse: false,
       },
     },

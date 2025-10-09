@@ -1,7 +1,6 @@
-// components/training/pretest/internal-arpeggio/InternalArpeggio.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
@@ -71,7 +70,6 @@ export default function InternalArpeggio({
   // Phase handled with STATE so UI updates properly
   const [phase, setPhase] = useState<"tonic" | "arp">("tonic");
   useEffect(() => {
-    // If the pretest toggles off/on, reset back to step 1
     if (!running || !inResponse) setPhase("tonic");
   }, [running, inResponse]);
 
@@ -109,10 +107,11 @@ export default function InternalArpeggio({
 
   // Delayed auto-advance (digest/rest)
   const advanceTimeoutRef = useRef<number | null>(null);
-  const queueAdvance = () => {
+  const queueAdvance = useCallback(() => {
     if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
     advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
-  };
+  }, [onContinue]);
+
   useEffect(
     () => () => {
       if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
@@ -125,16 +124,12 @@ export default function InternalArpeggio({
     if (running && inResponse && phase === "arp" && matcher.passed) {
       queueAdvance();
     }
-  }, [running, inResponse, phase, matcher.passed]);
+  }, [running, inResponse, phase, matcher.passed, queueAdvance]);
 
   const showTonicPhase = phase === "tonic";
   const target = [1, 3, 5, 3, 1] as const;
   const progress = matcher.capturedDegrees;
 
-  // Single control button behavior:
-  // - First press: start pretest AND play A440
-  // - While still on Step 1: replay A440
-  // - On Step 2: button inert
   const onFooterPlay = async () => {
     if (!running) {
       onStart();
@@ -251,7 +246,6 @@ export default function InternalArpeggio({
   );
 }
 
-/** Round icon button matching the side-panel visual language. */
 function RoundIconButton({
   children,
   title,

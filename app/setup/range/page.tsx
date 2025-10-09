@@ -1,16 +1,25 @@
 // app/setup/range/page.tsx
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import RangeSetup from "@/components/setup/range/RangeSetup";
 import { primeAudioOnce } from "@/lib/training/primeAudio";
 
 export default function RangeSetupPage() {
-  const sp = useSearchParams();
-  const studentId = sp?.get("student_id") ?? null;
+  // Suspense boundary must wrap the component that *uses* useSearchParams
+  return (
+    <Suspense fallback={null}>
+      <PageInner />
+    </Suspense>
+  );
+}
 
-  // Kick off audio/worklet as the setup page opens
+function PageInner() {
+  const sp = useSearchParams();
+  const studentId = sp.get("student_id") ?? null;
+
+  // warm up audio/worklet once
   useEffect(() => {
     void primeAudioOnce();
   }, []);

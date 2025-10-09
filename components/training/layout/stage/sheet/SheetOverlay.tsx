@@ -358,7 +358,7 @@ export default function SheetOverlay({
     };
   }, [shouldAnimate]);
 
-  // ⬅️ NEW: when layout/timeline inputs change (e.g., systems arrive),
+  // ⬅️ When layout/timeline inputs change (e.g., systems arrive),
   // force a one-off redraw if we're idle so the playhead repositions.
   useEffect(() => {
     if (!shouldAnimate) {
@@ -371,6 +371,8 @@ export default function SheetOverlay({
     leadInSec, totalSec, bpm, den,
     // staff mapping (vertical band & dot mapping)
     clef, useSharps,
+    // include animation switch to satisfy exhaustive-deps
+    shouldAnimate,
   ]);
 
   return (

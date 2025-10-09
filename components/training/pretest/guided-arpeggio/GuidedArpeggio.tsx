@@ -1,7 +1,6 @@
-// components/training/pretest/guided-arpeggio/GuidedArpeggio.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 import useGuidedArpMatcher from "./hooks/useGuidedArpMatcher";
@@ -91,7 +90,7 @@ export default function GuidedArpeggio({
     if (scaleName === "locrian") return deg === 1 ? "ti" : deg === 3 ? "re" : "se";
     if (isMinorish) return deg === 1 ? "la" : deg === 3 ? "do" : "me";
     return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
-    };
+  };
 
   const targetDegrees = [1, 3, 5, 3, 1] as const;
   const targetLabels = useMemo(
@@ -115,10 +114,11 @@ export default function GuidedArpeggio({
 
   // Delayed auto-advance (digest/rest)
   const advanceTimeoutRef = useRef<number | null>(null);
-  const queueAdvance = () => {
+  const queueAdvance = useCallback(() => {
     if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
     advanceTimeoutRef.current = window.setTimeout(() => onContinue(), 1000);
-  };
+  }, [onContinue]);
+
   useEffect(
     () => () => {
       if (advanceTimeoutRef.current) window.clearTimeout(advanceTimeoutRef.current);
@@ -137,7 +137,7 @@ export default function GuidedArpeggio({
       queueAdvance();
     }
     if (!matcher.passed) passLatch.current = false;
-  }, [running, inResponse, matcher.passed]);
+  }, [running, inResponse, matcher.passed, queueAdvance]);
 
   // Back-compat skip for any “long” variant text (unchanged)
   useEffect(() => {
@@ -145,7 +145,7 @@ export default function GuidedArpeggio({
     if (statusText.includes("do–mi–sol–do–sol–mi–do–sol–do")) {
       queueAdvance();
     }
-  }, [running, inResponse, statusText]);
+  }, [running, inResponse, statusText, queueAdvance]);
 
   const help = useMemo(() => {
     const pat = targetLabels.join("–");
@@ -187,7 +187,7 @@ export default function GuidedArpeggio({
         </div>
         <div className="mt-1 text-xs text-[#2d2d2d]">{help}</div>
 
-        {/* Progress chips — only "matched" or "waiting" (no red) */}
+        {/* Progress chips */}
         <div className="mt-2 flex items-center gap-1">
           {targetDegrees.map((deg, i) => {
             const got = progress[i] ?? null;
@@ -210,7 +210,7 @@ export default function GuidedArpeggio({
           })}
         </div>
 
-        <div className="mt-2 text-[11px] text-[#6b6b6b]">
+        <div className="mt-2 text*[11px] text-[#6b6b6b]">
           We only check order, not rhythm. Each note needs ~0.25s hold.
         </div>
       </div>

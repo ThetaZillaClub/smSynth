@@ -6,6 +6,7 @@ import GameFooter from "./footer/GameFooter";
 import { type Phrase } from "./stage/piano-roll/PianoRollCanvas";
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
 import TrainingSidePanel, { type TrainingSidePanelProps } from "./stage/side-panel/TrainingSidePanel";
+import type { RhythmEvent } from "@/utils/phrase/phraseTypes"; // ⬅️ add
 
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
 
@@ -56,15 +57,15 @@ type LayoutProps = {
   children?: React.ReactNode;
 
   /** Timing & rhythm (forwarded to stage if present) */
-  rhythm?: any;
-  melodyRhythm?: any;
+  rhythm?: RhythmEvent[] | null;          // ⬅️ was `any`
+  melodyRhythm?: RhythmEvent[] | null;    // ⬅️ was `any`
   bpm?: number;
   den?: number;
   tsNum?: number;
 };
 
 export default function GameLayout({
-  title, // reserved
+  title,
   error,
   running,
   onToggle,
@@ -92,14 +93,16 @@ export default function GameLayout({
   sessionPanel,
   stageAside,
   sidePanel,
-  // eslint-disable-next-line react/no-children-prop
-  children, // kept but unused by default in favor of aside rendering
+  children,
 }: LayoutProps) {
   const showPlay = !!phrase;
   const asideNode = sidePanel ? <TrainingSidePanel {...sidePanel} /> : stageAside;
 
   return (
     <main className="min-h-dvh h-dvh flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
+      {/* use `title` so it’s not “unused” and improves a11y */}
+      <h1 className="sr-only">{title}</h1>
+
       <div className="w-full flex-1 min-h-0 flex flex-col pb-0">
         {/* Stage row (fills available height); includes optional right-side panel */}
         <div className="w-full flex-1 min-h-0 px-0 md:px-6 pt-2">
@@ -112,8 +115,8 @@ export default function GameLayout({
             confThreshold={confThreshold}
             startAtMs={startAtMs}
             leadInSec={leadInSec}
-            rhythm={rhythm}
-            melodyRhythm={melodyRhythm}
+            rhythm={rhythm ?? undefined}
+            melodyRhythm={melodyRhythm ?? undefined}
             bpm={bpm}
             den={den}
             tsNum={tsNum}
@@ -123,6 +126,9 @@ export default function GameLayout({
             lowHz={lowHz}
             highHz={highHz}
             stageAside={asideNode}
+            /* forward for back-compat so they aren't "unused" */
+            step={step}
+            loopPhase={loopPhase}
           />
         </div>
 

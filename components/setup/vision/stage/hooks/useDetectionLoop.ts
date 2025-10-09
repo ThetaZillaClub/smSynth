@@ -1,5 +1,6 @@
-// components/vision/stage/hooks/useDetectionLoop.ts
+// components/setup/vision/stage/hooks/useDetectionLoop.ts
 "use client";
+
 import { useEffect, useRef, useState } from "react";
 import type { HandLandmarker, NormalizedLandmark } from "@mediapipe/tasks-vision";
 
@@ -61,14 +62,16 @@ export default function useDetectionLoop({
   const pausedRef = useRef(false);
   const didDrawRef = useRef(false);
 
-  const [, setVis] = useState(document.visibilityState);
+  // ❌ Avoid reading `document` during SSR. Initialize on mount only.
+  const [, setVis] = useState<string | null>(null);
   useEffect(() => {
+    if (typeof document === "undefined") return;
     const onVis = () => {
       pausedRef.current = document.visibilityState !== "visible";
       setVis(document.visibilityState);
     };
+    onVis(); // initialize on mount
     document.addEventListener("visibilitychange", onVis);
-    pausedRef.current = document.visibilityState !== "visible";
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
@@ -258,5 +261,6 @@ export default function useDetectionLoop({
   const resetEvents = () => {
     eventsSecRef.current = [];
   };
+
   return { eventsSecRef, resetEvents };
 }
