@@ -167,6 +167,8 @@ export default function GameLayout({
         lowHz={lowHz}
         highHz={highHz}
         sessionPanel={sessionPanel}
+        scaleName={scaleName ?? null}
+        tonicPc={typeof tonicPc === "number" ? tonicPc : null}
       />
     </main>
   );
