@@ -8,7 +8,7 @@ export type NavItem = {
   requireAuth?: boolean;
 };
 
-export const BRAND = 'PitchTune.Pro';
+export const BRAND = 'PitchTime.Pro';
 export const STORAGE_KEY = 'sidebar:collapsed';
 export const STUDENT_IMAGE_HINT_KEY = 'ptp:studentImagePath';
 
