@@ -141,6 +141,12 @@ export default function GameStage({
 
   const handleLayout = useCallback((m: { systems: SystemLayout[] }) => {
     setSystems(m.systems ?? null);
+    // After VexScore lays out, width can change from 0 -> real value; refresh sheetW.
+    const el = sheetHostRef.current;
+    if (el) {
+      const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
+      setSheetW((prev) => (w && w !== prev ? w : prev));
+    }
   }, []);
 
   const showRhythm = !!(rhythm && rhythm.length);
