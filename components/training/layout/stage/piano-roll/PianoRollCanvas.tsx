@@ -8,6 +8,7 @@ import useMeasuredWidth from "./roll/hooks/useMeasuredWidth";
 // Alias the helper so eslint doesn't think it's a React Hook
 import { useSharpsForKey as preferSharpsForKey } from "@/utils/pitch/enharmonics";
 import type { ScaleName } from "@/utils/phrase/scales";
+import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
 
 /** Re-export so upstream can import { type Phrase } from this file */
 export type { Phrase };
@@ -32,6 +33,10 @@ type Props = {
   showNoteBlocks?: boolean;    // default true
   showNoteBorders?: boolean;   // default true
   blocksWhenLyrics?: boolean;  // default false (so text-only when lyrics exist)
+
+  /** Optional overrides for solfege context (we also use these to LOCK the grid tonic) */
+  solfegeTonicPc?: number;
+  solfegeScaleName?: SolfegeScaleName;
 };
 
 /* -----------------------------------------------------------
@@ -58,7 +63,7 @@ function parseKeySig(rawIn: string | null | undefined): { tonicPc: number; scale
 
   // Extract the root note from the beginning: letter + optional accidental
   const m = raw.match(/^([A-Ga-g])\s*(#|b)?/);
-  // Uppercase the whole token (letter + accidental) so flats hit NOTE_TO_PC (e.g., "Db" -> "DB")
+  // Uppercase token so flats hit NOTE_TO_PC (e.g., "Db" -> "DB")
   const root = (m ? `${m[1]}${m[2] ?? ""}`.toUpperCase() : "C");
   const tonicPc = NOTE_TO_PC[root] ?? 0;
 
@@ -66,7 +71,6 @@ function parseKeySig(rawIn: string | null | undefined): { tonicPc: number; scale
   const tail = raw.slice(m?.[0]?.length ?? 0).toLowerCase();
 
   // Map keywords → ScaleName (defaults to "major")
-  // Accepts plenty of aliases; order matters (more specific first).
   let scale: ScaleName = "major";
   const sets: Array<[RegExp, ScaleName]> = [
     [/harmonic\s*minor/, "harmonic_minor"],
@@ -89,6 +93,10 @@ function parseKeySig(rawIn: string | null | undefined): { tonicPc: number; scale
   return { tonicPc, scale };
 }
 
+// Narrow casts between our identical string unions.
+const toSolfegeName = (s: ScaleName): SolfegeScaleName => (s as unknown as SolfegeScaleName);
+const fromSolfegeName = (s: SolfegeScaleName): ScaleName => (s as unknown as ScaleName);
+
 export default function PianoRollCanvas({
   height,
   phrase,
@@ -106,38 +114,56 @@ export default function PianoRollCanvas({
   showNoteBlocks = true,
   showNoteBorders = true,
   blocksWhenLyrics = true,
+
+  // Optional direct solfege overrides (we use these as the source of truth)
+  solfegeTonicPc,
+  solfegeScaleName,
 }: Props) {
   const { hostRef, width } = useMeasuredWidth();
 
-  // --- tonic + scale parsed from keySig (mode words ignored for tonic) ---
-  const { tonicPc, scale } = useMemo(() => parseKeySig(keySig), [keySig]);
+  // --- parse fallback from keySig ---
+  const parsed = useMemo(() => parseKeySig(keySig), [keySig]);
+  const tonicPcParsed = parsed.tonicPc;
+  const scaleParsed = parsed.scale;
 
-  // --- Enharmonic preference via your util (uses relative-major logic per scale) ---
-  // Name is aliased so eslint doesn't treat it as a Hook
-  const preferSharps = useMemo(() => preferSharpsForKey(tonicPc, scale), [tonicPc, scale]);
+  // --- EFFECTIVE scale context (prefer the explicit overrides) ---
+  const scaleTonicPcEff = typeof solfegeTonicPc === "number" ? solfegeTonicPc : tonicPcParsed;
+  const scaleNameEff: ScaleName = solfegeScaleName ? fromSolfegeName(solfegeScaleName) : scaleParsed;
 
-  // --- One-octave window anchored to tonic, with phrase-aware octave shift ---
+  // --- Enharmonic preference via util (use the effective scale, not keySig heuristics) ---
+  const preferSharps = useMemo(
+    () => preferSharpsForKey(scaleTonicPcEff, scaleNameEff),
+    [scaleTonicPcEff, scaleNameEff]
+  );
+
+  // --- Solfege basis matches the effective scale, too ---
+  const solfegeTonicPcEff = scaleTonicPcEff;
+  const solfegeScaleEff: SolfegeScaleName = solfegeScaleName ?? toSolfegeName(scaleNameEff);
+
+  // --- One-octave window LOCKED to the *scale tonic*, with phrase-aware octave shift ---
   const [minMidi, maxMidi] = useMemo<[number, number]>(() => {
     const fallbackCenter = 60; // middle C
+    const anchorPc = ((scaleTonicPcEff % 12) + 12) % 12;
+
     if (!phrase || !phrase.notes.length) {
-      const oct = Math.floor((fallbackCenter - tonicPc) / 12);
-      const min = oct * 12 + tonicPc;
-      return [min, min + 13]; // inclusive octave [tonic..tonic]
+      const oct = Math.floor((fallbackCenter - anchorPc) / 12);
+      const min = oct * 12 + anchorPc;
+      return [min, min + 13]; // inclusive boundaries: [tonic .. tonic+12]
     }
 
     const { minMidi: minP, maxMidi: maxP } = getMidiRange(phrase, 2);
     const center = Math.round((minP + maxP) / 2);
 
-    const baseOct = Math.floor((center - tonicPc) / 12);
-    let min = baseOct * 12 + tonicPc;
-    let max = min + 13; // keep *exactly* one octave
+    const baseOct = Math.floor((center - anchorPc) / 12);
+    let min = baseOct * 12 + anchorPc;
+    let max = min + 13; // keep exactly one octave of rows (inclusive upper line)
 
-    // Nudge by octaves so the phrase sits in/near the window
+    // Nudge so phrase sits in/near the window
     if (minP >= max) { min += 12; max += 12; }
     if (maxP < min)  { min -= 12; max -= 12; }
 
     return [min, max];
-  }, [phrase, tonicPc]);
+  }, [phrase, scaleTonicPcEff]);
 
   if (!phrase || phrase.notes.length === 0) {
     return <div ref={hostRef} className="relative w-full" style={{ height }} />;
@@ -163,11 +189,15 @@ export default function PianoRollCanvas({
           leadInSec={leadInSec}
           startAtMs={startAtMs}
           lyrics={lyrics}
-          tonicPc={tonicPc}
+          // 🔒 lock grid lines & bottom row to the *scale tonic*, not the relative major
+          tonicPc={scaleTonicPcEff}
           useSharps={preferSharps}
           showNoteBlocks={showNoteBlocks}
           showNoteBorders={showNoteBorders}
           blocksWhenLyrics={blocksWhenLyrics}
+          // 🎵 mode-rotated solfege labels (already correct in your app)
+          solfegeTonicPc={solfegeTonicPcEff}
+          solfegeScaleName={solfegeScaleEff}
         />
       ) : null}
     </div>

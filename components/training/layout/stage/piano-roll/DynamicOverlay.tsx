@@ -12,6 +12,8 @@ import {
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 import useRafLoop from "./rhythm/hooks/useRafLoop";
 import useDpr from "./rhythm/hooks/useDpr";
+import { isInScale, type ScaleName } from "@/utils/phrase/scales";
+import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
 
 type Props = {
   width: number;
@@ -36,12 +38,13 @@ type Props = {
   useSharps?: boolean;
 
   /** Visual toggles */
-  /** Draw note rectangles at all (ignores lyrics if false). Default: true */
   showNoteBlocks?: boolean;
-  /** Draw a 1px border on note rectangles. Default: true */
   showNoteBorders?: boolean;
-  /** If lyrics are present, still draw blocks behind the text. Default: false */
   blocksWhenLyrics?: boolean;
+
+  /** Mode-aware solfege context for row labeling */
+  solfegeTonicPc?: number;
+  solfegeScaleName?: SolfegeScaleName;
 };
 
 type BitmapLike = ImageBitmap | HTMLCanvasElement;
@@ -64,10 +67,12 @@ export default function DynamicOverlay({
   startAtMs = null,
   lyrics,
   tonicPc = 0,
-  useSharps = false, // default to flats unless caller opts into sharps
+  useSharps = false,
   showNoteBlocks = true,
   showNoteBorders = true,
   blocksWhenLyrics = true,
+  solfegeTonicPc,
+  solfegeScaleName,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -136,8 +141,18 @@ export default function DynamicOverlay({
   };
 
   const rebuildGridIfNeeded = useCallback(async () => {
-    const key = `${width}x${height}:${minMidi}-${maxMidi}:pc${tonicPc}:shp${useSharps ? 1 : 0}:dpr${dpr}`;
     if (!width || !height) return;
+
+    // Include solfege context in cache key so labels rebuild correctly
+    const labelKey =
+      solfegeScaleName != null
+        ? `solf:${solfegeScaleName}:${(solfegeTonicPc ?? tonicPc) | 0}`
+        : "solf:none";
+
+    const key = `${width}x${height}:${minMidi}-${maxMidi}:pc${tonicPc}:shp${
+      useSharps ? 1 : 0
+    }:dpr${dpr}:lbl${labelKey}`;
+
     if (gridKeyRef.current === key && gridBmpRef.current) return;
 
     disposeBitmap(gridBmpRef.current);
@@ -155,12 +170,20 @@ export default function DynamicOverlay({
     ctx.fillStyle = PR_COLORS.bg;
     ctx.fillRect(0, 0, width, height);
 
-    // grid + labels
+    // grid + labels (chromatic grid; labels only for scale tones)
     const span = maxMidi - minMidi;
+    const tonicForSolfege = (solfegeTonicPc ?? tonicPc) | 0;
+
+    // When using rotated-Do, solfegeScaleName may be "major"; that's intended —
+    // membership calculated against that (with rotated tonic) matches the target mode.
+    const scaleForSolfege = solfegeScaleName as unknown as ScaleName | undefined;
+
     for (let i = 0; i <= span; i++) {
       const midi = minMidi + i;
       const yLine = midiToY(midi, height, minMidi, maxMidi);
       const isTonic = ((midi - tonicPc) % 12 + 12) % 12 === 0;
+
+      // horizontal line
       ctx.strokeStyle = isTonic ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
       ctx.lineWidth = isTonic ? 1.25 : 0.75;
       ctx.beginPath();
@@ -168,16 +191,34 @@ export default function DynamicOverlay({
       ctx.lineTo(width, yLine);
       ctx.stroke();
 
-      // Draw labels only for actual cells (skip top boundary row)
+      // row labels (skip top boundary) — ONLY draw for notes in the active scale
       if (midi < maxMidi) {
+        const pc = ((midi % 12) + 12) % 12;
+
+        // If we know the scale, suppress labels for out-of-scale tones.
+        if (scaleForSolfege) {
+          const inScale = isInScale(pc, tonicForSolfege, scaleForSolfege);
+          if (!inScale) continue; // ← skip labeling this row
+        }
+
         const { y, h } = midiCellRect(midi, height, minMidi, maxMidi);
         const centerY = y + h / 2;
+
+        const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
+        let label = `${name}${octave}`;
+
+        if (scaleForSolfege) {
+          const solf = pcToSolfege(pc, tonicForSolfege, solfegeScaleName!, {
+            caseStyle: "capital",
+          });
+          label = `${label} - ${solf}`;
+        }
+
         ctx.fillStyle = PR_COLORS.label;
         ctx.font = "13px ui-sans-serif, system-ui, -apple-system, Segoe UI";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        const { name, octave } = midiToNoteName(midi, { useSharps, octaveAnchor: "C" });
-        ctx.fillText(`${name}${octave}`, 4, centerY);
+        ctx.fillText(label, 4, centerY);
       }
     }
 
@@ -191,7 +232,18 @@ export default function DynamicOverlay({
         // no-op
       }
     });
-  }, [width, height, minMidi, maxMidi, tonicPc, useSharps, dpr, buildCanvas]);
+  }, [
+    width,
+    height,
+    minMidi,
+    maxMidi,
+    tonicPc,
+    useSharps,
+    dpr,
+    buildCanvas,
+    solfegeTonicPc,
+    solfegeScaleName,
+  ]);
 
   useEffect(() => {
     void rebuildGridIfNeeded();
@@ -435,7 +487,7 @@ export default function DynamicOverlay({
       dpr,
       lyrics,
       onActiveNoteChange,
-      useSharps, // relabels if enharmonics switch
+      useSharps,
       showNoteBlocks,
       showNoteBorders,
       blocksWhenLyrics,

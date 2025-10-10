@@ -147,7 +147,7 @@ export default function TrainingGame({
   const pretestActive = pretestRequired && pretest.status !== "done";
   const exerciseUnlocked = !pretestRequired || pretest.status === "done";
 
-  // Rhythm visibility + detection flags (from session config) — avoid `any` usage
+  // Rhythm visibility + detection flags (from session config)
   const rhythmCfg = (sessionEff.rhythm ?? {}) as RhythmConfig;
   const rhythmLineEnabled = rhythmCfg.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfg.detectEnabled !== false;
@@ -187,7 +187,7 @@ export default function TrainingGame({
 
   const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
 
-  // ✅ match setup thresholds
+  // Match setup thresholds
   const hand = useHandBeat({
     latencyMs: calibratedLatencyMs ?? gestureLatencyMs,
     fireUpEps: 0.004,
@@ -260,8 +260,7 @@ export default function TrainingGame({
       const usedRhythm = rhythmForTakeRef.current ?? rhythmEffective;
       if (usedPhrase) {
         const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
-        // ⚠️ Gesture latency is already compensated inside useHandBeat via `latencyMs`,
-        // so keep this scoring offset at 0 to avoid double compensation.
+        // Gesture latency is compensated inside useHandBeat via latencyMs
         const gestureLagSec = 0;
 
         void scoreTake({
@@ -388,6 +387,10 @@ export default function TrainingGame({
       highHz={highHz ?? null}
       sessionPanel={footerSessionPanel}
       sidePanel={sidePanel}
+
+      // 🔑 Mode-aware grid labels (rotating solfege)
+      tonicPc={sessionEff.scale?.tonicPc ?? null}
+      scaleName={sessionEff.scale?.name ?? null}
     />
   );
 }

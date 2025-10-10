@@ -11,6 +11,7 @@ import type { SystemLayout } from "./sheet/vexscore/types";
 import { pickClef, preferSharpsForKeySig } from "./sheet/vexscore/builders";
 import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
 import SidePanelLayout from "./side-panel/SidePanelLayout";
+import type { ScaleName } from "@/utils/phrase/scales"; // NEW
 
 type Props = {
   phrase?: Phrase | null;
@@ -46,6 +47,10 @@ type Props = {
   /** accepted but unused (kept for compatibility with parent) */
   step?: "low" | "high" | "play";
   loopPhase?: unknown;
+
+  /** 🔑 NEW: mode-aware solfege for piano roll */
+  tonicPc?: number;
+  scaleName?: ScaleName;
 };
 
 export default function GameStage({
@@ -76,6 +81,10 @@ export default function GameStage({
   blocksWhenLyrics = true,
 
   stageAside,
+
+  // NEW
+  tonicPc,
+  scaleName,
 }: Props) {
   // Keep timeline math identical across canvases
   const WINDOW_SEC = 4;
@@ -113,7 +122,6 @@ export default function GameStage({
   const [systems, setSystems] = useState<SystemLayout[] | null>(null);
 
   // ✅ Fix: do not depend on `sheetHostRef.current`
-  // Re-run when the sheet view is active (mount/switch), and manage the observer from there.
   useLayoutEffect(() => {
     if (view !== "sheet") return;
 
@@ -141,7 +149,6 @@ export default function GameStage({
 
   const handleLayout = useCallback((m: { systems: SystemLayout[] }) => {
     setSystems(m.systems ?? null);
-    // After VexScore lays out, width can change from 0 -> real value; refresh sheetW.
     const el = sheetHostRef.current;
     if (el) {
       const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
@@ -173,7 +180,6 @@ export default function GameStage({
         {/* LEFT: Main stage area */}
         <div className="flex-1 min-w-0 flex flex-col drop-shadow-sm shadow-md">
           <div className="w-full">
-            {/* If no phrase, render an empty stage area with the correct height */}
             {!hasPhrase ? (
               <div style={{ height: mainH }} />
             ) : view === "sheet" ? (
@@ -241,6 +247,9 @@ export default function GameStage({
                 showNoteBlocks={showNoteBlocks}
                 showNoteBorders={showNoteBorders}
                 blocksWhenLyrics={blocksWhenLyrics}
+                /** 🔑 NEW: rotate solfege labels with the mode */
+                solfegeTonicPc={tonicPc}
+                solfegeScaleName={scaleName}
               />
             )}
           </div>

@@ -7,7 +7,7 @@
 export type ChromaticStyle = "auto" | "raised" | "lowered";
 export type CaseStyle = "lower" | "capital";
 
-// Chromatic solfege syllables relative to tonic (0..11)
+// Chromatic solfege syllables relative to tonic (0..11), do-based
 const CHROMATIC_RAISED = [
   "do", "di", "re", "ri", "mi", "fa", "fi", "sol", "si", "la", "li", "ti",
 ] as const;
@@ -85,6 +85,36 @@ const SCALE_STEPS: Record<SolfegeScaleName, number[]> = {
   chromatic:        [0,1,2,3,4,5,6,7,8,9,10,11],
 };
 
+// NEW: map each scale to its tonic solfege syllable (for chromatic rotation)
+const MODE_TONIC_SYLLABLE: Record<SolfegeScaleName, string> = {
+  major: "do",
+  natural_minor: "la",
+  harmonic_minor: "la",     // treat as Aeolian base with raised 7
+  melodic_minor: "la",      // ascending form: Aeolian base with raised 6 & 7
+  dorian: "re",
+  phrygian: "mi",
+  lydian: "fa",
+  mixolydian: "sol",
+  locrian: "ti",
+  major_pentatonic: "do",
+  minor_pentatonic: "la",
+  chromatic: "do",          // leave plain do-based when explicitly chromatic
+};
+
+// Rotate a chromatic array so index 0 is the mode's tonic syllable (e.g., "la" for Aeolian)
+function rotateChromaticForMode(
+  baseChromatic: readonly string[],
+  name: SolfegeScaleName
+): readonly string[] {
+  // Only rotate when we have a modal tonic (not the explicit "chromatic" case)
+  if (name === "chromatic") return baseChromatic;
+  const tonicSyll = MODE_TONIC_SYLLABLE[name] ?? "do";
+  const idx = baseChromatic.indexOf(tonicSyll);
+  if (idx <= 0) return baseChromatic;
+  // rotate left by idx
+  return [...baseChromatic.slice(idx), ...baseChromatic.slice(0, idx)];
+}
+
 // Map a single pitch-class (0..11) → solfege syllable
 export function pcToSolfege(
   pcAbs: number,
@@ -92,14 +122,18 @@ export function pcToSolfege(
   name: SolfegeScaleName,
   opts: { chromaticStyle?: ChromaticStyle; caseStyle?: CaseStyle } = {}
 ): string {
-  const chroma = pickChromatic(opts.chromaticStyle ?? "auto", tonicPc);
+  const baseChromatic = pickChromatic(opts.chromaticStyle ?? "auto", tonicPc);
+  const chroma = rotateChromaticForMode(baseChromatic, name);
   const rel = ((pcAbs - tonicPc) % 12 + 12) % 12;
 
-  if (name === "chromatic") return titleCase(chroma[rel], opts.caseStyle ?? "lower");
+  if (name === "chromatic") {
+    // explicit chromatic mode stays do-based (no rotation)
+    return titleCase(baseChromatic[rel], opts.caseStyle ?? "lower");
+  }
 
   const steps = SCALE_STEPS[name];
 
-  // Pentatonics: direct lookups
+  // Pentatonics: direct lookups (fallback to rotated chromatic for out-of-scale pcs)
   if (name === "major_pentatonic") {
     const syll = MAJOR_PENTA[rel as keyof typeof MAJOR_PENTA];
     return titleCase(syll ?? chroma[rel], opts.caseStyle ?? "lower");
@@ -114,11 +148,11 @@ export function pcToSolfege(
   if (degrees) {
     const idx = steps.indexOf(rel);
     if (idx >= 0) return titleCase(degrees[idx], opts.caseStyle ?? "lower");
-    // Out-of-scale → chromatic alteration syllable
+    // Out-of-scale → chromatic alteration syllable (ROTATED to mode tonic)
     return titleCase(chroma[rel], opts.caseStyle ?? "lower");
   }
 
-  // Harmonic/Melodic minor: Aeolian base with alterations
+  // Harmonic/Melodic minor: Aeolian base with alterations, and rotated chromatic fallback
   if (name === "harmonic_minor") {
     // aeolian + raised 7 → "si"
     if (rel === 11) return titleCase("si", opts.caseStyle ?? "lower");
@@ -127,7 +161,7 @@ export function pcToSolfege(
     return titleCase(chroma[rel], opts.caseStyle ?? "lower");
   }
   if (name === "melodic_minor") {
-    // ascending melodic minor: aeolian + raised 6 (fi) + raised 7 (si)
+    // ascending melodic: aeolian + raised 6 (fi) + raised 7 (si)
     if (rel === 9)  return titleCase("fi", opts.caseStyle ?? "lower"); // 6↑
     if (rel === 11) return titleCase("si", opts.caseStyle ?? "lower"); // 7↑
     const idx = SCALE_STEPS.natural_minor.indexOf(rel);

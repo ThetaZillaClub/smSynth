@@ -6,7 +6,8 @@ import GameFooter from "./footer/GameFooter";
 import { type Phrase } from "./stage/piano-roll/PianoRollCanvas";
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
 import TrainingSidePanel, { type TrainingSidePanelProps } from "./stage/side-panel/TrainingSidePanel";
-import type { RhythmEvent } from "@/utils/phrase/phraseTypes"; // ⬅️ add
+import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
+import type { ScaleName } from "@/utils/phrase/scales"; // NEW
 
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
 
@@ -57,11 +58,15 @@ type LayoutProps = {
   children?: React.ReactNode;
 
   /** Timing & rhythm (forwarded to stage if present) */
-  rhythm?: RhythmEvent[] | null;          // ⬅️ was `any`
-  melodyRhythm?: RhythmEvent[] | null;    // ⬅️ was `any`
+  rhythm?: RhythmEvent[] | null;
+  melodyRhythm?: RhythmEvent[] | null;
   bpm?: number;
   den?: number;
   tsNum?: number;
+
+  /** 🔑 NEW: feed mode-aware solfege into piano roll */
+  tonicPc?: number | null;
+  scaleName?: ScaleName | null;
 };
 
 export default function GameLayout({
@@ -94,6 +99,10 @@ export default function GameLayout({
   stageAside,
   sidePanel,
   children,
+
+  // NEW
+  tonicPc = null,
+  scaleName = null,
 }: LayoutProps) {
   const showPlay = !!phrase;
   const asideNode = sidePanel ? <TrainingSidePanel {...sidePanel} /> : stageAside;
@@ -129,6 +138,10 @@ export default function GameLayout({
             /* forward for back-compat so they aren't "unused" */
             step={step}
             loopPhase={loopPhase}
+
+            // 🔑 NEW: mode-aware solfege for piano roll
+            tonicPc={typeof tonicPc === "number" ? tonicPc : undefined}
+            scaleName={scaleName ?? undefined}
           />
         </div>
 
