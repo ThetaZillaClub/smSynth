@@ -4,11 +4,7 @@
 import * as React from "react";
 import type { SessionConfig } from "@/components/training/session";
 import { effectiveBpm } from "@/utils/time/speed";
-import {
-  allowedTonicPcsFromRange,
-  resolveTonicPc,
-  tonicMidisFromPreference,
-} from "@/utils/gameplay/tonic";
+import { allowedTonicPcsFromRange, resolveTonicPc, tonicMidisFromPreference } from "@/utils/gameplay/tonic";
 
 /** LocalStorage keys used by the Settings panel */
 export const SPEED_KEY = "gameplay:speedPercent";
@@ -16,9 +12,11 @@ export const KEY_CHOICE_KEY = "gameplay:keyChoice";   // "random" | "0..11"
 export const OCTAVE_PREF_KEY = "gameplay:octavePref"; // "low" | "high"
 export const LEAD_KEY = "gameplay:leadBars";          // "1" | "2"
 export const AUTOPLAY_KEY = "gameplay:autoplay";      // "on" | "off"
+export const VIEW_PREF_KEY = "gameplay:viewPref";     // "piano" | "sheet"   ← NEW
 
 export type KeyChoice = "random" | number;
 export type OctPref = "low" | "high";
+export type ViewPref = "piano" | "sheet";
 
 function readSpeedPercent(): number {
   try {
@@ -64,11 +62,17 @@ function readAutoplay(): boolean {
     return true;
   }
 }
+function readViewPref(): ViewPref {
+  try {
+    const raw = (localStorage.getItem(VIEW_PREF_KEY) || "").toLowerCase();
+    return raw === "sheet" ? "sheet" : "piano"; // default Piano Roll
+  } catch {
+    return "piano";
+  }
+}
 
 /**
  * Centralized gameplay settings → effective SessionConfig mapper.
- * - React-only (no custom hooks imported)
- * - Keeps random tonic stable until inputs change
  */
 export function useGameplaySession(params: {
   sessionConfig: SessionConfig;
@@ -83,6 +87,7 @@ export function useGameplaySession(params: {
   const [octPref, setOctPref] = React.useState<OctPref>(readOctPref());
   const [leadBars, setLeadBars] = React.useState<1 | 2>(readLeadBars());
   const [autoplay, setAutoplay] = React.useState<boolean>(readAutoplay());
+  const [viewPref, setViewPref] = React.useState<ViewPref>(readViewPref()); // ← NEW
 
   React.useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -91,15 +96,17 @@ export function useGameplaySession(params: {
       if (e.key === OCTAVE_PREF_KEY) setOctPref(readOctPref());
       if (e.key === LEAD_KEY) setLeadBars(readLeadBars());
       if (e.key === AUTOPLAY_KEY) setAutoplay(readAutoplay());
+      if (e.key === VIEW_PREF_KEY) setViewPref(readViewPref()); // ← NEW
     };
     window.addEventListener("storage", onStorage);
 
-    // one-time fresh read (if this mounted before settings page)
+    // one-time fresh read
     setSpeedPercent(readSpeedPercent());
     setKeyChoice(readKeyChoice());
     setOctPref(readOctPref());
     setLeadBars(readLeadBars());
     setAutoplay(readAutoplay());
+    setViewPref(readViewPref()); // ← NEW
 
     return () => window.removeEventListener("storage", onStorage);
   }, []);
@@ -111,13 +118,11 @@ export function useGameplaySession(params: {
     [baselineBpm, speedPercent]
   );
 
-  // 3) derive tonic from range + key choice (stable random)
+  // 3) derive tonic from range + key choice
   const allowed = React.useMemo(
     () => allowedTonicPcsFromRange(lowHz, highHz),
     [lowHz, highHz]
   );
-
-  // Bitmask of allowed set to detect true membership changes, not just size
   const allowedMask = React.useMemo(() => {
     let mask = 0;
     for (const pc of allowed) mask |= 1 << (((pc % 12) + 12) % 12);
@@ -125,8 +130,6 @@ export function useGameplaySession(params: {
   }, [allowed]);
 
   const randomPcRef = React.useRef<number | null>(null);
-
-  // reset cached random when membership changes or keyChoice toggles
   React.useEffect(() => {
     randomPcRef.current = null;
   }, [keyChoice, allowedMask]);
@@ -145,26 +148,33 @@ export function useGameplaySession(params: {
   // 4) final effective session
   const session: SessionConfig = React.useMemo(() => {
     const base: SessionConfig = { ...sessionConfig, bpm: bpmEff };
+
     base.leadBars = leadBars;
     base.loopingMode = !!autoplay;
+
+    // Apply view preference unless the course explicitly demands Sheet Music.
+    // If a lesson hard-codes `view: "sheet"`, we respect it.
+    // Otherwise we use the user's setting (default Piano Roll).
+    base.view = sessionConfig.view === "sheet" ? "sheet" : viewPref;
+
     const prevScale = base.scale ?? { tonicPc: 0, name: "major" as const };
     base.scale = { ...prevScale, tonicPc: resolvedTonicPc, randomTonic: false };
     base.tonicMidis = tonicMidis ?? null;
     return base;
-  }, [sessionConfig, bpmEff, leadBars, autoplay, resolvedTonicPc, tonicMidis]);
+  }, [sessionConfig, bpmEff, leadBars, autoplay, viewPref, resolvedTonicPc, tonicMidis]);
 
   return {
-    // effective
     session,
     bpmEff,
     baselineBpm,
 
-    // raw settings (handy for UI/telemetry)
+    // raw settings
     speedPercent,
     keyChoice,
     octPref,
     leadBars,
     autoplay,
+    viewPref, // ← exposed if you need it in UI/telemetry
 
     // derived key data
     resolvedTonicPc,
