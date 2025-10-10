@@ -14,6 +14,7 @@ import { beatsToSeconds, noteValueToBeats, type NoteValue } from "@/utils/time/t
 import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
 import { keyNameFromTonicPc } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import type { SessionConfig } from "@/components/training/session/types";
+import { hzToMidi } from "@/utils/pitch/pitchMath";
 
 const rand32 = () => (Math.floor(Math.random() * 0xffffffff) >>> 0);
 
@@ -25,6 +26,36 @@ export type ExerciseFabric = {
   keySig: string | null;
   fallbackPhraseSec: number;
 };
+
+/** Build all possible tonic windows (tonic..tonic+12) for a key inside a range. */
+function windowsForKeyInRange(tonicPc: number, lowHz: number, highHz: number): number[] {
+  const loM = Math.round(hzToMidi(Math.min(lowHz, highHz)));
+  const hiM = Math.round(hzToMidi(Math.max(lowHz, highHz)));
+  const pc = ((tonicPc % 12) + 12) % 12;
+  const out: number[] = [];
+  for (let m = loM; m <= hiM - 12; m++) {
+    if ((((m % 12) + 12) % 12) === pc) out.push(m);
+  }
+  return out;
+}
+
+/** Choose a tonic window: prefer preferredOctaveIndex, else nearest to range center. */
+function pickWindow(
+  windows: number[],
+  lowHz: number,
+  highHz: number,
+  preferredIndex: number | null
+): number | null {
+  if (!windows.length) return null;
+  if (preferredIndex != null) {
+    const idx = Math.max(0, Math.min(windows.length - 1, Math.floor(preferredIndex)));
+    return windows[idx]!;
+  }
+  const loM = Math.round(hzToMidi(Math.min(lowHz, highHz)));
+  const hiM = Math.round(hzToMidi(Math.max(lowHz, highHz))) - 12; // ensure full octave above tonic
+  const center = Math.round((loM + hiM) / 2);
+  return windows.slice().sort((a, b) => Math.abs(a - center) - Math.abs(b - center))[0]!;
+}
 
 export function useExerciseFabric(opts: {
   sessionConfig: SessionConfig;
@@ -51,6 +82,24 @@ export function useExerciseFabric(opts: {
   const syncSeed   = useMemo(() => rand32(), [seedBump]);
 
   const lengthBars = Math.max(1, Number((rhythm as any)?.lengthBars ?? exerciseBars ?? 2));
+
+  // ---- derive a safe tonic window if none was provided ----
+  const tonicMidisSafe: number[] | null = useMemo(() => {
+    if (tonicMidis && tonicMidis.length) return tonicMidis;
+    if (!haveRange || !scale) return null;
+
+    const wins = windowsForKeyInRange(scale.tonicPc, lowHz as number, highHz as number);
+    if (!wins.length) return null;
+
+    const pref =
+      Array.isArray(sessionConfig.preferredOctaveIndices) &&
+      sessionConfig.preferredOctaveIndices.length
+        ? sessionConfig.preferredOctaveIndices[0]!
+        : null;
+
+    const chosen = pickWindow(wins, lowHz as number, highHz as number, pref);
+    return chosen != null ? [chosen] : null;
+  }, [tonicMidis, haveRange, scale, lowHz, highHz, sessionConfig.preferredOctaveIndices]);
 
   // ---- rest policy calc (unchanged) ----
   const lineAllowRests: boolean = (rhythm as any)?.allowRests !== false;
@@ -154,7 +203,7 @@ export function useExerciseFabric(opts: {
         pairRhythm,
         gapRhythm: [],
         seed: scaleSeed,
-        tonicMidis,
+        tonicMidis: tonicMidisSafe,
         /** NEW: degree filter */
         allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
         /** Still respect absolute whitelists if present */
@@ -190,7 +239,7 @@ export function useExerciseFabric(opts: {
         pattern: (rhythm as any).pattern,
         noteQuota: want,
         seed: scaleSeed,
-        tonicMidis,
+        tonicMidis: tonicMidisSafe,
         /** NEW */
         allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
         allowedMidis,
@@ -218,7 +267,7 @@ export function useExerciseFabric(opts: {
       rhythm: fabric,
       maxPerDegree: scale.maxPerDegree ?? 2,
       seed: scaleSeed,
-      tonicMidis,
+      tonicMidis: tonicMidisSafe,
       includeUnder: !!randomIncludeUnder,
       includeOver: !!randomIncludeOver,
       /** NEW */
@@ -230,7 +279,7 @@ export function useExerciseFabric(opts: {
   }, [
     customPhrase, haveRange, lowHz, highHz, bpm, ts.den, ts.num,
     scale, rhythm, rhythmSeed, scaleSeed, lengthBars,
-    tonicMidis, allowedMidis, randomIncludeUnder, randomIncludeOver,
+    tonicMidisSafe, allowedMidis, randomIncludeUnder, randomIncludeOver,
     contentAllowRests, contentRestProb, sessionConfig.allowedDegrees,
   ]);
 
