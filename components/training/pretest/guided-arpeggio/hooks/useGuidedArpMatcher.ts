@@ -1,3 +1,4 @@
+// components/training/pretest/guided-arpeggio/hooks/useGuidedArpMatcher.ts
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -63,12 +64,12 @@ export default function useGuidedArpMatcher(opts: {
     [targetOffsets, tonicMidi, thirdSemitones, centsTol]
   );
 
+  // Main matcher tick — do nothing when inactive (no state writes).
   useEffect(() => {
     if (!active) {
-      setCaptured([]);
-      setPassed(false);
-      holdMsRef.current = 0;
+      // Only clear runtime counters; state resets are handled in the separate effect below.
       lastFrameTsRef.current = null;
+      holdMsRef.current = 0;
       latchedDegRef.current = null;
       return;
     }
@@ -119,10 +120,11 @@ export default function useGuidedArpMatcher(opts: {
     toNearestDegree,
   ]);
 
+  // Reset state once when deactivating (avoid new array each render).
   useEffect(() => {
     if (!active) {
-      setCaptured([]);
-      setPassed(false);
+      setCaptured((prev) => (prev.length ? [] : prev));
+      setPassed((prev) => (prev ? false : prev));
     }
   }, [active]);
 

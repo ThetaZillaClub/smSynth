@@ -2,11 +2,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
-import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
+import PlayProgressButton from "@/components/training/pretest/PlayProgressButton";
+import useSinglePitchGate from "@/components/training/pretest/single-pitch/hooks/useSinglePitchGate";
 
 export default function SinglePitch({
-  statusText,
+  statusText, // kept for prop compatibility; not shown
   running,
   inResponse,
   onStart,
@@ -38,7 +39,7 @@ export default function SinglePitch({
   confidence: number;
   playMidiList: (midi: number[], noteDurSec: number) => Promise<void> | void;
 }) {
-  const { quarterSec, leadInSec, requiredHoldSec } = usePitchTuneDurations({ bpm, tsNum });
+  const { quarterSec, requiredHoldSec } = usePitchTuneDurations({ bpm, tsNum });
 
   // Pick the low tonic root from range
   const tonicMidi = useMemo<number | null>(() => {
@@ -58,20 +59,26 @@ export default function SinglePitch({
     return `${n.name}${n.octave}`;
   }, [tonicMidi]);
 
-  // Sustain gate during student response; centsTol at 60 as requested
-  const gate = useSustainPass({
+  // Sustain gate using wrapper (internally stable)
+  const gate = useSinglePitchGate({
     active: !!inResponse && running && tonicHz != null,
     targetHz: tonicHz,
     liveHz,
     confidence,
-    confMin: 0.6,
-    centsTol: 60,
     holdSec: requiredHoldSec,
-    retryAfterSec: 6,
   });
 
   const held = Math.min(gate.heldSec, requiredHoldSec);
-  const pct = Math.max(0, Math.min(1, requiredHoldSec ? held / requiredHoldSec : 0));
+  const pctRaw = Math.max(0, Math.min(1, requiredHoldSec ? held / requiredHoldSec : 0));
+
+  // Latch "complete" once passed so progress & glow stay at 100% until reset
+  const completeLatch = useRef(false);
+  useEffect(() => {
+    if (gate.passed) completeLatch.current = true;
+    if (!running) completeLatch.current = false; // reset when pretest stops
+  }, [gate.passed, running]);
+
+  const displayProgress = completeLatch.current ? 1 : pctRaw;
 
   // Delayed auto-advance (digest/rest)
   const advanceTimeoutRef = useRef<number | null>(null);
@@ -100,6 +107,7 @@ export default function SinglePitch({
     if (!gate.passed) passLatch.current = false;
   }, [running, inResponse, gate.passed, queueAdvance]);
 
+  // Description/help text
   const help = useMemo(() => {
     if (tonicMidi == null) return "Waiting for your saved range…";
     if (!running) return "Press Play to start. Then match and hold the target.";
@@ -114,7 +122,7 @@ export default function SinglePitch({
     await playMidiList([tonicMidi], Math.min(quarterSec, requiredHoldSec));
   };
 
-  const onFooterPlay = async () => {
+  const onButtonClick = async () => {
     if (!running) {
       onStart(); // first click starts the pretest
       return;
@@ -122,84 +130,22 @@ export default function SinglePitch({
     await playTarget();
   };
 
+  // Light-theme card + description above centered button (matches SidePanelScores language)
   return (
-    <div className="mt-2 grid gap-3 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold">{statusText}</div>
-      </div>
+    <div className="rounded-xl bg-[#f2f2f2] border border-[#dcdcdc] p-3 shadow-sm">
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Single Pitch — Tonic</div>
+      <p className="mt-1 text-xs text-[#373737]">{help}</p>
 
-      {/* Target + helper */}
-      <div className="rounded-md border border-[#d2d2d2] bg-white/70 px-3 py-2">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Single Pitch — Tonic</div>
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold">
-            Target {tonicLabel}
-            <span className="ml-2 text-xs font-normal text-[#2d2d2d]">Hold for {requiredHoldSec.toFixed(2)}s</span>
-          </div>
-        </div>
-        <div className="mt-1 text-xs text-[#2d2d2d]">{help}</div>
-      </div>
-
-      {/* Progress */}
-      <div className="rounded-md border border-[#d2d2d2] bg:white/70 bg-white/70 px-3 py-2">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Hold progress</div>
-        <div className="mt-1 h-2 rounded-full bg-[#ebebeb] overflow-hidden border border-[#dcdcdc]">
-          <div className="h-full bg-[#0f0f0f] transition-[width]" style={{ width: `${Math.round(pct * 100)}%` }} />
-        </div>
-        <div className="mt-1 text-xs text-[#2d2d2d]">
-          Held {held.toFixed(2)}s / {requiredHoldSec.toFixed(2)}s
-          {gate.lastCents != null && <span className="ml-2">({gate.lastCents}¢)</span>}
-        </div>
-      </div>
-
-      {/* Footer controls */}
-      <div className="mt-1 flex items-center justify-end">
-        <RoundIconButton title={running ? "Play target" : "Start pre-test"} ariaLabel="Play" onClick={onFooterPlay} disabled={running && tonicMidi == null}>
-          <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-            <path d="M8 5v14l11-7L8 5z" fill="currentColor" />
-          </svg>
-        </RoundIconButton>
-      </div>
-
-      {/* timing hints */}
-      <div className="text-[11px] text-[#6b6b6b]">
-        (Lead-in {leadInSec.toFixed(2)}s • quarter {quarterSec.toFixed(2)}s)
+      <div className="mt-3 flex justify-center">
+        <PlayProgressButton
+          label={tonicLabel}
+          onToggle={onButtonClick}
+          progress={displayProgress}
+          complete={completeLatch.current}
+          disabled={running && tonicMidi == null}
+          size={72}
+        />
       </div>
     </div>
-  );
-}
-
-function RoundIconButton({
-  children,
-  title,
-  ariaLabel,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  title: string;
-  ariaLabel: string;
-  onClick: () => void | Promise<void>;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={ariaLabel}
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        "inline-flex items-center justify-center",
-        "rounded-full p-2.5 bg-[#ebebeb] text-[#0f0f0f]",
-        "hover:opacity-90 active:scale-[0.98] transition",
-        "border border-[#dcdcdc] shadow-sm",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
-        disabled ? "opacity-40 cursor-not-allowed" : "",
-      ].join(" ")}
-    >
-      {children}
-    </button>
   );
 }

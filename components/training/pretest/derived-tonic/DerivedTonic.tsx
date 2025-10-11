@@ -4,9 +4,10 @@ import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
+import PlayProgressButton from "@/components/training/pretest/PlayProgressButton";
 
 export default function DerivedTonic({
-  statusText,
+  statusText, // kept for prop compatibility; not shown
   running,
   inResponse,
   onStart,
@@ -38,9 +39,16 @@ export default function DerivedTonic({
   confidence: number;
   playMidiList: (midi: number[], noteDurSec: number) => Promise<void> | void;
 }) {
-  const { quarterSec, leadInSec, requiredHoldSec } = usePitchTuneDurations({ bpm, tsNum });
+  const { quarterSec, requiredHoldSec } = usePitchTuneDurations({ bpm, tsNum });
 
-  // Target is still the tonic (low tonic root from range)
+  // --- Cue is fixed A440 (A4) ---
+  const cueMidi = 69; // A4
+  const cueLabel = useMemo(() => {
+    const n = midiToNoteName(cueMidi, { useSharps: true });
+    return `${n.name}${n.octave}`; // "A4"
+  }, []);
+
+  // --- Target is the tonic (low tonic root from range) ---
   const tonicMidi = useMemo<number | null>(() => {
     if (lowHz == null) return null;
     const lowM = Math.round(hzToMidi(lowHz));
@@ -52,11 +60,6 @@ export default function DerivedTonic({
   }, [lowHz, tonicPc]);
 
   const tonicHz = useMemo(() => (tonicMidi != null ? midiToHz(tonicMidi, 440) : null), [tonicMidi]);
-  const tonicLabel = useMemo(() => {
-    if (tonicMidi == null) return "—";
-    const n = midiToNoteName(tonicMidi, { useSharps: true });
-    return `${n.name}${n.octave}`;
-  }, [tonicMidi]);
 
   // Gate for passing (same tolerance = 60¢)
   const gate = useSustainPass({
@@ -71,7 +74,16 @@ export default function DerivedTonic({
   });
 
   const held = Math.min(gate.heldSec, requiredHoldSec);
-  const pct = Math.max(0, Math.min(1, requiredHoldSec ? held / requiredHoldSec : 0));
+  const pctRaw = Math.max(0, Math.min(1, requiredHoldSec ? held / requiredHoldSec : 0));
+
+  // Latch 100% once passed so the progress & glow stay on until reset
+  const completeLatch = useRef(false);
+  useEffect(() => {
+    if (gate.passed) completeLatch.current = true;
+    if (!running) completeLatch.current = false; // reset when pretest stops
+  }, [gate.passed, running]);
+
+  const displayProgress = completeLatch.current ? 1 : pctRaw;
 
   // Delayed auto-advance (digest/rest)
   const advanceTimeoutRef = useRef<number | null>(null);
@@ -100,6 +112,7 @@ export default function DerivedTonic({
     if (!gate.passed) passLatch.current = false;
   }, [running, inResponse, gate.passed, queueAdvance]);
 
+  // Description/help text — mirrors SinglePitch style/placement
   const help = useMemo(() => {
     if (!running) return "Press Play to hear A440. Then derive the tonic and hold it.";
     if (!inResponse) return "Listen… A440 will play first.";
@@ -108,100 +121,37 @@ export default function DerivedTonic({
     return "Sing the tonic you’ve derived from A440 and hold it…";
   }, [running, inResponse, gate.passed, gate.failed]);
 
-  // Footer Play behavior:
+  // Button behavior:
   // - first click starts (handled upstream via onStart)
   // - subsequent clicks replay the teacher cue (A440)
-  const onFooterPlay = async () => {
+  const onButtonClick = async () => {
     if (!running) {
       onStart();
       return;
     }
     try {
-      // A4 (MIDI 69)
-      await playMidiList([69], Math.min(quarterSec, requiredHoldSec));
+      await playMidiList([cueMidi], Math.min(quarterSec, requiredHoldSec));
     } catch {}
   };
 
+  // Light-theme card + description + centered button (same styling as SinglePitch)
   return (
-    <div className="mt-2 grid gap-3 rounded-lg border border-[#d2d2d2] bg-[#ebebeb] p-3">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold">{statusText}</div>
-      </div>
+    <div className="rounded-xl bg-[#f2f2f2] border border-[#dcdcdc] p-3 shadow-sm">
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Derived Tonic</div>
+      <p className="mt-1 text-xs text-[#373737]">{help}</p>
 
-      {/* Target + helper copy */}
-      <div className="rounded-md border border-[#d2d2d2] bg-white/70 px-3 py-2">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Derived Tonic</div>
-        <div className="text-sm font-semibold">
-          Target {tonicLabel}
-          <span className="ml-2 text-xs font-normal text-[#2d2d2d]">
-            Hold for {requiredHoldSec.toFixed(2)}s
-          </span>
-        </div>
-        <div className="mt-1 text-xs text-[#2d2d2d]">{help}</div>
-        <div className="mt-1 text-[11px] text-[#6b6b6b]">
-          (Cue is A440; derive tonic via intervals & key context.)
-        </div>
-      </div>
-
-      {/* Progress */}
-      <div className="rounded-md border border-[#d2d2d2] bg-white/70 px-3 py-2">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Hold progress</div>
-        <div className="mt-1 h-2 rounded-full bg-[#ebebeb] overflow-hidden border border-[#dcdcdc]">
-          <div className="h-full bg-[#0f0f0f] transition-[width]" style={{ width: `${Math.round(pct * 100)}%` }} />
-        </div>
-        <div className="mt-1 text-xs text-[#2d2d2d]">
-          Held {held.toFixed(2)}s / {requiredHoldSec.toFixed(2)}s
-          {gate.lastCents != null && <span className="ml-2">({gate.lastCents}¢)</span>}
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="mt-1 flex items-center justify-end">
-        <RoundIconButton title={running ? "Play A440" : "Start pre-test"} ariaLabel="Play" onClick={onFooterPlay}>
-          <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-            <path d="M8 5v14l11-7L8 5z" fill="currentColor" />
-          </svg>
-        </RoundIconButton>
-      </div>
-
-      <div className="text-[11px] text-[#6b6b6b]">
-        (Lead-in {leadInSec.toFixed(2)}s • quarter {quarterSec.toFixed(2)}s)
+      <div className="mt-3 flex justify-center">
+        <PlayProgressButton
+          label={cueLabel}                         // show "A4" for the cue
+          ariaLabel={`Cue ${cueLabel}`}           // accessible label
+          tooltip={`Play cue (${cueLabel})`}
+          onToggle={onButtonClick}
+          progress={displayProgress}
+          complete={completeLatch.current}
+          disabled={running && tonicMidi == null}
+          size={72}
+        />
       </div>
     </div>
-  );
-}
-
-function RoundIconButton({
-  children,
-  title,
-  ariaLabel,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  title: string;
-  ariaLabel: string;
-  onClick: () => void | Promise<void>;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={ariaLabel}
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        "inline-flex items-center justify-center",
-        "rounded-full p-2.5 bg-[#ebebeb] text-[#0f0f0f]",
-        "hover:opacity-90 active:scale-[0.98] transition",
-        "border border-[#dcdcdc] shadow-sm",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
-        disabled ? "opacity-40 cursor-not-allowed" : "",
-      ].join(" ")}
-    >
-      {children}
-    </button>
   );
 }

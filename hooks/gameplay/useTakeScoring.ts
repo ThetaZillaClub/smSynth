@@ -63,8 +63,8 @@ export default function useTakeScoring() {
       melodyOnsetsSec: args.melodyOnsetsSec,
       rhythmLineOnsetsSec: args.rhythmOnsetsSec ?? undefined,
       options: {
-        confMin: 0,
-        centsOk: 50,
+        confMin: 0.5,
+        centsOk: 60,
         onsetGraceMs: 120,
         maxAlignMs: 300,
         goodAlignMs: 120,

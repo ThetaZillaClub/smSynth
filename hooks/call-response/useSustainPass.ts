@@ -1,7 +1,6 @@
 // hooks/call-response/useSustainPass.ts
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { hzToMidi } from "@/utils/pitch/pitchMath";
 
 export type SustainPassOptions = {
   active: boolean;
@@ -37,20 +36,41 @@ export default function useSustainPass({
   const [failed, setFailed] = useState(false);
   const [lastCents, setLastCents] = useState<number | null>(null);
 
+  // Refs for fast-changing inputs (avoid effect restarts)
+  const targetHzRef = useRef<number | null>(targetHz);
+  const liveHzRef = useRef<number | null>(liveHz);
+  const confRef = useRef<number>(confidence);
+  targetHzRef.current = targetHz;
+  liveHzRef.current = liveHz;
+  confRef.current = confidence;
+
+  // Refs to avoid stale closures inside RAF
+  const heldRef = useRef(0);
+  const passedRef = useRef(false);
+
   const startRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const reset = () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
     setHeld(0);
     setPassed(false);
     setFailed(false);
     setLastCents(null);
+    heldRef.current = 0;
+    passedRef.current = false;
     startRef.current = null;
     lastTsRef.current = null;
   };
 
   useEffect(() => {
-    if (!active) { reset(); return; }
+    if (!active) {
+      reset();
+      return;
+    }
+
     const tick = () => {
       const now = performance.now();
       if (startRef.current == null) startRef.current = now;
@@ -58,38 +78,49 @@ export default function useSustainPass({
       const dt = (now - lastTs) / 1000;
       lastTsRef.current = now;
 
+      const tHz = targetHzRef.current;
+      const lHz = liveHzRef.current;
+      const conf = confRef.current;
+
       const ok =
-        targetHz != null &&
-        liveHz != null &&
-        confidence >= confMin &&
-        isFinite(liveHz) &&
-        isFinite(targetHz);
+        tHz != null &&
+        lHz != null &&
+        conf >= confMin &&
+        isFinite(lHz) &&
+        isFinite(tHz);
 
       if (ok) {
-        const cents = 1200 * Math.log2(liveHz! / targetHz!);
+        const cents = 1200 * Math.log2(lHz! / tHz!);
         setLastCents(Math.round(cents));
         const within = Math.abs(cents) <= centsTol;
-        setHeld((h) => Math.max(0, within ? h + dt : 0));
+
+        const nextHeld = Math.max(0, within ? heldRef.current + dt : 0);
+        heldRef.current = nextHeld;
+        setHeld(nextHeld);
       } else {
         setLastCents(null);
+        heldRef.current = 0;
         setHeld(0);
       }
 
       const elapsed = (now - (startRef.current ?? now)) / 1000;
-      if (!passed && held + dt >= holdSec) {
+      if (!passedRef.current && heldRef.current >= holdSec) {
+        passedRef.current = true;
         setPassed(true);
-      } else if (!passed && elapsed >= retryAfterSec) {
+      } else if (!passedRef.current && elapsed >= retryAfterSec) {
         setFailed(true);
       }
+
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    const rafRef = { current: requestAnimationFrame(tick) as number | null };
+    rafRef.current = requestAnimationFrame(tick);
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, targetHz, liveHz, confidence, confMin, centsTol, holdSec, retryAfterSec]);
+    // Only restart the RAF when these truly change:
+  }, [active, confMin, centsTol, holdSec, retryAfterSec]);
 
   return { heldSec: held, passed, failed, lastCents, reset };
 }
