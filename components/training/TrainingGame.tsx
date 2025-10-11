@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
@@ -27,6 +27,10 @@ import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 import { useGameplaySession } from "@/hooks/gameplay/useGameplaySession";
 import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
+import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
+
+// 🔑 mode-aware solfège (used for the arp button label)
+import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
 
 // Vision settings + calibrated latency
 import { useVisionEnabled } from "@/components/settings/vision/vision-layout";
@@ -54,6 +58,23 @@ type TakeSnapshot = {
   rhythm: RhythmEvent[] | null;
   melodyRhythm: RhythmEvent[] | null;
 };
+
+/** Helper: triad offsets per scale (matches pretest components) */
+function triadOffsetsForScale(name?: string | null) {
+  const minorish = new Set([
+    "minor",
+    "aeolian",
+    "natural_minor",
+    "dorian",
+    "phrygian",
+    "harmonic_minor",
+    "melodic_minor",
+    "minor_pentatonic",
+  ]);
+  const third = name && minorish.has(name) ? 3 : 4;
+  const fifth = name === "locrian" ? 6 : 7;
+  return { third, fifth };
+}
 
 export default function TrainingGame({
   title = "Training",
@@ -329,6 +350,48 @@ export default function TrainingGame({
       | "internal_arpeggio"
       | undefined) ?? undefined;
 
+  // ----- NEW: footer actions (available AFTER pretest) -----
+  const footerTonicMidi = useMemo<number | null>(() => {
+    if (lowHz == null) return null;
+    const lowM = Math.round(hzToMidi(lowHz));
+    const pc = sessionEff.scale?.tonicPc ?? 0;
+    const wantPc = ((pc % 12) + 12) % 12;
+    for (let m = lowM; m < lowM + 36; m++) {
+      if ((((m % 12) + 12) % 12) === wantPc) return m;
+    }
+    return null;
+  }, [lowHz, sessionEff.scale?.tonicPc]);
+
+  const footerTonicLabel = useMemo(() => {
+    if (footerTonicMidi == null) return "—";
+    const n = midiToNoteName(footerTonicMidi, { useSharps: true });
+    return `${n.name}${n.octave}`;
+  }, [footerTonicMidi]);
+
+  const { third: triadThird, fifth: triadFifth } = triadOffsetsForScale(sessionEff.scale?.name ?? "major");
+  const footerArpMidis = useMemo<number[] | null>(() => {
+    if (footerTonicMidi == null) return null;
+    const r = footerTonicMidi;
+    return [r, r + triadThird, r + triadFifth, r + triadThird, r];
+  }, [footerTonicMidi, triadThird, triadFifth]);
+
+  // ✅ Arp button label: show ONLY the first solfège (mode-aware for ANY scale)
+  const footerArpLabel = useMemo(() => {
+    const scaleName = (sessionEff.scale?.name ?? "major") as SolfegeScaleName;
+    const tonicPc = sessionEff.scale?.tonicPc ?? 0;
+    return pcToSolfege(tonicPc, tonicPc, scaleName); // e.g., do / la / re / …
+  }, [sessionEff.scale?.name, sessionEff.scale?.tonicPc]);
+
+  const playFooterTonic = useCallback(async () => {
+    if (footerTonicMidi == null) return;
+    try { await playMidiList([footerTonicMidi], Math.max(0.25, Math.min(1.0, secPerBeat))); } catch {}
+  }, [footerTonicMidi, playMidiList, secPerBeat]);
+
+  const playFooterArp = useCallback(async () => {
+    if (!footerArpMidis) return;
+    try { await playMidiList(footerArpMidis, Math.max(0.2, Math.min(0.75, secPerBeat))); } catch {}
+  }, [footerArpMidis, playMidiList, secPerBeat]);
+
   const sidePanel = {
     pretest: {
       active: pretestActive,
@@ -357,6 +420,14 @@ export default function TrainingGame({
     tonicPc: sessionEff.scale?.tonicPc ?? 0,
     scaleName: sessionEff.scale?.name ?? "major",
   } as const;
+
+  const footerTonicAction = exerciseUnlocked
+    ? { label: footerTonicLabel, onClick: playFooterTonic, disabled: footerTonicMidi == null, title: "Play tonic" }
+    : undefined;
+
+  const footerArpAction = exerciseUnlocked
+    ? { label: footerArpLabel, onClick: playFooterArp, disabled: !footerArpMidis, title: "Play arpeggio" }
+    : undefined;
 
   return (
     <GameLayout
@@ -387,10 +458,10 @@ export default function TrainingGame({
       highHz={highHz ?? null}
       sessionPanel={footerSessionPanel}
       sidePanel={sidePanel}
-
-      // 🔑 Mode-aware grid labels (rotating solfege)
-      tonicPc={sessionEff.scale?.tonicPc ?? null}
+      tonicPc={exerciseUnlocked ? (sessionEff.scale?.tonicPc ?? null) : null}
       scaleName={sessionEff.scale?.name ?? null}
+      tonicAction={footerTonicAction}
+      arpAction={footerArpAction}
     />
   );
 }

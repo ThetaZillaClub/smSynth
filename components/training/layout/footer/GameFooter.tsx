@@ -8,6 +8,13 @@ import type { ScaleName } from "@/utils/phrase/scales";
 
 type FooterSession = React.ComponentProps<typeof SessionPanel>;
 
+type FooterAction = {
+  label: string;
+  onClick: () => void | Promise<void>;
+  disabled?: boolean;
+  title?: string;
+};
+
 type FooterProps = {
   showPlay?: boolean;
   running: boolean;
@@ -34,9 +41,12 @@ type FooterProps = {
 
   /** 🔒 NEW: lock Key to absolute tonic, independent of scale type */
   tonicPc?: number | null;
+
+  /** NEW: footer actions */
+  tonicAction?: FooterAction;
+  arpAction?: FooterAction;
 };
 
-/** Small display item matching the style of other footer elements */
 function MetaItem({
   label,
   value,
@@ -96,7 +106,6 @@ function friendlyScaleLabel(
   return "—";
 }
 
-/** NEW: absolute tonic → key label (defaults to sharps; uses flats if keySig clearly signals flats) */
 function pcToKeyLabel(pc: number | null | undefined, keySig?: string | null): string {
   if (pc == null || !Number.isFinite(pc)) return "—";
   const namesSharp = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"] as const;
@@ -107,7 +116,7 @@ function pcToKeyLabel(pc: number | null | undefined, keySig?: string | null): st
   return (preferFlats ? namesFlat : namesSharp)[idx];
 }
 
-/* ——— NEW: beautiful light-theme Play/Pause button ——— */
+/* Play/Pause button (unchanged size) */
 function PlayPauseButton({
   running,
   onToggle,
@@ -119,11 +128,9 @@ function PlayPauseButton({
     [
       "relative inline-flex items-center justify-center",
       "w-14 h-14 md:w-16 md:h-16 rounded-full",
-      // Light surface + subtle depth
       "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
       "ring-1 ring-inset ring-black/5",
       "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
-      // Interactions
       "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_28px_rgba(0,0,0,0.12)]",
       "hover:ring-black/10",
       "active:scale-95",
@@ -144,17 +151,13 @@ function PlayPauseButton({
       title={running ? "Pause" : "Play"}
       className={`${base} ${runningAccent}`}
     >
-      {/* Subtle glow when running */}
       <span
         aria-hidden
         className={`pointer-events-none absolute -inset-1 rounded-full blur transition-opacity duration-300 bg-green-400/20 ${
           running ? "opacity-100" : "opacity-0"
         }`}
       />
-
-      {/* Icon with cross-fade */}
       <span className="relative block w-8 h-8 md:w-9 md:h-9">
-        {/* Play */}
         <svg
           viewBox="0 0 24 24"
           aria-hidden
@@ -164,8 +167,6 @@ function PlayPauseButton({
         >
           <path d="M8 5v14l11-7z" fill="currentColor" />
         </svg>
-
-        {/* Pause */}
         <svg
           viewBox="0 0 24 24"
           aria-hidden
@@ -175,6 +176,46 @@ function PlayPauseButton({
         >
           <path d="M6 5h5v14H6zM13 5h5v14h-5z" fill="currentColor" />
         </svg>
+      </span>
+    </button>
+  );
+}
+
+/** 🔧 Smaller circular footer action buttons (Tonic / Arp) */
+function FooterActionButton({ label, onClick, disabled, title }: FooterAction) {
+  const len = (label ?? "").length;
+
+  const base =
+    [
+      "relative inline-flex items-center justify-center",
+      // smaller than before
+      "w-11 h-11 md:w-12 md:h-12 rounded-full",
+      "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
+      "ring-1 ring-inset ring-black/5",
+      "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
+      "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_28px_rgba(0,0,0,0.12)]",
+      "hover:ring-black/10",
+      "active:scale-95",
+      "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300/40",
+      "transition-all duration-200",
+      disabled ? "opacity-40 cursor-not-allowed" : "",
+    ].join(" ");
+
+  // tighten label for long text
+  const textSize =
+    len > 10 ? "text-[10px]" : "text-xs md:text-sm";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      aria-label={title ?? label}
+      className={base}
+    >
+      <span className={`relative z-10 px-1 font-semibold tracking-tight tabular-nums ${textSize}`}>
+        {label}
       </span>
     </button>
   );
@@ -195,9 +236,11 @@ export default function GameFooter({
   highHz = null,
   sessionPanel,
   scaleName = null,
-  tonicPc = null, // NEW
+  tonicPc = null,
+  tonicAction,
+  arpAction,
 }: FooterProps) {
-  const keyText = pcToKeyLabel(tonicPc, keySig); // 🔒 locked
+  const keyText = pcToKeyLabel(tonicPc, keySig);
   const scaleText = friendlyScaleLabel(scaleName, keySig);
 
   return (
@@ -205,11 +248,32 @@ export default function GameFooter({
       <div className="w-[90%] mx-auto">
         <div className="rounded-2xl shadow-[0_6px_24px_rgba(0,0,0,0.12)] px-3 md:px-4 py-2 bg-[#f1f1f1]">
           <div className="grid grid-cols-[1fr_auto_minmax(0,1fr)] items-center gap-4">
-            {/* LEFT cluster: Key & Scale */}
+            {/* LEFT cluster: Key & Scale + actions */}
             <div className="justify-self-start w-full min-w-0 overflow-hidden">
-              <div className="w-full flex items-center justify-start gap-x-4 flex-nowrap">
+              <div className="w-full flex items-center justify-start gap-x-3 flex-nowrap">
                 <MetaItem className="w-[6.5rem] flex-none" label="Key" value={keyText} />
                 <MetaItem className="w-[9rem] flex-none" label="Scale" value={scaleText} />
+
+                {(tonicAction || arpAction) ? (
+                  <div className="ml-1 flex items-center gap-2">
+                    {tonicAction ? (
+                      <FooterActionButton
+                        label={tonicAction.label}
+                        onClick={tonicAction.onClick}
+                        disabled={tonicAction.disabled}
+                        title={tonicAction.title ?? "Play tonic"}
+                      />
+                    ) : null}
+                    {arpAction ? (
+                      <FooterActionButton
+                        label={arpAction.label}
+                        onClick={arpAction.onClick}
+                        disabled={arpAction.disabled}
+                        title={arpAction.title ?? "Play arpeggio"}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
 

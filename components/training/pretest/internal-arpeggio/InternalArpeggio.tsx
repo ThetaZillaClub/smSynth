@@ -10,7 +10,14 @@ import type { ScaleName } from "@/utils/phrase/scales";
 
 function triadOffsetsForScale(name?: ScaleName) {
   const minorish = new Set<ScaleName>(
-    ["minor", "aeolian", "dorian", "phrygian", "harmonic_minor", "melodic_minor"] as unknown as ScaleName[]
+    [
+      "natural_minor",
+      "harmonic_minor",
+      "melodic_minor",
+      "dorian",
+      "phrygian",
+      "minor_pentatonic",
+    ] as unknown as ScaleName[]
   );
   const dim5 = new Set<ScaleName>(["locrian"] as unknown as ScaleName[]);
   const third = name && minorish.has(name) ? 3 : 4;
@@ -68,24 +75,30 @@ export default function InternalArpeggio({
     return `${n.name}${n.octave}`;
   }, [tonicMidi]);
 
-  // ---- Solfège mapping (for step 2 button text) ----
-  const isMinorish = useMemo(
-    () =>
-      scaleName === "natural_minor" ||
-      scaleName === "harmonic_minor" ||
-      scaleName === "melodic_minor" ||
-      scaleName === "dorian" ||
-      scaleName === "phrygian" ||
-      scaleName === "minor_pentatonic",
-    [scaleName]
-  );
+  // ---- Solfège mapping (mode-tonic) ----
   const labelForDegree = (deg: 1 | 3 | 5): string => {
-    if (scaleName === "locrian") return deg === 1 ? "ti" : deg === 3 ? "re" : "se";
-    if (isMinorish) return deg === 1 ? "la" : deg === 3 ? "do" : "me";
-    return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
+    switch (scaleName) {
+      case "lydian":
+        return deg === 1 ? "fa" : deg === 3 ? "la" : "do";
+      case "mixolydian":
+        return deg === 1 ? "sol" : deg === 3 ? "ti" : "re";
+      case "dorian":
+        return deg === 1 ? "re" : deg === 3 ? "fa" : "la";
+      case "phrygian":
+        return deg === 1 ? "mi" : deg === 3 ? "sol" : "ti";
+      case "locrian":
+        return deg === 1 ? "ti" : deg === 3 ? "re" : "fa";
+      case "natural_minor":
+      case "harmonic_minor":
+      case "melodic_minor":
+      case "minor_pentatonic":
+        return deg === 1 ? "la" : deg === 3 ? "do" : "mi";
+      default:
+        return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
+    }
   };
   const targetDegrees = [1, 3, 5, 3, 1] as const;
-  const patternLabel = useMemo(() => targetDegrees.map(labelForDegree).join("–"), [isMinorish, scaleName]);
+  const patternLabel = useMemo(() => targetDegrees.map(labelForDegree).join("–"), [scaleName]);
 
   // ---- Phase control ----
   const [phase, setPhase] = useState<"tonic" | "arp">("tonic");
@@ -120,7 +133,6 @@ export default function InternalArpeggio({
   const tonicProgress = tonicCompleteRef.current ? 1 : tonicPctRaw;
 
   // ---- Delay before moving to step 2 (prevents snap change after tonic) ----
-  // Pick a musical-feeling delay: clamp around a beat, but keep within 450–1000ms.
   const toArpDelayMs = useMemo(
     () => Math.min(1000, Math.max(450, Math.round(quarterSec * 1000))),
     [quarterSec]
@@ -128,11 +140,9 @@ export default function InternalArpeggio({
   const toArpTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Only schedule while in tonic phase and after pass, with session still valid
     if (showTonicPhase && running && inResponse && gate.passed) {
       if (toArpTimerRef.current == null) {
         toArpTimerRef.current = window.setTimeout(() => {
-          // re-check guards at fire time
           if (running && inResponse && showTonicPhase) {
             setPhase("arp");
           }
@@ -140,7 +150,6 @@ export default function InternalArpeggio({
         }, toArpDelayMs);
       }
     } else {
-      // Cancel any pending transition if conditions no longer hold
       if (toArpTimerRef.current != null) {
         window.clearTimeout(toArpTimerRef.current);
         toArpTimerRef.current = null;
@@ -229,7 +238,9 @@ export default function InternalArpeggio({
   return (
     <div className="rounded-xl bg-[#f2f2f2] border border-[#dcdcdc] p-3 shadow-sm">
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-        {showTonicPhase ? "Internal Arpeggio — Step 1: Tonic (A440 cue)" : `Internal Arpeggio — Step 2: ${patternLabel}`}
+        {showTonicPhase
+          ? "Internal Arpeggio — Step 1: Tonic (A440 cue)"
+          : `Internal Arpeggio — Step 2: ${patternLabel}`}
       </div>
       <p className="mt-1 text-xs text-[#373737]">{help}</p>
       {!showTonicPhase && (

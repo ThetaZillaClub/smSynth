@@ -102,6 +102,28 @@ export default function usePretest({
   const scheduledKeyRef = useRef<string | null>(null);
   const resetScheduledKey = () => { scheduledKeyRef.current = null; };
 
+  // Mode-aware pattern label for side panel / response prompts
+  const patternLabelForScale = useMemo(() => {
+    const triad = (name: ScaleName): [string, string, string] => {
+      switch (name) {
+        case "lydian":       return ["fa", "la", "do"];
+        case "mixolydian":   return ["sol", "ti", "re"];
+        case "dorian":       return ["re", "fa", "la"];
+        case "phrygian":     return ["mi", "sol", "ti"];
+        case "locrian":      return ["ti", "re", "fa"];
+        case "natural_minor":
+        case "harmonic_minor":
+        case "melodic_minor":
+        case "minor_pentatonic":
+          return ["la", "do", "mi"];
+        default:
+          return ["do", "mi", "sol"];
+      }
+    };
+    const [s1, s3, s5] = triad(scale.name);
+    return `${s1}–${s3}–${s5}–${s3}–${s1}`;
+  }, [scale.name]);
+
   const currentLabel = useMemo(() => {
     if (status === "done") return "Pre-test complete";
     if (!sequence.length) return "No pre-test selected";
@@ -115,11 +137,11 @@ export default function usePretest({
     if (status === "response") {
       if (mode === "single_tonic") return "Sing: tonic";
       if (mode === "derived_tonic") return "Sing: tonic (derived from A440)";
-      if (mode === "guided_arpeggio") return "Sing: do–mi–sol–mi–do"; // single pass
-      if (mode === "internal_arpeggio") return "Sing (internal): do–mi–sol–mi–do";
+      if (mode === "guided_arpeggio") return `Sing: ${patternLabelForScale}`;      // mode-aware
+      if (mode === "internal_arpeggio") return `Sing (internal): ${patternLabelForScale}`;
     }
     return "Pre-test";
-  }, [sequence, modeIndex, status]);
+  }, [sequence, modeIndex, status, patternLabelForScale]);
 
   const start = useCallback(() => {
     if (!sequence.length) {
@@ -202,6 +224,7 @@ export default function usePretest({
 
       if (mode === "guided_arpeggio") {
         const root = tonicMidi!;
+        const [third, fifth] = triadIntervalsForScale(scale.name);
         const upDown = [root, root + third, root + fifth, root + third, root];
         const callDur = upDown.length * quarterSec;
         await player.playMidiList(upDown, quarterSec);
@@ -214,28 +237,15 @@ export default function usePretest({
         return;
       }
     })();
-  }, [running, status, modeIndex, sequence, quarterSec, player, tonicMidi, third, fifth, clearTimer, bpm, ts.den]);
+  }, [running, status, modeIndex, sequence, quarterSec, player, tonicMidi, scale.name, clearTimer, bpm, ts.den]);
 
   const continueResponse = useCallback(() => {
     if (!sequence.length) return;
 
-    const mode = sequence[modeIndex]?.kind;
     setShouldRecord(false);
     setAnchorMs(null);
 
     // ✅ All current pretest modes are single-pass now.
-    const needsTwo = false;
-
-    if (status === "response" && needsTwo && subResponse === 0) {
-      setSubResponse(1);
-      setStatus("response");
-      setShouldRecord(true);
-      setAnchorMs(performance.now());
-      resetScheduledKey();
-      return;
-    }
-
-    // Advance to next mode or finish
     const nextIndex = modeIndex + 1;
     if (nextIndex >= sequence.length) {
       setStatus("done");
@@ -246,7 +256,7 @@ export default function usePretest({
     setSubResponse(0);
     setStatus("call");
     resetScheduledKey();
-  }, [sequence, modeIndex, status, subResponse]);
+  }, [sequence, modeIndex]);
 
   // Cleanup
   useEffect(() => () => clearTimer(), [clearTimer]);

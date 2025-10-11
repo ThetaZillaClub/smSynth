@@ -76,8 +76,8 @@ export default function GuidedArpeggio({
 
   const triadOffsets = useMemo(() => {
     if (scaleName === "locrian") return { third: 3, fifth: 6 }; // diminished 5
-    if (isMinorish) return { third: 3, fifth: 7 };              // minor 3, P5
-    return { third: 4, fifth: 7 };                               // major
+    if (isMinorish) return { third: 3, fifth: 7 }; // minor 3, P5
+    return { third: 4, fifth: 7 }; // major
   }, [scaleName, isMinorish]);
 
   const callMidis = useMemo<number[] | null>(() => {
@@ -87,11 +87,30 @@ export default function GuidedArpeggio({
     return [r, r + third, r + fifth, r + third, r];
   }, [tonicMidi, triadOffsets]);
 
-  // ----- Solfège mapping -----
+  // ----- Solfège mapping (mode-tonic) -----
   const labelForDegree = (deg: 1 | 3 | 5): string => {
-    if (scaleName === "locrian") return deg === 1 ? "ti" : deg === 3 ? "re" : "se";
-    if (isMinorish) return deg === 1 ? "la" : deg === 3 ? "do" : "me";
-    return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
+    switch (scaleName) {
+      // Mode-tonic solfège (relative to the mode tonic)
+      case "lydian":
+        return deg === 1 ? "fa" : deg === 3 ? "la" : "do";
+      case "mixolydian":
+        return deg === 1 ? "sol" : deg === 3 ? "ti" : "re";
+      case "dorian":
+        return deg === 1 ? "re" : deg === 3 ? "fa" : "la";
+      case "phrygian":
+        return deg === 1 ? "mi" : deg === 3 ? "sol" : "ti";
+      case "locrian":
+        return deg === 1 ? "ti" : deg === 3 ? "re" : "fa";
+      // Minor families (la-based)
+      case "natural_minor":
+      case "harmonic_minor":
+      case "melodic_minor":
+      case "minor_pentatonic":
+        return deg === 1 ? "la" : deg === 3 ? "do" : "mi";
+      // Major / Ionian default
+      default:
+        return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
+    }
   };
   const targetDegrees = [1, 3, 5, 3, 1] as const;
   const patternLabel = useMemo(

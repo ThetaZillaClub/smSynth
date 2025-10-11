@@ -67,6 +67,10 @@ type LayoutProps = {
   /** 🔑 NEW: feed mode-aware solfege into piano roll */
   tonicPc?: number | null;
   scaleName?: ScaleName | null;
+
+  /** NEW: footer actions */
+  tonicAction?: React.ComponentProps<typeof GameFooter>["tonicAction"];
+  arpAction?: React.ComponentProps<typeof GameFooter>["arpAction"];
 };
 
 export default function GameLayout({
@@ -103,13 +107,14 @@ export default function GameLayout({
   // NEW
   tonicPc = null,
   scaleName = null,
+  tonicAction,
+  arpAction,
 }: LayoutProps) {
   const showPlay = !!phrase;
   const asideNode = sidePanel ? <TrainingSidePanel {...sidePanel} /> : stageAside;
 
   return (
     <main className="min-h-dvh h-dvh flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
-      {/* use `title` so it’s not “unused” and improves a11y */}
       <h1 className="sr-only">{title}</h1>
 
       <div className="w-full flex-1 min-h-0 flex flex-col pb-0">
@@ -169,6 +174,8 @@ export default function GameLayout({
         sessionPanel={sessionPanel}
         scaleName={scaleName ?? null}
         tonicPc={typeof tonicPc === "number" ? tonicPc : null}
+        tonicAction={tonicAction}
+        arpAction={arpAction}
       />
     </main>
   );
