@@ -1,7 +1,6 @@
-// components/training/pretest/internal-arpeggio/InternalArpeggio.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
@@ -51,7 +50,7 @@ export default function InternalArpeggio({
   const { quarterSec, requiredHoldSec } = usePitchTuneDurations({ bpm, tsNum });
   const { third, fifth } = triadOffsetsForScale(scaleName);
 
-  // Tonic selection
+  // ---- Tonic selection (low tonic from range) ----
   const tonicMidi = useMemo<number | null>(() => {
     if (lowHz == null) return null;
     const lowM = Math.round(hzToMidi(lowHz));
@@ -69,15 +68,35 @@ export default function InternalArpeggio({
     return `${n.name}${n.octave}`;
   }, [tonicMidi]);
 
-  // Phase control
+  // ---- Solfège mapping (for step 2 button text) ----
+  const isMinorish = useMemo(
+    () =>
+      scaleName === "natural_minor" ||
+      scaleName === "harmonic_minor" ||
+      scaleName === "melodic_minor" ||
+      scaleName === "dorian" ||
+      scaleName === "phrygian" ||
+      scaleName === "minor_pentatonic",
+    [scaleName]
+  );
+  const labelForDegree = (deg: 1 | 3 | 5): string => {
+    if (scaleName === "locrian") return deg === 1 ? "ti" : deg === 3 ? "re" : "se";
+    if (isMinorish) return deg === 1 ? "la" : deg === 3 ? "do" : "me";
+    return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
+  };
+  const targetDegrees = [1, 3, 5, 3, 1] as const;
+  const patternLabel = useMemo(() => targetDegrees.map(labelForDegree).join("–"), [isMinorish, scaleName]);
+
+  // ---- Phase control ----
   const [phase, setPhase] = useState<"tonic" | "arp">("tonic");
   useEffect(() => {
     if (!running || !inResponse) setPhase("tonic");
   }, [running, inResponse]);
+  const showTonicPhase = phase === "tonic";
 
-  // Step 1: hold the tonic (after A440 cue)
+  // ---- Step 1: sustain tonic (after A440) ----
   const gate = useSustainPass({
-    active: running && inResponse && phase === "tonic" && tonicHz != null,
+    active: running && inResponse && showTonicPhase && tonicHz != null,
     targetHz: tonicHz,
     liveHz,
     confidence,
@@ -87,12 +106,12 @@ export default function InternalArpeggio({
     retryAfterSec: 6,
   });
 
-  // Latch complete for Step 1
+  // Latch & progress for step 1
   const tonicCompleteRef = useRef(false);
   useEffect(() => {
-    if (phase === "tonic" && gate.passed) tonicCompleteRef.current = true;
+    if (showTonicPhase && gate.passed) tonicCompleteRef.current = true;
     if (!running) tonicCompleteRef.current = false;
-  }, [phase, gate.passed, running]);
+  }, [showTonicPhase, gate.passed, running]);
 
   const tonicPctRaw = Math.max(
     0,
@@ -100,16 +119,44 @@ export default function InternalArpeggio({
   );
   const tonicProgress = tonicCompleteRef.current ? 1 : tonicPctRaw;
 
-  // Advance to Step 2 once tonic passes
-  useEffect(() => {
-    if (phase === "tonic" && gate.passed) {
-      setPhase("arp");
-    }
-  }, [phase, gate.passed]);
+  // ---- Delay before moving to step 2 (prevents snap change after tonic) ----
+  // Pick a musical-feeling delay: clamp around a beat, but keep within 450–1000ms.
+  const toArpDelayMs = useMemo(
+    () => Math.min(1000, Math.max(450, Math.round(quarterSec * 1000))),
+    [quarterSec]
+  );
+  const toArpTimerRef = useRef<number | null>(null);
 
-  // Step 2: internal (unguided) arpeggio matcher: 1–3–5–3–1
+  useEffect(() => {
+    // Only schedule while in tonic phase and after pass, with session still valid
+    if (showTonicPhase && running && inResponse && gate.passed) {
+      if (toArpTimerRef.current == null) {
+        toArpTimerRef.current = window.setTimeout(() => {
+          // re-check guards at fire time
+          if (running && inResponse && showTonicPhase) {
+            setPhase("arp");
+          }
+          toArpTimerRef.current = null;
+        }, toArpDelayMs);
+      }
+    } else {
+      // Cancel any pending transition if conditions no longer hold
+      if (toArpTimerRef.current != null) {
+        window.clearTimeout(toArpTimerRef.current);
+        toArpTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (toArpTimerRef.current != null) {
+        window.clearTimeout(toArpTimerRef.current);
+        toArpTimerRef.current = null;
+      }
+    };
+  }, [showTonicPhase, running, inResponse, gate.passed, toArpDelayMs]);
+
+  // ---- Step 2: unguided matcher (1–3–5–3–1) ----
   const matcher = useGuidedArpMatcher({
-    active: running && inResponse && phase === "arp" && tonicMidi != null,
+    active: running && inResponse && !showTonicPhase && tonicMidi != null,
     tonicMidi: tonicMidi ?? 60,
     thirdSemitones: third,
     fifthSemitones: fifth,
@@ -122,45 +169,34 @@ export default function InternalArpeggio({
 
   const arpCompleteRef = useRef(false);
   useEffect(() => {
-    if (phase === "arp" && matcher.passed) arpCompleteRef.current = true;
+    if (!showTonicPhase && matcher.passed) arpCompleteRef.current = true;
     if (!running) arpCompleteRef.current = false;
-  }, [phase, matcher.passed, running]);
+  }, [showTonicPhase, matcher.passed, running]);
 
   const arpCount = matcher.capturedDegrees.length;
   const arpPctRaw = Math.max(0, Math.min(1, arpCount / 5));
   const arpProgress = arpCompleteRef.current ? 1 : arpPctRaw;
 
-  // 🔁 Robust auto-advance after full arpeggio — fire once regardless of inResponse
-  const advanceTimerRef = useRef<number | null>(null);
-  const passQueuedRef = useRef(false);
-
-  // reset latch/timer when leaving arp phase or stopping
+  // ---- Auto-advance ~800ms after success (one-shot) ----
+  const advancedRef = useRef(false);
   useEffect(() => {
-    if (!running || phase !== "arp") {
-      passQueuedRef.current = false;
-      if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
-      advanceTimerRef.current = null;
+    if (!running) advancedRef.current = false;
+  }, [running]);
+
+  useEffect(() => {
+    if (!showTonicPhase && matcher.passed && !advancedRef.current) {
+      advancedRef.current = true;
+      const id = window.setTimeout(onContinue, 800);
+      return () => clearTimeout(id);
     }
-  }, [running, phase]);
+  }, [showTonicPhase, matcher.passed, onContinue]);
 
-  useEffect(() => {
-    if (phase === "arp" && matcher.passed && !passQueuedRef.current) {
-      passQueuedRef.current = true;
-      if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
-      advanceTimerRef.current = window.setTimeout(onContinue, 800);
-    }
-  }, [phase, matcher.passed, onContinue]);
+  // ---- Button label per phase ----
+  const currentIdx = Math.min(arpCount, targetDegrees.length - 1);
+  const currentSolfege = labelForDegree(targetDegrees[currentIdx]);
+  const buttonLabel = showTonicPhase ? "A4" : currentSolfege;
 
-  useEffect(() => {
-    return () => {
-      if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
-    };
-  }, []);
-
-  const showTonicPhase = phase === "tonic";
-  const targetDegrees = [1, 3, 5, 3, 1] as const;
-
-  // Button behavior
+  // ---- Button behavior ----
   const onButtonClick = async () => {
     if (!running) {
       onStart();
@@ -174,9 +210,10 @@ export default function InternalArpeggio({
         await playMidiList([69], Math.min(quarterSec, requiredHoldSec)); // replay cue
       } catch {}
     }
-    // No playback in arp phase (internal)
+    // No playback in step 2 (internal)
   };
 
+  // ---- Helper copy ----
   const help = useMemo(() => {
     if (showTonicPhase) {
       if (!running) return "Press Play to hear A440. Then derive the tonic and hold it.";
@@ -185,25 +222,27 @@ export default function InternalArpeggio({
       if (gate.failed) return "Close. Re-center on the tonic and hold steady.";
       return "Sing the tonic you’ve derived from A440 and hold it…";
     }
-    if (matcher.passed) return "Nice! You sang 1–3–5–3–1.";
+    if (matcher.passed) return "Nice! You sang the arpeggio in order.";
     return "Sing the five notes in order — any tempo or octave.";
   }, [showTonicPhase, running, inResponse, gate.passed, gate.failed, matcher.passed]);
 
   return (
     <div className="rounded-xl bg-[#f2f2f2] border border-[#dcdcdc] p-3 shadow-sm">
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-        {showTonicPhase ? "Internal Arpeggio — Step 1: Tonic (A440 cue)" : "Internal Arpeggio — Step 2: 1–3–5–3–1"}
+        {showTonicPhase ? "Internal Arpeggio — Step 1: Tonic (A440 cue)" : `Internal Arpeggio — Step 2: ${patternLabel}`}
       </div>
       <p className="mt-1 text-xs text-[#373737]">{help}</p>
       {!showTonicPhase && (
-        <div className="mt-0.5 text-[11px] text-[#6b6b6b]">Tonic {tonicLabel} • We check order only; each ~0.25s.</div>
+        <div className="mt-0.5 text-[11px] text-[#6b6b6b]">
+          Tonic {tonicLabel} • Pattern: {patternLabel} • We check order only; each ~0.25s.
+        </div>
       )}
 
       <div className="mt-3 flex justify-center">
         <PlayProgressButton
-          label={showTonicPhase ? "A4" : "1–3–5–3–1"}
-          ariaLabel={showTonicPhase ? "Cue A4" : "Arpeggio 1–3–5–3–1"}
-          tooltip={showTonicPhase ? "Play cue (A4)" : "Internal arpeggio (no playback)"}
+          label={buttonLabel}
+          ariaLabel={showTonicPhase ? "Cue A4" : `Sing: ${currentSolfege}`}
+          tooltip={showTonicPhase ? "Play cue (A4)" : `Next: ${currentSolfege}`}
           onToggle={onButtonClick}
           progress={showTonicPhase ? tonicProgress : arpProgress}
           complete={showTonicPhase ? tonicCompleteRef.current : arpCompleteRef.current}
@@ -211,28 +250,7 @@ export default function InternalArpeggio({
           size={72}
         />
       </div>
-
-      {/* Compact degree chips under the button for clarity */}
-      {!showTonicPhase && (
-        <div className="mt-2 flex items-center justify-center gap-1">
-          {targetDegrees.map((deg, i) => {
-            const got = matcher.capturedDegrees[i] ?? null;
-            const ok = got != null && got === deg;
-            return (
-              <span
-                key={i}
-                className={[
-                  "inline-flex items-center justify-center w-7 h-7 rounded-md border text-xs font-semibold",
-                  ok ? "bg-[#0f0f0f] text-white border-[#0f0f0f]" : "bg-white text-[#2d2d2d] border-[#dcdcdc]",
-                ].join(" ")}
-                title={ok ? "Matched" : "Waiting…"}
-              >
-                {deg}
-              </span>
-            );
-          })}
-        </div>
-      )}
+      {/* chips removed */}
     </div>
   );
 }

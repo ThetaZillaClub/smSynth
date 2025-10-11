@@ -1,6 +1,7 @@
+// components/training/pretest/guided-arpeggio/GuidedArpeggio.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 import useGuidedArpMatcher from "./hooks/useGuidedArpMatcher";
@@ -44,7 +45,7 @@ export default function GuidedArpeggio({
 }) {
   const { quarterSec } = usePitchTuneDurations({ bpm, tsNum });
 
-  // Low tonic reference
+  // ----- Tonic (low tonic from range) -----
   const tonicMidi = useMemo<number | null>(() => {
     if (lowHz == null) return null;
     const lowM = Math.round(hzToMidi(lowHz));
@@ -61,7 +62,7 @@ export default function GuidedArpeggio({
     return `${n.name}${n.octave}`;
   }, [tonicMidi]);
 
-  // Intervals by scale
+  // ----- Intervals by scale -----
   const isMinorish = useMemo(
     () =>
       scaleName === "natural_minor" ||
@@ -74,9 +75,9 @@ export default function GuidedArpeggio({
   );
 
   const triadOffsets = useMemo(() => {
-    if (scaleName === "locrian") return { third: 3, fifth: 6 };
-    if (isMinorish) return { third: 3, fifth: 7 };
-    return { third: 4, fifth: 7 };
+    if (scaleName === "locrian") return { third: 3, fifth: 6 }; // diminished 5
+    if (isMinorish) return { third: 3, fifth: 7 };              // minor 3, P5
+    return { third: 4, fifth: 7 };                               // major
   }, [scaleName, isMinorish]);
 
   const callMidis = useMemo<number[] | null>(() => {
@@ -86,16 +87,20 @@ export default function GuidedArpeggio({
     return [r, r + third, r + fifth, r + third, r];
   }, [tonicMidi, triadOffsets]);
 
-  // Solfège caption
+  // ----- Solfège mapping -----
   const labelForDegree = (deg: 1 | 3 | 5): string => {
     if (scaleName === "locrian") return deg === 1 ? "ti" : deg === 3 ? "re" : "se";
     if (isMinorish) return deg === 1 ? "la" : deg === 3 ? "do" : "me";
     return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
   };
   const targetDegrees = [1, 3, 5, 3, 1] as const;
-  const targetSolfeg = useMemo(() => targetDegrees.map(labelForDegree).join("–"), [isMinorish, scaleName]);
+  const patternLabel = useMemo(
+    () => targetDegrees.map(labelForDegree).join("–"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scaleName]
+  );
 
-  // Matcher (order-only)
+  // ----- Matcher (order-only; lenient by cents; confidence floor .5) -----
   const matcher = useGuidedArpMatcher({
     active: !!inResponse && running && tonicMidi != null,
     tonicMidi: tonicMidi ?? 60,
@@ -103,12 +108,12 @@ export default function GuidedArpeggio({
     fifthSemitones: triadOffsets.fifth,
     liveHz,
     confidence,
-    confMin: 0.6,
+    confMin: 0.5, // floor .5
     centsTol: 60,
     holdSecPerNote: 0.25,
   });
 
-  // Latch completion for ring glow
+  // Latch 100% ring after pass
   const completeRef = useRef(false);
   useEffect(() => {
     if (matcher.passed) completeRef.current = true;
@@ -118,43 +123,38 @@ export default function GuidedArpeggio({
   const progRaw = Math.max(0, Math.min(1, matcher.capturedDegrees.length / targetDegrees.length));
   const displayProgress = completeRef.current ? 1 : progRaw;
 
-  // 🔁 Robust auto-advance: fire once when passed, regardless of inResponse
-  const advanceTimerRef = useRef<number | null>(null);
-  const passQueuedRef = useRef(false);
-
+  // ----- Auto-advance ~800ms after pass (single pass only) -----
+  const advancedRef = useRef(false);
   useEffect(() => {
-    if (!running) {
-      passQueuedRef.current = false;
-    }
+    if (!running) advancedRef.current = false;
   }, [running]);
 
   useEffect(() => {
-    if (matcher.passed && !passQueuedRef.current) {
-      passQueuedRef.current = true;
-      if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
-      advanceTimerRef.current = window.setTimeout(() => onContinue(), 800);
+    if (running && inResponse && matcher.passed && !advancedRef.current) {
+      advancedRef.current = true;
+      const id = window.setTimeout(() => onContinue(), 800);
+      return () => clearTimeout(id);
     }
-  }, [matcher.passed, onContinue]);
+  }, [running, inResponse, matcher.passed, onContinue]);
 
-  useEffect(() => {
-    return () => {
-      if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
-    };
-  }, []);
+  // ----- Phase-aware button label (one at a time) -----
+  const currentIdx = Math.min(matcher.capturedDegrees.length, targetDegrees.length - 1);
+  const currentSolfege = labelForDegree(targetDegrees[currentIdx]);
+  const buttonLabel = running && inResponse ? currentSolfege : "Play";
 
   const help = useMemo(() => {
     if (!running) return "Press Play to start. Then echo the arpeggio.";
-    if (!inResponse) return `Listen… the teacher will sing ${targetSolfeg}.`;
+    if (!inResponse) return `Listen… the teacher will sing ${patternLabel}.`;
     if (matcher.passed) return "Great! You sang the pattern in order.";
     return "Sing the five notes in order — any tempo or octave.";
-  }, [running, inResponse, matcher.passed, targetSolfeg]);
+  }, [running, inResponse, matcher.passed, patternLabel]);
 
   const onButtonClick = async () => {
     if (!running) {
-      onStart();
+      onStart(); // parent will schedule the call phase
       return;
     }
-    if (!callMidis) return;
+    if (!callMidis) return; // range not ready yet
     try {
       await playMidiList(callMidis, quarterSec);
     } catch {}
@@ -165,41 +165,22 @@ export default function GuidedArpeggio({
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">Guided Arpeggio</div>
       <p className="mt-1 text-xs text-[#373737]">{help}</p>
       <div className="mt-0.5 text-[11px] text-[#6b6b6b]">
-        Tonic {tonicLabel} • Pattern: {targetSolfeg} (order only; ~0.25s each)
+        Tonic {tonicLabel} • Pattern: {patternLabel} (order only; ~0.25s each)
       </div>
 
       <div className="mt-3 flex justify-center">
         <PlayProgressButton
-          label="1–3–5–3–1"
-          ariaLabel="Play arpeggio 1–3–5–3–1"
-          tooltip="Play arpeggio"
+          label={buttonLabel}
+          ariaLabel={running && inResponse ? `Echo ${currentSolfege}` : "Start pre-test"}
+          tooltip={running && inResponse ? `Next: ${currentSolfege}` : "Start pre-test"}
           onToggle={onButtonClick}
           progress={displayProgress}
           complete={completeRef.current}
-          disabled={!callMidis}
+          disabled={running && !callMidis /* allow starting even if range not loaded */}
           size={72}
         />
       </div>
-
-      {/* Compact degree chips under the button */}
-      <div className="mt-2 flex items-center justify-center gap-1">
-        {targetDegrees.map((deg, i) => {
-          const got = matcher.capturedDegrees[i] ?? null;
-          const ok = got != null && got === deg;
-          return (
-            <span
-              key={i}
-              className={[
-                "inline-flex items-center justify-center w-7 h-7 rounded-md border text-xs font-semibold",
-                ok ? "bg-[#0f0f0f] text-white border-[#0f0f0f]" : "bg-white text-[#2d2d2d] border-[#dcdcdc]",
-              ].join(" ")}
-              title={ok ? "Matched" : "Waiting…"}
-            >
-              {deg}
-            </span>
-          );
-        })}
-      </div>
+      {/* chips removed */}
     </div>
   );
 }

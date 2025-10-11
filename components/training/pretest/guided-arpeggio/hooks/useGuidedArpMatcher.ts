@@ -5,9 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 
 /**
- * Unguided arpeggio matcher (1–3–5–3–1):
- * - Waits for the correct next degree; ignores wrong notes (no "mismatch" state).
- * - Each step must be held for `holdSecPerNote` with conf >= `confMin` and within `centsTol`.
+ * Unguided arpeggio matcher (1–3–5–3–1), lenient only by cents:
+ * - Uses inner/outer cents zones. Inner = full speed; Outer = reduced speed.
+ * - Confidence is only gated with a floor of 0.5 (no other confidence changes).
+ * - Hold time is whatever the caller passes (no easing).
  */
 export default function useGuidedArpMatcher(opts: {
   active: boolean;
@@ -16,8 +17,8 @@ export default function useGuidedArpMatcher(opts: {
   fifthSemitones: number;
   liveHz: number | null;
   confidence: number;
-  confMin: number;
-  centsTol: number;
+  confMin: number;       // respected, but never below 0.5
+  centsTol: number;      // inner tolerance
   holdSecPerNote: number;
 }) {
   const {
@@ -32,11 +33,19 @@ export default function useGuidedArpMatcher(opts: {
     holdSecPerNote,
   } = opts;
 
+  // Sequence
   const targetDegrees = useMemo(() => [1, 3, 5, 3, 1] as const, []);
   const targetOffsets = useMemo(
     () => [0, thirdSemitones, fifthSemitones, thirdSemitones, 0],
     [thirdSemitones, fifthSemitones]
   );
+
+  // Cents-only leniency
+  const innerTol = Math.max(0, centsTol);                 // unchanged from caller
+  const outerTol = Math.min(120, innerTol + 50);          // allow near-misses up to ~±1 semitone
+  const effConfMin = Math.max(0.5, confMin);              // confidence floor only
+
+  const requiredMs = Math.max(10, holdSecPerNote * 1000); // unchanged
 
   const [captured, setCaptured] = useState<number[]>([]);
   const [passed, setPassed] = useState(false);
@@ -54,20 +63,20 @@ export default function useGuidedArpMatcher(opts: {
         const oct = Math.round((midiFloat - base) / 12);
         const nearest = base + 12 * oct;
         const cents = (midiFloat - nearest) * 100;
-        const deg = (off === 0 ? 1 : off === thirdSemitones ? 3 : 5) as 1 | 3 | 5;
-        if (Math.abs(cents) <= centsTol) {
+        const abs = Math.abs(cents);
+        if (abs <= outerTol) {
+          const deg = (off === 0 ? 1 : off === thirdSemitones ? 3 : 5) as 1 | 3 | 5;
           if (!best || Math.abs(cents) < Math.abs(best.cents)) best = { deg, cents };
         }
       }
       return best;
     },
-    [targetOffsets, tonicMidi, thirdSemitones, centsTol]
+    [targetOffsets, tonicMidi, thirdSemitones, outerTol]
   );
 
-  // Main matcher tick — do nothing when inactive (no state writes).
+  // Main matcher tick
   useEffect(() => {
     if (!active) {
-      // Only clear runtime counters; state resets are handled in the separate effect below.
       lastFrameTsRef.current = null;
       holdMsRef.current = 0;
       latchedDegRef.current = null;
@@ -81,46 +90,54 @@ export default function useGuidedArpMatcher(opts: {
 
     const midi = typeof liveHz === "number" && liveHz > 0 ? hzToMidi(liveHz) : NaN;
     const near =
-      confidence >= confMin && Number.isFinite(midi) ? toNearestDegree(midi as number) : null;
+      confidence >= effConfMin && Number.isFinite(midi) ? toNearestDegree(midi as number) : null;
 
     const idx = captured.length;
     const expected = targetDegrees[idx];
 
+    let hold = holdMsRef.current;
+
     if (near) {
+      const absC = Math.abs(near.cents);
+      const inInner = absC <= innerTol;
+      const onExpected = near.deg === expected;
+
+      // Update latch
       if (latchedDegRef.current !== near.deg) {
         latchedDegRef.current = near.deg;
-        holdMsRef.current = 0;
+        // keep current progress if switching between zones/degrees; do not hard reset
+      }
+
+      if (onExpected) {
+        // progress based purely on cents zone
+        const gain = inInner ? 1.0 : 0.6; // slower when only within outer
+        hold += dt * gain;
       } else {
-        holdMsRef.current += dt;
-      }
-
-      if (latchedDegRef.current === expected && holdMsRef.current >= holdSecPerNote * 1000) {
-        const next = [...captured, expected];
-        setCaptured(next);
-        holdMsRef.current = 0;
-        latchedDegRef.current = null;
-        if (next.length === targetDegrees.length) setPassed(true);
-      }
-
-      if (latchedDegRef.current && latchedDegRef.current !== expected) {
-        if (holdMsRef.current >= holdSecPerNote * 1000) holdMsRef.current = 0;
+        // gently decay when close to the wrong degree (still cents-based)
+        const decay = inInner ? 0.35 : 0.55;
+        hold = Math.max(0, hold - dt * decay);
       }
     } else {
+      // far away or low confidence: stronger decay
+      hold = Math.max(0, hold - dt * 0.9);
       latchedDegRef.current = null;
-      holdMsRef.current = 0;
     }
-  }, [
-    active,
-    liveHz,
-    confidence,
-    confMin,
-    holdSecPerNote,
-    captured,
-    targetDegrees,
-    toNearestDegree,
-  ]);
 
-  // Reset state once when deactivating (avoid new array each render).
+    // Clamp & store
+    hold = Math.min(hold, requiredMs);
+    holdMsRef.current = hold;
+
+    // Capture expected degree
+    if (hold >= requiredMs && latchedDegRef.current === expected) {
+      const next = [...captured, expected];
+      setCaptured(next);
+      holdMsRef.current = 0;
+      latchedDegRef.current = null;
+      if (next.length === targetDegrees.length) setPassed(true);
+    }
+  }, [active, liveHz, confidence, effConfMin, innerTol, outerTol, requiredMs, toNearestDegree, captured, targetDegrees]);
+
+  // Reset state when deactivating
   useEffect(() => {
     if (!active) {
       setCaptured((prev) => (prev.length ? [] : prev));

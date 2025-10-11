@@ -10,8 +10,8 @@ import type { ScaleName } from "@/utils/phrase/scales";
 export type CRMode =
   | { kind: "single_tonic" }        // Teacher: tonic (quarter). Student: tonic (1 response)
   | { kind: "derived_tonic" }       // Teacher: A440 (quarter). Student: tonic (1 response)
-  | { kind: "guided_arpeggio" }     // Teacher: do-mi-sol-mi-do (5 quarters). Student: 2 responses (2nd is auto-skipped by UI)
-  | { kind: "internal_arpeggio" };  // No teacher call. Student: 1 response (1–3–5–3–1) ✅
+  | { kind: "guided_arpeggio" }     // Teacher: do-mi-sol-mi-do (5 quarters). Student: 1 response ✅
+  | { kind: "internal_arpeggio" };  // No teacher call. Student: 1 response (1–3–5–3–1)
 
 export type PretestStatus = "idle" | "call" | "response" | "done";
 
@@ -115,18 +115,11 @@ export default function usePretest({
     if (status === "response") {
       if (mode === "single_tonic") return "Sing: tonic";
       if (mode === "derived_tonic") return "Sing: tonic (derived from A440)";
-      if (mode === "guided_arpeggio") {
-        return subResponse === 0
-          ? "Sing: do–mi–sol–mi–do"
-          : "Sing: do–mi–sol–do–sol–mi–do–sol–do";
-      }
-      if (mode === "internal_arpeggio") {
-        // ✅ Always the short pass; no 2nd, long variant requested
-        return "Sing (internal): do–mi–sol–mi–do";
-      }
+      if (mode === "guided_arpeggio") return "Sing: do–mi–sol–mi–do"; // single pass
+      if (mode === "internal_arpeggio") return "Sing (internal): do–mi–sol–mi–do";
     }
     return "Pre-test";
-  }, [sequence, modeIndex, status, subResponse]);
+  }, [sequence, modeIndex, status]);
 
   const start = useCallback(() => {
     if (!sequence.length) {
@@ -230,15 +223,15 @@ export default function usePretest({
     setShouldRecord(false);
     setAnchorMs(null);
 
-    // 🔁 Only guided_arpeggio requests two responses; internal_arpeggio now completes after one
-    const needsTwo = mode === "guided_arpeggio";
+    // ✅ All current pretest modes are single-pass now.
+    const needsTwo = false;
 
     if (status === "response" && needsTwo && subResponse === 0) {
       setSubResponse(1);
-      setStatus("response");           // stay in response for 2nd pass
+      setStatus("response");
       setShouldRecord(true);
       setAnchorMs(performance.now());
-      resetScheduledKey();             // ensure next CALL (if any) can schedule
+      resetScheduledKey();
       return;
     }
 
