@@ -58,7 +58,7 @@ function MetaItem({
 }) {
   return (
     <div className={`flex flex-col items-start ${className ?? ""}`}>
-      <div className="text-xs text-[#2d2d2d]">{label}</div>
+      <div className="text-xs text-[#2d2d2d] leading-none">{label}</div>
       <div className="text-lg leading-tight text-[#0f0f0f] whitespace-nowrap tabular-nums">
         {value}
       </div>
@@ -106,16 +106,6 @@ function friendlyScaleLabel(
   return "—";
 }
 
-function pcToKeyLabel(pc: number | null | undefined, keySig?: string | null): string {
-  if (pc == null || !Number.isFinite(pc)) return "—";
-  const namesSharp = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"] as const;
-  const namesFlat  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"] as const;
-  const preferFlats =
-    typeof keySig === "string" && /b/.test(keySig) && !/#/.test(keySig);
-  const idx = ((pc % 12) + 12) % 12;
-  return (preferFlats ? namesFlat : namesSharp)[idx];
-}
-
 /* Play/Pause button (unchanged size) */
 function PlayPauseButton({
   running,
@@ -124,19 +114,19 @@ function PlayPauseButton({
   running: boolean;
   onToggle: () => void;
 }) {
-  const base =
-    [
-      "relative inline-flex items-center justify-center",
-      "w-14 h-14 md:w-16 md:h-16 rounded-full",
-      "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
-      "ring-1 ring-inset ring-black/5",
-      "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
-      "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_28px_rgba(0,0,0,0.12)]",
-      "hover:ring-black/10",
-      "active:scale-95",
-      "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300/40",
-      "transition-all duration-200",
-    ].join(" ");
+  const base = [
+    "relative inline-flex items-center justify-center",
+    "w-14 h-14 md:w-16 md:h-16 rounded-full",
+    "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
+    "ring-1 ring-inset ring-black/5",
+    "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
+    "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_28px_rgba(0,0,0,0.12)]",
+    "hover:ring-black/10",
+    "active:scale-95",
+    "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300/40",
+    "transition-all duration-200",
+    "overflow-visible", // ensure the inner glow is never clipped by the button
+  ].join(" ");
 
   const runningAccent = running
     ? "ring-green-500/40 shadow-[0_0_0_3px_rgba(16,185,129,0.15),0_12px_32px_rgba(16,185,129,0.22)]"
@@ -151,9 +141,10 @@ function PlayPauseButton({
       title={running ? "Pause" : "Play"}
       className={`${base} ${runningAccent}`}
     >
+      {/* Outer green glow — extend beyond bounds; wrapper/containers allow overflow */}
       <span
         aria-hidden
-        className={`pointer-events-none absolute -inset-1 rounded-full blur transition-opacity duration-300 bg-green-400/20 ${
+        className={`pointer-events-none absolute -inset-2 rounded-full blur transition-opacity duration-300 bg-green-400/25 ${
           running ? "opacity-100" : "opacity-0"
         }`}
       />
@@ -185,25 +176,22 @@ function PlayPauseButton({
 function FooterActionButton({ label, onClick, disabled, title }: FooterAction) {
   const len = (label ?? "").length;
 
-  const base =
-    [
-      "relative inline-flex items-center justify-center",
-      // smaller than before
-      "w-11 h-11 md:w-12 md:h-12 rounded-full",
-      "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
-      "ring-1 ring-inset ring-black/5",
-      "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
-      "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_28px_rgba(0,0,0,0.12)]",
-      "hover:ring-black/10",
-      "active:scale-95",
-      "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300/40",
-      "transition-all duration-200",
-      disabled ? "opacity-40 cursor-not-allowed" : "",
-    ].join(" ");
+  const base = [
+    "relative inline-flex items-center justify-center",
+    "w-11 h-11 md:w-12 md:h-12 rounded-full",
+    "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
+    "ring-1 ring-inset ring-black/5",
+    "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
+    "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_28px_rgba(0,0,0,0.12)]",
+    "hover:ring-black/10",
+    "active:scale-95",
+    "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300/40",
+    "transition-all duration-200",
+    "overflow-visible",
+    disabled ? "opacity-40 cursor-not-allowed" : "",
+  ].join(" ");
 
-  // tighten label for long text
-  const textSize =
-    len > 10 ? "text-[10px]" : "text-xs md:text-sm";
+  const textSize = len > 10 ? "text-[10px]" : "text-xs md:text-sm";
 
   return (
     <button
@@ -218,6 +206,22 @@ function FooterActionButton({ label, onClick, disabled, title }: FooterAction) {
         {label}
       </span>
     </button>
+  );
+}
+
+/** Label stacked above an action button (used for Key / Arp) */
+function LabeledAction({
+  topLabel,
+  action,
+}: {
+  topLabel: string;
+  action: FooterAction;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1 min-w-[3.25rem] overflow-visible">
+      <div className="text-xs text-[#2d2d2d] leading-none">{topLabel}</div>
+      <FooterActionButton {...action} />
+    </div>
   );
 }
 
@@ -240,54 +244,44 @@ export default function GameFooter({
   tonicAction,
   arpAction,
 }: FooterProps) {
-  const keyText = pcToKeyLabel(tonicPc, keySig);
   const scaleText = friendlyScaleLabel(scaleName, keySig);
 
   return (
-    <footer className="w-full bg-transparent px-4 md:px-6 py-3">
-      <div className="w-[90%] mx-auto">
-        <div className="rounded-2xl shadow-[0_6px_24px_rgba(0,0,0,0.12)] px-3 md:px-4 py-2 bg-[#f1f1f1]">
-          <div className="grid grid-cols-[1fr_auto_minmax(0,1fr)] items-center gap-4">
-            {/* LEFT cluster: Key & Scale + actions */}
-            <div className="justify-self-start w-full min-w-0 overflow-hidden">
-              <div className="w-full flex items-center justify-start gap-x-3 flex-nowrap">
-                <MetaItem className="w-[6.5rem] flex-none" label="Key" value={keyText} />
+    <footer className="w-full bg-transparent px-4 md:px-6 py-3 overflow-visible">
+      <div className="w-[90%] mx-auto overflow-visible">
+        <div className="rounded-2xl shadow-[0_6px_24px_rgba(0,0,0,0.12)] px-3 md:px-4 py-2 bg-[#f1f1f1] overflow-visible">
+          <div className="grid grid-cols-[1fr_auto_minmax(0,1fr)] items-center gap-4 overflow-visible">
+            {/* LEFT cluster: Scale + actions (Tonic/Arp with labels above) */}
+            <div className="justify-self-start w-full min-w-0 overflow-visible">
+              <div className="w-full flex items-center justify-start gap-x-4 flex-nowrap overflow-visible">
                 <MetaItem className="w-[9rem] flex-none" label="Scale" value={scaleText} />
 
                 {(tonicAction || arpAction) ? (
-                  <div className="ml-1 flex items-center gap-2">
+                  <div className="ml-1 flex items-center gap-3 overflow-visible">
                     {tonicAction ? (
-                      <FooterActionButton
-                        label={tonicAction.label}
-                        onClick={tonicAction.onClick}
-                        disabled={tonicAction.disabled}
-                        title={tonicAction.title ?? "Play tonic"}
-                      />
+                      <LabeledAction topLabel="Tonic" action={tonicAction} />
                     ) : null}
                     {arpAction ? (
-                      <FooterActionButton
-                        label={arpAction.label}
-                        onClick={arpAction.onClick}
-                        disabled={arpAction.disabled}
-                        title={arpAction.title ?? "Play arpeggio"}
-                      />
+                      <LabeledAction topLabel="Triad" action={arpAction} />
                     ) : null}
                   </div>
                 ) : null}
               </div>
             </div>
 
-            {/* center: play/pause */}
-            <div className="justify-self-center">
+            {/* center: play/pause (wrap allows glow outside) */}
+            <div className="justify-self-center overflow-visible">
               {showPlay ? (
-                <PlayPauseButton running={running} onToggle={onToggle} />
+                <div className="relative p-1 overflow-visible">
+                  <PlayPauseButton running={running} onToggle={onToggle} />
+                </div>
               ) : (
                 <div className="w-16 h-16" aria-hidden />
               )}
             </div>
 
-            {/* RIGHT cluster: session panel + stats */}
-            <div className="justify-self-end w-full min-w-0 overflow-hidden">
+            {/* RIGHT cluster: session panel + (trimmed) stats */}
+            <div className="justify-self-end w-full min-w-0 overflow-visible">
               <div className="w-full flex items-center justify-end gap-x-4 flex-nowrap">
                 {sessionPanel ? <SessionPanel {...sessionPanel} /> : null}
                 <GameStats

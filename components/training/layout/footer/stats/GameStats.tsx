@@ -30,8 +30,8 @@ type Props = {
   isReady?: boolean;
   error?: string | null;
 
-  confidence: number;
-  confThreshold?: number;
+  confidence: number;     // kept for prop compatibility; not shown
+  confThreshold?: number; // kept for prop compatibility; not shown
 
   keySig?: string | null;
   clef?: "treble" | "bass" | null;
@@ -45,15 +45,14 @@ export default function GameStats({
   livePitchHz,
   isReady = false,
   error,
-  confidence,
-  confThreshold = 0.5,
+  // confidence, confThreshold — intentionally unused (labels removed)
   keySig = null,
   clef = null,
   lowHz = null,
   highHz = null,
   className,
 }: Props) {
-  const { pitchText, noteText } = usePitchReadout({
+  const { noteText } = usePitchReadout({
     pitch: typeof livePitchHz === "number" ? livePitchHz : null,
     isReady,
     error,
@@ -64,22 +63,11 @@ export default function GameStats({
     highHz,
   });
 
-  const confText = Number.isFinite(confidence) && confidence >= confThreshold ? confidence.toFixed(2) : "—";
-
   return (
-    // Do NOT take full width when placed in a row
     <div className={`min-w-0 flex-none ${className ?? ""}`}>
-      {/* single row; no wrap */}
       <div className="flex items-center justify-end gap-x-4 flex-nowrap">
-        <StatItem className="w-[7.5rem] flex-none" label="Live Pitch" value={pitchText} mono />
-        <StatItem className="w-[7rem] flex-none" label="Note (A440)" value={noteText} mono />
-        <StatItem
-          className="w-[6rem] flex-none"
-          label="Confidence"
-          value={confText}
-          mono
-          intent={error ? "error" : "default"}
-        />
+        {/* Only show a single Note readout; no (A440) suffix, no Live Pitch/Confidence */}
+        <StatItem className="w-[7rem] flex-none" label="Note" value={noteText} mono />
       </div>
     </div>
   );
