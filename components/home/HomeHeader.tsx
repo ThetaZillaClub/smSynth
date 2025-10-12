@@ -82,8 +82,7 @@ export default function HomeHeader({
         </div>
 
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Welcome, {displayName}!</h1>
-          <p className="text-sm md:text-base text-[#373737]">Let’s get some reps in today.</p>
+          <h1 className="text-2xl md:text-3xl font-bold">Welcome back, {displayName}</h1>
         </div>
       </div>
     </header>

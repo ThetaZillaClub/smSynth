@@ -14,7 +14,7 @@ import MasteredCountCard from './statsbento/MasteredCountCard';
 export default function StatsBento() {
   return (
     <section className="w-full space-y-6">
-      {/* First row: four banner cards (2:1) — wrappers control the height */}
+      {/* Row 0: four banner cards (2:1) — wrappers control the height */}
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <div className="aspect-[2/1] min-h-[96px]">
           <RatingCard compact />
@@ -30,17 +30,23 @@ export default function StatsBento() {
         </div>
       </div>
 
-      {/* Second row: 2×2 bento (PitchFocus large TL, Performance small TR, Completed Lessons small BL, Intervals large BR) */}
+      {/* Rows 1–2: custom bento */}
+      {/* Grid is 8 columns so we can do: 
+          Row 1 -> [Performance span-4] [Completed Lessons span-3] [spacer span-1]
+          Row 2 -> [Pitch Focus span-4] [Intervals span-4] */}
       <div
         className="
           grid gap-6
-          sm:grid-cols-7
+          sm:grid-cols-8
           [grid-auto-rows:minmax(360px,auto)]
         "
       >
-        <div className="sm:col-span-4"><PitchFocusCard /></div>
-        <div className="sm:col-span-3"><PerformanceCard /></div>
+        {/* Row 1 */}
+        <div className="sm:col-span-5"><PerformanceCard /></div>
         <div className="sm:col-span-3"><MilestonesCard /></div>
+
+        {/* Row 2 */}
+        <div className="sm:col-span-4"><PitchFocusCard /></div>
         <div className="sm:col-span-4"><IntervalsCard /></div>
       </div>
     </section>

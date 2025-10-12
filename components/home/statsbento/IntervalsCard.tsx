@@ -6,13 +6,14 @@ import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { PR_COLORS } from '@/utils/stage';
 
-const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
+const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 const intervalName = (s: number) =>
   ({ 0:'Unison',1:'m2',2:'M2',3:'m3',4:'M3',5:'P4',6:'TT',7:'P5',8:'m6',9:'M6',10:'m7',11:'M7',12:'Octave' } as Record<number,string>)[s] ?? `${s}`;
 
+/* ---------------- measure & canvas hooks ---------------- */
 function useMeasure() {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [w, setW] = React.useState(0);
@@ -47,226 +48,220 @@ function useCanvas2d(width: number, height: number) {
   return { ref, dpr };
 }
 
-type Item = { label: string; v1: number };
+/* ---------------- polar area chart (single metric) ---------------- */
+type Item = { label: string; pct: number; attempts: number };
 
-type Hit = {
-  x1: number; x2: number; cx: number;
-  top: number; h: number;
+// dataset-bounds normalization; gentle gamma keeps weaker values visible
+const GAMMA = 0.9;
+const normFromDataset = (vals: number[]): ((v: number) => number) => {
+  const vMin = Math.min(...vals);
+  const vMax = Math.max(...vals);
+  const spread = vMax - vMin;
+  if (!isFinite(vMin) || !isFinite(vMax) || spread <= 1e-6) {
+    return () => Math.pow(0.75, GAMMA); // uniform data → consistent visible radius
+  }
+  return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
 };
 
-function VerticalSticks({
+function PolarAreaIntervals({
   items,
-  max = 100,
   height = 360,
-  stickW = 14,
-  gap = 20,
 }: {
   items: Item[];
-  max?: number; height?: number; stickW?: number; gap?: number;
+  height?: number;
 }) {
   const { ref, width } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, height);
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
-  const hitsRef = React.useRef<Hit[]>([]);
-  const hostRef = ref;
+  const [tip, setTip] = React.useState<{ x: number; y: number; label: string; pct: number; attempts: number } | null>(null);
 
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
-    const tick = (now: number) => { const u = ease((now - start) / 650); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
+    const tick = (now: number) => { const u = ease((now - start) / 800); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
   }, [items.length]);
 
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
-    const W = width, H = height;
+
+    const W = Math.max(1, width);
+    const H = Math.max(1, height);
     ctx.clearRect(0, 0, W, H);
 
-    // Layout paddings & gutters (match Pitch Focus feel)
-    const pad = { l: 66, r: 48, t: 10, b: 22 };
-    const innerGutter = 16;   // padding between Y labels and plot
-    const labelGap = 16;      // text offset from plot edge
-    const iw = Math.max(10, W - pad.l - pad.r);
-    const ih = Math.max(10, H - pad.t - pad.b);
-    const baseline = pad.t + ih;
+    const minSide = Math.min(W, H);
+    if (minSide < 64) return; // guard first small pass
 
-    // Plot rect
-    const plotL = pad.l + innerGutter;
-    const plotR = pad.l + iw - innerGutter;
-    const plotW = Math.max(10, plotR - plotL);
+    // radii + ring bounds
+    const ringPad = 8;
+    const Rraw = minSide * 0.42;
+    const R = Math.max(ringPad + 12, Rraw);
+    const r0 = Math.max(0, R * 0.20);
+    const Rmax = Math.max(r0 + 6, R - ringPad);
 
-    // GRID + left Y axis (0..100%)
-    const ticks = 4;
+    const cx = W / 2, cy = H / 2;
+
+    // dataset-normalized radii (normalize to OUTER bounds)
+    const vals = items.map(it => clamp01(it.pct / 100));
+    const norm = normFromDataset(vals);
+
+    // background rings
     ctx.save();
-    ctx.font = '14px ui-sans-serif, system-ui';
-    for (let i = 0; i <= ticks; i++) {
-      const y = Math.round(pad.t + (ih * i) / ticks) + 0.5;
-      const major = i % 2 === 0;
-      ctx.strokeStyle = major ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
-      ctx.lineWidth = major ? 1.25 : 0.75;
-      ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
-
-      ctx.fillStyle = '#0f0f0f';
-      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      const val = Math.round((max * (ticks - i)) / ticks);
-      ctx.fillText(`${val}%`, plotL - labelGap, y);
+    ctx.translate(cx, cy);
+    const rings = 4;
+    for (let i = 1; i <= rings; i++) {
+      const r = Math.max(1, r0 + (Rmax - r0) * (i / rings));
+      ctx.strokeStyle = i % 2 === 0 ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
+      ctx.lineWidth = i % 2 === 0 ? 1.25 : 0.75;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.restore();
 
-    // FIT: scale bar width + gaps to always fit
-    const n = items.length;
-    const MIN_STICK = 4;
-    const MIN_GAP = 4;
+    // sectors
+    const n = Math.max(1, items.length);
+    const gapRad = (Math.PI / 180) * 6;
+    const totalGap = gapRad * n;
+    const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
+    const startBase = -Math.PI / 2;
 
-    const baseTotal = n * stickW + Math.max(0, n - 1) * gap; // single bar per interval
-    let scale = baseTotal > plotW ? plotW / baseTotal : 1;
-
-    let sW = Math.max(MIN_STICK, Math.floor(stickW * scale));
-    let g = Math.max(MIN_GAP, Math.floor(gap * scale));
-
-    let total = n * sW + Math.max(0, n - 1) * g;
-    if (total > plotW) {
-      // reduce gaps to min, then shrink bars if needed
-      g = MIN_GAP;
-      const targetForBars = plotW - Math.max(0, n - 1) * g;
-      sW = Math.max(MIN_STICK, Math.floor(targetForBars / n));
-      total = n * sW + Math.max(0, n - 1) * g;
-      while (total > plotW && sW > MIN_STICK) {
-        sW -= 1;
-        total = n * sW + Math.max(0, n - 1) * g;
-      }
-    }
-
-    const x0 = plotL + Math.max(0, Math.floor((plotW - total) / 2));
-
-    // DRAW (clip to plot)
-    hitsRef.current = [];
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(plotL + 0.5, pad.t + 0.5, plotW - 1, ih - 1);
-    ctx.clip();
+    ctx.translate(cx, cy);
 
     for (let i = 0; i < n; i++) {
-      const it = items[i];
-      const x = x0 + i * (sW + g);
+      const a0 = startBase + i * (sector + gapRad);
+      const a1 = a0 + sector;
+      const mid = (a0 + a1) / 2;
 
-      const h = ih * clamp01((clamp(it.v1, 0, max) / max)) * t;
-      const y = baseline - h;
+      const u = norm(vals[i]);
+      const rFill = r0 + (Rmax - r0) * u * t;
 
-      // hover band
+      // hover underlay
       if (hover === i) {
         ctx.save();
         ctx.fillStyle = 'rgba(16,24,40,0.06)';
-        const bandPad = 6;
-        ctx.fillRect(x - bandPad, pad.t + 2, sW + bandPad * 2, ih - 2);
+        ctx.beginPath();
+        ctx.arc(0, 0, Rmax + 4, a0, a1, false);
+        ctx.arc(0, 0, Math.max(0, r0 - 4), a1, a0, true);
+        ctx.closePath(); ctx.fill();
         ctx.restore();
       }
 
-      // bar
+      // filled sector
       ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.08)';
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetY = 2;
-
+      ctx.globalAlpha = 0.62;
       ctx.fillStyle = PR_COLORS.noteFill;
-      ctx.fillRect(Math.round(x), Math.round(y), sW, Math.max(0, Math.round(h)));
-
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
+      ctx.arc(0, 0, r0, a1, a0, true);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
 
-      // stroke
-      ctx.lineWidth = 1;
+      // subtle rim
+      ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
-      ctx.strokeRect(x + 0.5, y + 0.5, sW - 1, Math.max(0, Math.round(h) - 1));
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
+      ctx.stroke();
+      ctx.restore();
 
-      // hover value
-      if (hover === i) {
-        ctx.save();
-        ctx.font = '12px ui-sans-serif, system-ui';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillStyle = '#0f0f0f';
-        const dv = clamp(Math.round(it.v1), 0, max);
-        ctx.fillText(`${dv}%`, x + sW / 2, y - 6);
-        ctx.restore();
-
-        // connector
-        ctx.save();
-        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x + sW / 2, y - 4); ctx.lineTo(x + sW / 2, y); ctx.stroke();
-        ctx.restore();
-      }
-
-      hitsRef.current.push({
-        x1: x, x2: x + sW, cx: x + sW / 2,
-        top: y, h,
-      });
+      // label outside
+      const lblR = Rmax + 16;
+      ctx.save();
+      ctx.fillStyle = '#0f0f0f';
+      ctx.font = '14px ui-sans-serif, system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(items[i].label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
+      ctx.restore();
     }
 
     // focus ring
-    if (hover != null && hitsRef.current[hover]) {
-      const h = hitsRef.current[hover];
-      const left = h.x1 - 6, right = h.x2 + 6;
+    if (hover != null) {
+      const i = hover;
+      const a0 = startBase + i * (sector + gapRad);
+      const a1 = a0 + sector;
       ctx.save();
       ctx.strokeStyle = 'rgba(16,24,40,0.25)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(left + 0.5, pad.t + 1.5, Math.max(0, right - left), ih - 3);
+      ctx.beginPath();
+      ctx.arc(0, 0, Rmax + 5, a0, a1, false);
+      ctx.arc(0, 0, Math.max(0, r0 - 5), a1, a0, true);
+      ctx.closePath();
+      ctx.stroke();
       ctx.restore();
     }
 
-    ctx.restore(); // end clip
-
-    // X labels (clamped to plot)
-    const labelStep = Math.max(1, Math.ceil(n / 8));
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(plotL, pad.t, plotW, ih + 28);
-    ctx.clip();
-    ctx.fillStyle = '#0f0f0f'; ctx.font = '14px ui-sans-serif, system-ui';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-
-    for (let i = 0; i < n; i++) {
-      if (i % labelStep !== 0) continue;
-      const cx = x0 + i * (sW + g) + sW / 2;
-      const center = clamp(cx, plotL + 8, plotR - 8);
-      ctx.fillText(items[i].label, center, baseline + 6);
-    }
     ctx.restore();
-  }, [canvasRef, width, height, items, max, stickW, gap, t, hover]);
+  }, [canvasRef, width, height, items, t, hover]);
 
-  // hover + tooltip
-  const [tip, setTip] = React.useState<{ x: number; y: number; label: string; v1: number } | null>(null);
+  // hit detection + tooltip
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const rect = el.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    let idx: number | null = null;
-    for (let i = 0; i < hitsRef.current.length; i++) {
-      const h = hitsRef.current[i];
-      if (x >= h.x1 - 8 && x <= h.x2 + 8) { idx = i; break; }
-    }
+    const c = canvasRef.current; if (!c) return;
+    const rect = c.getBoundingClientRect();
+
+    const W = Math.max(1, rect.width);
+    const H = Math.max(1, rect.height);
+    const minSide = Math.min(W, H);
+    if (minSide < 64) { setHover(null); setTip(null); return; }
+
+    const ringPad = 8;
+    const R = Math.max(ringPad + 12, minSide * 0.42);
+    const r0 = Math.max(0, R * 0.20);
+    const Rmax = Math.max(r0 + 6, R - ringPad);
+
+    const cx = W / 2, cy = H / 2;
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const dx = x - cx, dy = y - cy;
+    const r = Math.hypot(dx, dy);
+
+    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
+
+    const startBase = -Math.PI / 2;
+    let ang = Math.atan2(dy, dx);
+    let rel = ang - startBase;
+    while (rel < 0) rel += Math.PI * 2;
+    while (rel >= Math.PI * 2) rel -= Math.PI * 2;
+
+    const n = Math.max(1, items.length);
+    const gapRad = (Math.PI / 180) * 6;
+    const sector = Math.max(0, (Math.PI * 2 - gapRad * n) / n);
+    const cluster = sector + gapRad;
+
+    const idx = Math.floor(rel / cluster);
+    const posInCluster = rel - idx * cluster;
+    if (idx < 0 || idx >= n || posInCluster > sector) { setHover(null); setTip(null); return; }
+
     setHover(idx);
-    if (idx != null) {
-      const it = items[idx];
-      const h = hitsRef.current[idx];
-      const tipX = clamp(h.cx, 8, rect.width - 8);
-      const tipY = h.top - 14;
-      setTip({
-        x: tipX,
-        y: Math.max(12, tipY),
-        label: it.label,
-        v1: clamp(Math.round(it.v1), 0, max),
-      });
-    } else {
-      setTip(null);
-    }
-  }, [items, max]);
+
+    // tooltip near normalized radius
+    const vals = items.map(it => clamp01(it.pct / 100));
+    const norm = normFromDataset(vals);
+    const u = norm(vals[idx]);
+
+    const Rdraw = r0 + (Rmax - r0) * u; // current radius (no easing needed for tip)
+    const mid = (startBase + idx * cluster) + sector / 2;
+
+    const tipX = clamp(cx + Math.cos(mid) * (Rdraw + 12), 8, W - 8);
+    const tipY = clamp(cy + Math.sin(mid) * (Rdraw + 12), 8, H - 8);
+
+    const it = items[idx];
+    setTip({
+      x: tipX, y: tipY,
+      label: it.label,
+      pct: Math.round(it.pct),
+      attempts: it.attempts,
+    });
+  }, [items, canvasRef]);
+
   const onMouseLeave = React.useCallback(() => { setHover(null); setTip(null); }, []);
 
   return (
     <div
-      ref={hostRef}
+      ref={ref}
       className="relative w-full"
       style={{ height }}
       onMouseMove={onMouseMove}
@@ -278,7 +273,7 @@ function VerticalSticks({
       />
       {tip ? (
         <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
           style={{
             left: tip.x,
             top: tip.y,
@@ -290,9 +285,11 @@ function VerticalSticks({
           <div className="flex items-center gap-2">
             <span className="font-semibold">{tip.label}</span>
             <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
-              {tip.v1}%
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
+              {tip.pct}% correct
             </span>
+            <span className="text-[#373737]">·</span>
+            <span className="text-[#0f0f0f]">{tip.attempts} attempts</span>
           </div>
         </div>
       ) : null}
@@ -300,11 +297,12 @@ function VerticalSticks({
   );
 }
 
+/* ---------------- card + data ---------------- */
 export default function IntervalsCard() {
   const supabase = React.useMemo(() => createClient(), []);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
-  const [items, setItems] = React.useState<{ label: string; v1: number }[]>([]);
+  const [items, setItems] = React.useState<Item[]>([]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -333,18 +331,20 @@ export default function IntervalsCard() {
 
         const by = new Map<number, { a: number; c: number }>(); for (let i = 0; i <= 12; i++) by.set(i,{a:0,c:0});
         for (const r of (iQ.data ?? []) as any[]) {
-          const g = by.get(r.semitones)!; g.a += Number(r.attempts || 0); g.c += Number(r.correct || 0);
+          const g = by.get(r.semitones)!;
+          g.a += Number(r.attempts || 0);
+          g.c += Number(r.correct || 0);
         }
 
-        // Semitone order 0..12; keep anchors (even if 0%) so chart has context
+        // Keep anchors (even if 0%) so chart has context
         const anchors = new Set([0, 2, 3, 7, 12]);
         const list = Array.from({ length: 13 }, (_, s) => {
           const v = by.get(s)!;
           const pct = v.a ? Math.round((100 * v.c) / v.a) : 0;
-          return { s, label: intervalName(s), v1: pct };
+          return { s, label: intervalName(s), pct, attempts: v.a };
         })
-          .filter(x => x.v1 > 0 || anchors.has(x.s))
-          .map(({ label, v1 }) => ({ label, v1 }));
+          .filter(x => x.pct > 0 || anchors.has(x.s))
+          .map(({ label, pct, attempts }) => ({ label, pct, attempts }));
 
         if (!cancelled) setItems(list);
       } catch (e: any) {
@@ -369,7 +369,7 @@ export default function IntervalsCard() {
           No interval attempts yet.
         </div>
       ) : (
-        <VerticalSticks items={items} height={360} stickW={14} gap={20} max={100} />
+        <PolarAreaIntervals items={items} height={360} />
       )}
       {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
     </div>

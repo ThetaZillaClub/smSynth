@@ -15,6 +15,7 @@ const NOTE = (m: number) => {
   return `${n.name}${n.octave}`;
 };
 
+/* ---------------- measure & canvas hooks ---------------- */
 function useMeasure() {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [w, setW] = React.useState(0);
@@ -49,273 +50,248 @@ function useCanvas2d(width: number, height: number) {
   return { ref, dpr };
 }
 
-type Item = { label: string; v1: number; v2: number };
-type Hit = { x1: number; x2: number; cx: number; v1Top: number; v2Top: number; v1H: number; v2H: number };
+/* ---------------- polar area chart ---------------- */
+type Item = { label: string; v1: number; v2: number }; // v1 = on-pitch %, v2 = MAE ¢
 
-function VerticalSticks({
+// Dataset-bounds normalization (min→0, max→1), with gentle gamma to
+// keep weak values visible without biasing everything near the outer rim.
+const GAMMA = 0.9;
+const normFromDataset = (vals: number[]): ((v: number) => number) => {
+  const vMin = Math.min(...vals);
+  const vMax = Math.max(...vals);
+  const spread = vMax - vMin;
+  if (!isFinite(vMin) || !isFinite(vMax) || spread <= 1e-6) {
+    // all equal — give a consistent mid/high fill so the chart isn't invisible
+    return () => Math.pow(0.75, GAMMA);
+  }
+  return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
+};
+
+function PolarArea({
   items,
-  max1 = 100,          // on-pitch %
-  max2 = 120,          // MAE (¢)
+  max1 = 100,      // on-pitch %
+  max2 = 120,      // MAE ¢ (higher is worse; drawn inversely)
   height = 360,
-  stickW = 14,
-  gap = 20,
 }: {
   items: Item[];
-  max1?: number; max2?: number; height?: number; stickW?: number; gap?: number;
+  max1?: number;
+  max2?: number;
+  height?: number;
 }) {
   const { ref, width } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, height);
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
-  const hitsRef = React.useRef<Hit[]>([]);
-  const hostRef = ref;
+  const [tip, setTip] = React.useState<{ x: number; y: number; label: string; v1: number; v2: number } | null>(null);
 
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
-    const tick = (now: number) => { const u = ease((now - start) / 650); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
+    const tick = (now: number) => { const u = ease((now - start) / 800); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
   }, [items.length]);
 
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
-    const W = width, H = height;
-    ctx.clearRect(0, 0, W, H); // transparent canvas
 
-    // Outer padding & gutters so Y labels have room
-    const pad = { l: 66, r: 66, t: 10, b: 22 };
-    const innerGutter = 16;              // between Y-labels and plot edge
-    const labelGap = 16;                 // label text offset from plot edge
-    const iw = Math.max(10, W - pad.l - pad.r);
-    const ih = Math.max(10, H - pad.t - pad.b);
-    const baseline = pad.t + ih;
+    const W = Math.max(1, width);
+    const H = Math.max(1, height);
+    ctx.clearRect(0, 0, W, H);
 
-    // Plot rect
-    const plotL = pad.l + innerGutter;
-    const plotR = pad.l + iw - innerGutter;
-    const plotW = Math.max(10, plotR - plotL);
+    // Guard against the first tiny layout pass
+    const minSide = Math.min(W, H);
+    if (minSide < 64) return;
 
-    // --- GRID + Y AXES ---
-    const ticks = 4;
+    // Radii (safe clamps)
+    const ringPad = 8;
+    const Rraw = minSide * 0.42;
+    const R = Math.max(ringPad + 12, Rraw);        // outer usable radius
+    const r0 = Math.max(0, R * 0.20);               // inner radius (donut)
+    const Rmax = Math.max(r0 + 6, R - ringPad);     // ensure outer ≥ inner + margin
+
+    const cx = W / 2, cy = H / 2;
+
+    // Build dataset-normalizers (to OUTER BOUNDS)
+    const onVals  = items.map(it => clamp01(it.v1 / max1));           // 0..1 (higher is better)
+    const maeGood = items.map(it => clamp01(1 - it.v2 / max2));       // 0..1 (lower MAE → higher "goodness")
+    const normOn  = normFromDataset(onVals);
+    const normMae = normFromDataset(maeGood);
+
+    // background rings (grid)
     ctx.save();
-    ctx.font = '14px ui-sans-serif, system-ui';
-    for (let i = 0; i <= ticks; i++) {
-      const y = Math.round(pad.t + (ih * i) / ticks) + 0.5;
-      const major = i % 2 === 0;
-      ctx.strokeStyle = major ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
-      ctx.lineWidth = major ? 1.25 : 0.75;
-      ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
-
-      // Left (% descending)
-      ctx.fillStyle = '#0f0f0f';
-      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      const pVal = Math.round((max1 * (ticks - i)) / ticks);
-      ctx.fillText(`${pVal}%`, plotL - labelGap, y);
-
-      // Right (MAE ascending)
-      ctx.textAlign = 'left';
-      const mVal = Math.round((max2 * i) / ticks);
-      ctx.fillText(`${mVal}¢`, plotR + labelGap, y);
+    ctx.translate(cx, cy);
+    const rings = 4;
+    for (let i = 1; i <= rings; i++) {
+      const r = Math.max(1, r0 + (Rmax - r0) * (i / rings));
+      ctx.strokeStyle = i % 2 === 0 ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
+      ctx.lineWidth = i % 2 === 0 ? 1.25 : 0.75;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.restore();
 
-    // --- FIT LAYOUT: dynamically scale widths/gaps to fit plotW ---
-    const n = items.length;
-    const BASE_INNER = 10; // space between the two bars in a cluster
-
-    // minimums to remain readable on small widths
-    const MIN_STICK = 4;
-    const MIN_GAP = 4;
-    const MIN_INNER = 4;
-
-    // first pass: proportional scale
-    const baseCluster = stickW * 2 + BASE_INNER;
-    const baseTotal = n * baseCluster + Math.max(0, n - 1) * gap;
-
-    // compute scaled sizes
-    let scale = baseTotal > plotW ? plotW / baseTotal : 1;
-    let sW = Math.max(MIN_STICK, Math.floor(stickW * scale));
-    let inner = Math.max(MIN_INNER, Math.floor(BASE_INNER * scale));
-    let g = Math.max(MIN_GAP, Math.floor(gap * scale));
-
-    // second pass: ensure guaranteed fit (reallocate width if mins forced overflow)
-    let total = n * (2 * sW + inner) + Math.max(0, n - 1) * g;
-    if (total > plotW) {
-      // Reduce gaps first down to MIN_GAP
-      const targetForBars = plotW - Math.max(0, n - 1) * MIN_GAP;
-      g = MIN_GAP;
-
-      // Distribute remaining width to bars + inner
-      let clusterAvail = Math.floor(targetForBars / n); // width per cluster
-      // Keep inner proportional but not below MIN_INNER
-      const innerShare = Math.max(MIN_INNER, Math.floor(clusterAvail * (BASE_INNER / baseCluster)));
-      const barsAvail = Math.max(2 * MIN_STICK, clusterAvail - innerShare);
-      sW = Math.max(MIN_STICK, Math.floor(barsAvail / 2));
-      inner = Math.max(MIN_INNER, clusterAvail - 2 * sW);
-
-      total = n * (2 * sW + inner) + Math.max(0, n - 1) * g;
-      // If somehow still > plotW due to rounding, shave a pixel off sW until it fits
-      while (total > plotW && sW > MIN_STICK) {
-        sW -= 1;
-        total = n * (2 * sW + inner) + Math.max(0, n - 1) * g;
-      }
-    }
-
-    // x origin centered
-    const x0 = plotL + Math.max(0, Math.floor((plotW - total) / 2));
-
-    // --- DRAW BARS (hard-clipped to plot rect) ---
-    const TEAL = '#14b8a6';
-    hitsRef.current = [];
+    // chart angles
+    const n = Math.max(1, items.length);
+    const gapRad = (Math.PI / 180) * 6; // gap between sectors
+    const totalGap = gapRad * n;
+    const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
+    const startBase = -Math.PI / 2; // start at top
 
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(plotL + 0.5, pad.t + 0.5, plotW - 1, ih - 1);
-    ctx.clip();
-
-    const pct = (v: number) => clamp(v, 0, max1) / max1;
-    const invMae = (val: number) => {
-      const v = clamp(val, 0, max2);
-      return (max2 - v) / max2; // taller = lower MAE
-    };
+    ctx.translate(cx, cy);
 
     for (let i = 0; i < n; i++) {
+      const a0 = startBase + i * (sector + gapRad);
+      const a1 = a0 + sector;
+      const mid = (a0 + a1) / 2;
+
       const it = items[i];
-      const cx = x0 + i * (2 * sW + inner + g);
+      const uOn  = normOn(onVals[i]);         // dataset-normalized on-pitch
+      const uMae = normMae(maeGood[i]);       // dataset-normalized inverted MAE
 
-      // height calculations with clamped values
-      const h1 = ih * clamp01(pct(it.v1)) * t;
-      const h2 = ih * clamp01(invMae(it.v2)) * t;
+      const rMae = r0 + (Rmax - r0) * uMae * t;    // MAE radius (base layer)
+      const rOn  = r0 + (Rmax - r0) * uOn  * t;    // On-pitch radius (over layer)
 
-      const x1 = cx;
-      const x2 = cx + sW + inner;
-      const y1 = baseline - h1;
-      const y2 = baseline - h2;
-
-      // hover band
+      // hover highlight underlay
       if (hover === i) {
         ctx.save();
         ctx.fillStyle = 'rgba(16,24,40,0.06)';
-        const bandPad = 6;
-        ctx.fillRect(x1 - bandPad, pad.t + 2, (2 * sW + inner) + bandPad * 2, ih - 2);
+        ctx.beginPath();
+        ctx.arc(0, 0, Rmax + 4, a0, a1, false);
+        ctx.arc(0, 0, Math.max(0, r0 - 4), a1, a0, true);
+        ctx.closePath(); ctx.fill();
         ctx.restore();
       }
 
-      // bars
+      // --- LAYER 1: MAE FILLED SECTOR (teal, translucent) ---
       ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.08)';
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetY = 2;
-
-      ctx.fillStyle = PR_COLORS.noteFill; // on-pitch %
-      ctx.fillRect(Math.round(x1), Math.round(y1), sW, Math.max(0, Math.round(h1)));
-
-      ctx.fillStyle = TEAL;               // MAE inverted
-      ctx.fillRect(Math.round(x2), Math.round(y2), sW, Math.max(0, Math.round(h2)));
-
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = '#14b8a6'; // teal
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
+      ctx.arc(0, 0, r0, a1, a0, true);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
 
-      // strokes (crisp)
-      ctx.lineWidth = 1;
+      // --- LAYER 2: ON-PITCH FILLED SECTOR (note color, over MAE) ---
+      ctx.save();
+      ctx.globalAlpha = 0.60;
+      ctx.fillStyle = PR_COLORS.noteFill;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(r0, rOn), a0, a1, false);
+      ctx.arc(0, 0, r0, a1, a0, true);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // Optional subtle rim for On-Pitch edge (kept crisp, not dashed)
+      ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
-      ctx.strokeRect(x1 + 0.5, y1 + 0.5, sW - 1, Math.max(0, Math.round(h1) - 1));
-      ctx.strokeStyle = 'rgba(20,184,166,0.65)';
-      ctx.strokeRect(x2 + 0.5, y2 + 0.5, sW - 1, Math.max(0, Math.round(h2) - 1));
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(r0, rOn), a0, a1, false);
+      ctx.stroke();
+      ctx.restore();
 
-      // hover values
-      if (hover === i) {
-        ctx.save();
-        ctx.font = '12px ui-sans-serif, system-ui';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillStyle = '#0f0f0f';
-        const dv1 = clamp(Math.round(it.v1), 0, max1);
-        const dv2 = clamp(Math.round(it.v2), 0, max2);
-        ctx.fillText(`${dv1}%`, x1 + sW / 2, y1 - 6);
-        ctx.fillText(`${dv2}¢`, x2 + sW / 2, y2 - 6);
-        ctx.restore();
-
-        // connectors
-        ctx.save();
-        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x1 + sW / 2, y1 - 4); ctx.lineTo(x1 + sW / 2, y1); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x2 + sW / 2, y2 - 4); ctx.lineTo(x2 + sW / 2, y2); ctx.stroke();
-        ctx.restore();
-      }
-
-      // hit zones (not clipped)
-      hitsRef.current.push({
-        x1, x2: x2 + sW, cx: x1 + sW + inner / 2,
-        v1Top: y1, v2Top: y2, v1H: h1, v2H: h2,
-      });
+      // labels (outside)
+      const lblR = Rmax + 16;
+      ctx.save();
+      ctx.fillStyle = '#0f0f0f';
+      ctx.font = '14px ui-sans-serif, system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(it.label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
+      ctx.restore();
     }
 
-    // focus ring (inside plot)
-    if (hover != null && hitsRef.current[hover]) {
-      const h = hitsRef.current[hover];
-      const left = h.x1 - 6, right = h.x2 + 6;
+    // focus ring around hovered sector
+    if (hover != null) {
+      const i = hover;
+      const a0 = startBase + i * (sector + gapRad);
+      const a1 = a0 + sector;
       ctx.save();
       ctx.strokeStyle = 'rgba(16,24,40,0.25)';
       ctx.lineWidth = 2;
-      ctx.strokeRect(left + 0.5, pad.t + 1.5, Math.max(0, right - left), ih - 3);
+      ctx.beginPath();
+      ctx.arc(0, 0, Rmax + 5, a0, a1, false);
+      ctx.arc(0, 0, Math.max(0, r0 - 5), a1, a0, true);
+      ctx.closePath();
+      ctx.stroke();
       ctx.restore();
     }
 
-    ctx.restore(); // end plot clipping
-
-    // --- X LABELS (clamped to plot rect) ---
-    const labelStep = Math.max(1, Math.ceil(n / 8));
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(plotL, pad.t, plotW, ih + 28);
-    ctx.clip();
-    ctx.fillStyle = '#0f0f0f'; ctx.font = '14px ui-sans-serif, system-ui';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-
-    for (let i = 0; i < n; i++) {
-      if (i % labelStep !== 0) continue;
-      const cx = x0 + i * (2 * sW + inner + g);
-      const centerIdeal = cx + sW + inner / 2;
-      const center = clamp(centerIdeal, plotL + 8, plotR - 8);
-      ctx.fillText(items[i].label, center, baseline + 6);
-    }
     ctx.restore();
-  }, [canvasRef, width, height, items, max1, max2, stickW, gap, t, hover]);
+  }, [canvasRef, width, height, items, max1, max2, t, hover]);
 
-  // hover/tooltip plumbing
-  const [tip, setTip] = React.useState<{ x: number; y: number; label: string; v1: number; v2: number } | null>(null);
+  // hit detection + tooltip
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const rect = el.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    let idx: number | null = null;
-    for (let i = 0; i < hitsRef.current.length; i++) {
-      const h = hitsRef.current[i];
-      if (x >= h.x1 - 8 && x <= h.x2 + 8) { idx = i; break; }
-    }
+    const c = canvasRef.current; if (!c) return;
+    const rect = c.getBoundingClientRect();
+
+    const W = Math.max(1, rect.width);
+    const H = Math.max(1, rect.height);
+    const minSide = Math.min(W, H);
+    if (minSide < 64) { setHover(null); setTip(null); return; }
+
+    const ringPad = 8;
+    const R = Math.max(ringPad + 12, minSide * 0.42);
+    const r0 = Math.max(0, R * 0.20);
+    const Rmax = Math.max(r0 + 6, R - ringPad);
+
+    const cx = W / 2, cy = H / 2;
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const dx = x - cx, dy = y - cy;
+    const r = Math.hypot(dx, dy);
+
+    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
+
+    // sector math
+    const startBase = -Math.PI / 2;
+    let ang = Math.atan2(dy, dx);
+    let rel = ang - startBase;
+    while (rel < 0) rel += Math.PI * 2;
+    while (rel >= Math.PI * 2) rel -= Math.PI * 2;
+
+    const n = Math.max(1, items.length);
+    const gapRad = (Math.PI / 180) * 6;
+    const sector = Math.max(0, (Math.PI * 2 - gapRad * n) / n);
+    const cluster = sector + gapRad;
+
+    const idx = Math.floor(rel / cluster);
+    const posInCluster = rel - idx * cluster;
+    if (idx < 0 || idx >= n || posInCluster > sector) { setHover(null); setTip(null); return; }
+
     setHover(idx);
-    if (idx != null) {
-      const it = items[idx];
-      const h = hitsRef.current[idx];
-      const tipX = clamp(h.cx, 8, rect.width - 8);
-      const tipY = Math.min(h.v1Top, h.v2Top) - 14;
-      setTip({
-        x: tipX,
-        y: Math.max(12, tipY),
-        label: it.label,
-        v1: clamp(Math.round(it.v1), 0, max1),
-        v2: clamp(Math.round(it.v2), 0, max2)
-      });
-    } else {
-      setTip(null);
-    }
-  }, [items, max1, max2]);
+
+    // Dataset-normalized On-Pitch for tooltip placement
+    const onVals  = items.map(it => clamp01(it.v1 / max1));
+    const maeGood = items.map(it => clamp01(1 - it.v2 / max2));
+    const normOn  = normFromDataset(onVals);
+    // const normMae = normFromDataset(maeGood); // not needed for tip position
+
+    const it = items[idx];
+    const uOn = normOn(onVals[idx]);
+    const Rdraw = r0 + (Rmax - r0) * uOn * (/* same easing phase */ 1);
+
+    const mid = (startBase + idx * cluster) + sector / 2;
+    const tipX = clamp(cx + Math.cos(mid) * (Rdraw + 12), 8, W - 8);
+    const tipY = clamp(cy + Math.sin(mid) * (Rdraw + 12), 8, H - 8);
+
+    setTip({
+      x: tipX,
+      y: tipY,
+      label: it.label,
+      v1: clamp(Math.round(it.v1), 0, max1),
+      v2: clamp(Math.round(it.v2), 0, max2),
+    });
+  }, [items, max1, max2, canvasRef]);
+
   const onMouseLeave = React.useCallback(() => { setHover(null); setTip(null); }, []);
 
   return (
     <div
-      ref={hostRef}
+      ref={ref}
       className="relative w-full"
       style={{ height }}
       onMouseMove={onMouseMove}
@@ -327,7 +303,7 @@ function VerticalSticks({
       />
       {tip ? (
         <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
           style={{
             left: tip.x,
             top: tip.y,
@@ -339,11 +315,11 @@ function VerticalSticks({
           <div className="flex items-center gap-2">
             <span className="font-semibold">{tip.label}</span>
             <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
               {tip.v1}%
             </span>
             <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#14b8a6' }} />
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: '#14b8a6' }} />
               {tip.v2}¢
             </span>
           </div>
@@ -353,6 +329,7 @@ function VerticalSticks({
   );
 }
 
+/* ---------------- card ---------------- */
 export default function PitchFocusCard() {
   const supabase = React.useMemo(() => createClient(), []);
   const [loading, setLoading] = React.useState(true);
@@ -394,7 +371,6 @@ export default function PitchFocusCard() {
           g.w   = wt; byMidi.set(p.midi, g);
         }
 
-        // Build full list with midi so we can sort by MIDI later
         const full = Array.from(byMidi.entries()).map(([m, v]) => ({
           midi: m,
           label: NOTE(m),
@@ -403,7 +379,7 @@ export default function PitchFocusCard() {
           score: (1 - clamp(v.on, 0, 1)) * 0.6 + Math.min(1, v.mae / 120) * 0.4,
         }));
 
-        // Take the 8 most fragile, THEN sort them in standard MIDI order
+        // Top 8 by "fragile" score, then order by MIDI
         const topFragile = [...full].sort((a, b) => b.score - a.score).slice(0, 8);
         const midiOrdered = topFragile.sort((a, b) => a.midi - b.midi);
 
@@ -442,14 +418,7 @@ export default function PitchFocusCard() {
           No per-note data yet.
         </div>
       ) : (
-        <VerticalSticks
-          items={items}
-          max1={100}
-          max2={120}
-          height={360}
-          stickW={14}
-          gap={20}
-        />
+        <PolarArea items={items} max1={100} max2={120} height={360} />
       )}
 
       {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
