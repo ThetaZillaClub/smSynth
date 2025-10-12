@@ -13,8 +13,8 @@ export function computePitchScore(
 
   // Softer, musical defaults
   const TAIL_GRACE_MS = 80;                               // ignore last 80ms (release)
-  const ZERO_CREDIT_CENTS = Math.max(100, centsOk + 45);  // 0 credit by here
-  const TRIM_UPPER = 0.10;                                // drop worst 10% for MAE calc
+  const ZERO_CREDIT_CENTS = Math.max(200, centsOk + 150);  // 0 credit by here
+  const TRIM_UPPER = 0.25;                                // drop worst 25% for MAE calc
 
   const voiced = filterVoiced(samples, confMin);
   const perNote: PerNotePitch[] = [];
@@ -68,10 +68,10 @@ export function computePitchScore(
   // Quarter at 60 BPM ≈ 1.0s; after 120ms onset + 80ms tail, eval ≈ 0.8s.
   // If notes are short and MAE is tight, allow 100% without robotic coverage.
   const avgEvalDur = phrase.notes.length ? (sumEvalDur / phrase.notes.length) : 0;
-  const maeTight = centsMaeAll <= 30;                // "pretty darn tight"
+  const maeTight = centsMaeAll <= 50;                // more generous tight threshold
   const thr =
-    avgEvalDur <= 0.90 ? 0.88 :                     // short notes
-    avgEvalDur <= 1.50 ? 0.92 : 0.94;               // medium / long
+    avgEvalDur <= 0.90 ? 0.80 :                     // short notes
+    avgEvalDur <= 1.50 ? 0.85 : 0.88;               // medium / long
 
   if (maeTight && timeOnPitchRatio >= thr) {
     percent = 100;
@@ -86,7 +86,7 @@ export function computePitchScore(
 }
 
 /** Upper-trimmed mean (drop worst `upperTrim` fraction). */
-function trimmedMean(xs: number[], upperTrim = 0.1, lowerTrim = 0): number {
+function trimmedMean(xs: number[], upperTrim = 0.25, lowerTrim = 0): number {
   if (!xs.length) return 0;
   const ys = xs.slice().sort((a, b) => a - b);
   const lo = Math.floor(ys.length * lowerTrim);
@@ -96,11 +96,11 @@ function trimmedMean(xs: number[], upperTrim = 0.1, lowerTrim = 0): number {
 
 /** Gently compress top-end so 0.85..0.95 feels fairer. */
 function boostTopEnd(ratio: number): number {
-  const pivot = 0.80; // keep everything ≤0.80 unchanged
+  const pivot = 0.60; // start boosting earlier
   if (ratio <= pivot) return ratio;
   const u = (ratio - pivot) / (1 - pivot); // 0..1
   // concave curve (γ<1) boosts toward 1 without making mediocre takes jump
-  const gamma = 0.6;
+  const gamma = 0.25;
   const boosted = pivot + (1 - pivot) * Math.pow(u, gamma);
   return Math.min(1, boosted);
 }

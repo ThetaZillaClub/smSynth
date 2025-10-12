@@ -8,7 +8,7 @@ type StudentRow = {
   creator_display_name: string;
   image_path: string | null;
   privacy: "public" | "private";
-  gender: "male" | "female" | "unspecified" | "other";
+  // gender removed from DB
   range_low: string | null;
   range_high: string | null;
   updated_at?: string;
@@ -23,7 +23,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("models")
-    .select("id,name,creator_display_name,image_path,privacy,gender,range_low,range_high,updated_at")
+    // ⬇️ gender removed
+    .select("id,name,creator_display_name,image_path,privacy,range_low,range_high,updated_at")
     .eq("id", id)
     .single();
 

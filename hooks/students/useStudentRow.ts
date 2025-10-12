@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 type StudentRow = {
   id: string;
   creator_display_name: string;
-  gender: "male" | "female" | "unspecified" | "other";
+  // gender removed from DB
   range_low?: string | null;
   range_high?: string | null;
 };
@@ -14,7 +14,7 @@ type StudentRow = {
 type ReturnShape = {
   studentRowId: string | null;
   studentName: string | null;
-  genderLabel: "male" | "female" | null;
+  genderLabel: "male" | "female" | null; // keep in API for UI compatibility, always null now
   rangeLowLabel: string | null;
   rangeHighLabel: string | null;
   loading: boolean;
@@ -72,7 +72,8 @@ export default function useStudentRow({
         if (row) {
           setStudentRowId(row.id);
           setStudentName(row.creator_display_name || null);
-          setGenderLabel(row.gender === "male" || row.gender === "female" ? row.gender : null);
+          // gender removed: always null
+          setGenderLabel(null);
           setRangeLowLabel(row.range_low ?? null);
           setRangeHighLabel(row.range_high ?? null);
         } else {

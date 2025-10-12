@@ -22,7 +22,8 @@ export async function GET() {
 
   const { data: row, error } = await supabase
     .from("models")
-    .select("id, creator_display_name, image_path, gender, range_low, range_high, updated_at")
+    // ⬇️ gender removed from schema; keep image & range fields
+    .select("id, creator_display_name, image_path, range_low, range_high, updated_at")
     .eq("uid", sub)
     .order("created_at", { ascending: false })
     .limit(1)

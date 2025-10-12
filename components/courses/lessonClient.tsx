@@ -1,6 +1,8 @@
-// components/courses/LessonClient.tsx
+// components/courses/lessonClient.tsx
 'use client';
 
+import * as React from 'react';
+import { useParams } from 'next/navigation';
 import TrainingGame from '@/components/training/TrainingGame';
 import useStudentRow from '@/hooks/students/useStudentRow';
 import useStudentRange from '@/hooks/students/useStudentRange';
@@ -16,6 +18,9 @@ export default function LessonClient({
   lessonTitle: string;
   lessonConfig: Partial<SessionConfig>;
 }) {
+  const params = useParams<{ course: string; lesson: string }>();
+  const lessonSlug = (params?.lesson ?? null) as string | null;
+
   const { studentRowId, rangeLowLabel, rangeHighLabel } =
     useStudentRow({ studentIdFromQuery: null });
 
@@ -30,6 +35,15 @@ export default function LessonClient({
     { autoSelectWindowIfMissing: true, clampKeyToRange: true }
   );
 
+  // Stable per-mount session id (browser only)
+  const sessionIdRef = React.useRef<string | null>(null);
+  if (!sessionIdRef.current) {
+    sessionIdRef.current =
+      (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
   return (
     <TrainingGame
       title={`${courseTitle} — ${lessonTitle}`}
@@ -37,6 +51,8 @@ export default function LessonClient({
       studentRowId={studentRowId}
       rangeLowLabel={rangeLowLabel}
       rangeHighLabel={rangeHighLabel}
+      lessonSlug={lessonSlug}
+      sessionId={sessionIdRef.current}
     />
   );
 }

@@ -28,6 +28,8 @@ import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 import { useGameplaySession } from "@/hooks/gameplay/useGameplaySession";
 import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
+import type { TakeScore } from "@/utils/scoring/score";
+import { letterFromPercent } from "@/utils/scoring/grade";
 
 // 🔑 mode-aware solfège (used for the arp button label)
 import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
@@ -48,6 +50,10 @@ type Props = {
   studentRowId?: string | null;
   rangeLowLabel?: string | null;
   rangeHighLabel?: string | null;
+
+  /** Optional: identify a lesson + session so we can submit takes */
+  lessonSlug?: string | null;
+  sessionId?: string | null;
 };
 
 const CONF_THRESHOLD = 0.5;
@@ -76,12 +82,135 @@ function triadOffsetsForScale(name?: string | null) {
   return { third, fifth };
 }
 
+// ───────────────────────── session aggregation helpers ─────────────────────────
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const r2 = (x: number) => Math.round(x * 100) / 100;
+const mean = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+
+function aggregateForSubmission(scores: TakeScore[], snaps: TakeSnapshot[]): TakeScore {
+  // Top-level means
+  const finalPct = mean(scores.map((s) => s.final.percent));
+  const pitchPct = mean(scores.map((s) => s.pitch.percent));
+  const pitchOn = clamp01(mean(scores.map((s) => s.pitch.timeOnPitchRatio)));
+  const pitchMae = mean(scores.map((s) => s.pitch.centsMae));
+  const melPct = mean(scores.map((s) => s.rhythm.melodyPercent));
+  const lineCandidates = scores.filter((s) => s.rhythm.lineEvaluated);
+  const linePct = lineCandidates.length ? mean(lineCandidates.map((s) => s.rhythm.linePercent)) : 0;
+  const lineEvaluated = lineCandidates.length > 0;
+  const intervalsRatio = clamp01(mean(scores.map((s) => s.intervals.correctRatio)));
+
+  // Aggregated arrays (not from a single best take):
+  // Pitch per-note: group by rounded MIDI across all takes
+  type PitchAgg = { count: number; ratio: number; mae: number };
+  const pitchByMidi = new Map<number, PitchAgg>();
+  scores.forEach((s, i) => {
+    const snap = snaps[i];
+    const per = s.pitch.perNote ?? [];
+    const notes = snap?.phrase?.notes ?? [];
+    for (let j = 0; j < per.length && j < notes.length; j++) {
+      const p = per[j]!;
+      const midi = Math.round(notes[j]!.midi);
+      const g = pitchByMidi.get(midi) ?? { count: 0, ratio: 0, mae: 0 };
+      const n = g.count + 1;
+      g.ratio += (p.ratio - g.ratio) / n;
+      g.mae += (p.centsMae - g.mae) / n;
+      g.count = n;
+      pitchByMidi.set(midi, g);
+    }
+  });
+  const aggregatedPerNotePitch = Array.from(pitchByMidi.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([midi, g]) => ({ midi, ratio: r2(g.ratio), centsMae: r2(g.mae), n: g.count })) as any[];
+
+  // Melody per-note rhythm: aggregate across all notes in all takes
+  type MelAgg = { count: number; coverage: number; onsetAbs: number };
+  const melAgg: MelAgg = { count: 0, coverage: 0, onsetAbs: 0 };
+  scores.forEach((s) => {
+    (s.rhythm.perNoteMelody ?? []).forEach((r) => {
+      melAgg.count++;
+      melAgg.coverage += (r.coverage - melAgg.coverage) / melAgg.count;
+      if (Number.isFinite(r.onsetErrMs)) {
+        const abs = Math.abs(r.onsetErrMs!);
+        melAgg.onsetAbs += (abs - melAgg.onsetAbs) / melAgg.count;
+      }
+    });
+  });
+  const aggregatedPerNoteMelody =
+    melAgg.count > 0 ? [{ coverage: r2(melAgg.coverage), onsetErrMs: Math.round(melAgg.onsetAbs) }] : [];
+
+  // Rhythm line per-event: aggregate by event value label across takes if present
+  type LineAgg = { count: number; credit: number; absErr: number; value: string };
+  const lineMap = new Map<string, LineAgg>();
+  scores.forEach((s, i) => {
+    if (!s.rhythm.lineEvaluated) return;
+    const rows = s.rhythm.linePerEvent ?? [];
+    const evs = snaps[i]?.rhythm ?? [];
+    rows.forEach((row) => {
+      const ev = evs[row.idx];
+      const label = ev ? String(ev.value) : "unknown";
+      const g = lineMap.get(label) ?? { count: 0, credit: 0, absErr: 0, value: label };
+      const n = g.count + 1;
+      const hit = (row.credit ?? 0) > 0 ? 1 : 0;
+      g.credit += (hit - g.credit) / n;
+      if (Number.isFinite(row.errMs)) {
+        const abs = Math.abs(row.errMs!);
+        g.absErr += (abs - g.absErr) / n;
+      }
+      g.count = n;
+      lineMap.set(label, g);
+    });
+  });
+  const aggregatedLinePerEvent = Array.from(lineMap.values()).map((g) => ({
+    value: g.value,
+    credit: r2(g.credit),
+    errMs: Math.round(g.absErr),
+    n: g.count,
+  })) as any[];
+
+  // Intervals by class: sum attempts/correct across all takes
+  const byClass = new Map<number, { attempts: number; correct: number }>();
+  for (let i = 0; i <= 12; i++) byClass.set(i, { attempts: 0, correct: 0 });
+  scores.forEach((s) => {
+    (s.intervals.classes ?? []).forEach((c) => {
+      const cell = byClass.get(c.semitones)!;
+      cell.attempts += c.attempts || 0;
+      cell.correct += c.correct || 0;
+    });
+  });
+  const aggregatedIntervals = Array.from(byClass.entries())
+    .filter(([, v]) => v.attempts > 0)
+    .map(([k, v]) => ({ semitones: k, attempts: v.attempts, correct: v.correct }));
+
+  return {
+    final: { percent: r2(finalPct), letter: letterFromPercent(finalPct) },
+    pitch: {
+      percent: r2(pitchPct),
+      timeOnPitchRatio: r2(pitchOn),
+      centsMae: r2(pitchMae),
+      perNote: aggregatedPerNotePitch as any,
+    },
+    rhythm: {
+      melodyPercent: r2(melPct),
+      lineEvaluated,
+      linePercent: lineEvaluated ? r2(linePct) : 0,
+      perNoteMelody: aggregatedPerNoteMelody as any,
+      linePerEvent: aggregatedLinePerEvent as any,
+    },
+    intervals: {
+      correctRatio: r2(intervalsRatio),
+      classes: aggregatedIntervals as any,
+    },
+  } as TakeScore;
+}
+
 export default function TrainingGame({
   title = "Training",
   sessionConfig = DEFAULT_SESSION_CONFIG,
   studentRowId = null,
   rangeLowLabel = null,
   rangeHighLabel = null,
+  lessonSlug = null,
+  sessionId = null,
 }: Props) {
   const { lowHz, highHz, loading: rangeLoading, error: rangeError } = useStudentRange(
     studentRowId,
@@ -197,8 +326,15 @@ export default function TrainingGame({
     },
   });
 
-  const shouldRecord = (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
-  useRecorderAutoSync({ enabled: step === "play", shouldRecord, isRecording, startRec, stopRec });
+  const shouldRecord =
+    (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
+  useRecorderAutoSync({
+    enabled: step === "play",
+    shouldRecord,
+    isRecording,
+    startRec,
+    stopRec,
+  });
 
   useLeadInMetronome({
     enabled: exerciseUnlocked, metronome, leadBeats,
@@ -221,7 +357,13 @@ export default function TrainingGame({
 
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
   const samplerAnchor: number | null = !pretestActive ? (loop.anchorMs ?? null) : null;
-  const sampler = usePitchSampler({ active: samplerActive, anchorMs: samplerAnchor, hz: liveHz, confidence, fps: 60 });
+  const sampler = usePitchSampler({
+    active: samplerActive,
+    anchorMs: samplerAnchor,
+    hz: liveHz,
+    confidence,
+    fps: 60,
+  });
 
   useEffect(() => {
     (async () => {
@@ -254,13 +396,14 @@ export default function TrainingGame({
   const rhythmEffective: RhythmEvent[] | null = fabric.syncRhythmFabric ?? null;
   const haveRhythm: boolean = rhythmLineEnabled && (rhythmEffective?.length ?? 0) > 0;
 
-  const { sessionScores, scoreTake } = useTakeScoring();
+  const { sessionScores, scoreTake } = useTakeScoring(); // no submit helper here
   const alignForScoring = useScoringAlignment();
 
   const [takeSnapshots, setTakeSnapshots] = useState<TakeSnapshot[]>([]);
   const phraseForTakeRef = useRef<Phrase | null>(null);
   const rhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
   const melodyRhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
+  const sessionSubmittedRef = useRef(false);
 
   useEffect(() => {
     if (!pretestActive && loop.loopPhase === "lead-in" && phrase) {
@@ -284,16 +427,65 @@ export default function TrainingGame({
         // Gesture latency is compensated inside useHandBeat via latencyMs
         const gestureLagSec = 0;
 
-        void scoreTake({
+        // Build shared scoring args
+        const scoringArgs = {
           phrase: usedPhrase,
-          bpm, den: ts.den, leadInSec,
-          pitchLagSec, gestureLagSec,
+          bpm,
+          den: ts.den,
+          leadInSec,
+          pitchLagSec,
+          gestureLagSec,
           snapshotSamples: () => sampler.snapshot(),
           snapshotBeats: () => hand.snapshotEvents(),
           melodyOnsetsSec: usedPhrase.notes.map((n) => n.startSec),
           rhythmOnsetsSec: makeOnsetsFromRhythm(usedRhythm, bpm, ts.den),
           align: alignForScoring,
-        });
+        };
+
+        // Compute locally and stash
+        const score = scoreTake(scoringArgs);
+
+        // Submit ONE aggregated row when exerciseLoops reached
+        const totalTakesNow = sessionScores.length + 1; // include this score
+        const maxTakes = Math.max(1, Number(exerciseLoops ?? 10));
+
+        if (
+          lessonSlug &&
+          sessionId &&
+          totalTakesNow >= maxTakes &&
+          !sessionSubmittedRef.current
+        ) {
+          sessionSubmittedRef.current = true;
+
+          const allScores = [...sessionScores, score];
+          const aggScore = aggregateForSubmission(allScores, [
+            ...takeSnapshots,
+            {
+              phrase: usedPhrase,
+              rhythm: usedRhythm ?? null,
+              melodyRhythm: melodyRhythmForTakeRef.current ?? null,
+            },
+          ]);
+
+          const snapshots = {
+            perTakeFinals: allScores.map((s, i) => ({ i, final: s.final.percent })),
+            perTakePitch: allScores.map((s, i) => ({ i, pct: s.pitch.percent })),
+          };
+
+          void fetch(`/api/lessons/${lessonSlug}/results`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              sessionId,
+              takeIndex: totalTakesNow - 1,
+              score: aggScore,
+              snapshots,
+            }),
+          }).catch(() => {});
+        }
+
+        // Side panel snapshot history (for review UI)
         setTakeSnapshots((xs) => [
           ...xs,
           {
@@ -311,12 +503,16 @@ export default function TrainingGame({
     bpm,
     ts.den,
     leadInSec,
-    loopingMode,
     alignForScoring,
     sampler,
     hand,
     rhythmEffective,
     scoreTake,
+    sessionScores.length,
+    lessonSlug,
+    sessionId,
+    exerciseLoops,
+    takeSnapshots,
   ]);
 
   const showLyrics = step === "play" && !!fabric.words?.length;
@@ -350,7 +546,7 @@ export default function TrainingGame({
       | "internal_arpeggio"
       | undefined) ?? undefined;
 
-  // ----- NEW: footer actions (available AFTER pretest) -----
+  // ----- footer actions (available AFTER pretest) -----
   const footerTonicMidi = useMemo<number | null>(() => {
     if (lowHz == null) return null;
     const lowM = Math.round(hzToMidi(lowHz));
