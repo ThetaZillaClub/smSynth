@@ -1,4 +1,4 @@
-// components/home/statsbento/MilestonesCard.tsx
+// components/home/statsbento/LessonsCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -18,7 +18,7 @@ const titleByLessonSlug: Record<string,string> = (() => {
   return m;
 })();
 
-export default function MilestonesCard() {
+export default function LessonsCard() {
   const supabase = React.useMemo(() => createClient(), []);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
@@ -94,21 +94,23 @@ export default function MilestonesCard() {
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Completed Lessons</h3>
         <div className="flex items-center gap-2">
           <span
-            className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]"
+            className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-[#0f0f0f] whitespace-nowrap leading-tight"
             style={{ borderColor: '#dcdcdc', background: '#fff' }}
+            title={`${completedCount} completed`}
           >
             {completedCount} completed
           </span>
           <span
-            className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]"
+            className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-[#0f0f0f] whitespace-nowrap leading-tight"
             style={{ borderColor: PR_COLORS.noteFill, background: '#fff' }}
+            title={`${masteredCount} mastered`}
           >
             {masteredCount} mastered
           </span>
         </div>
       </div>
 
-      {/* Body fills remaining height to match Intervals */}
+      {/* Body fills remaining height */}
       {loading ? (
         <div className="mt-3 flex-1 animate-pulse rounded-xl bg-[#e8e8e8]" />
       ) : recent.length === 0 ? (
@@ -117,10 +119,7 @@ export default function MilestonesCard() {
         </div>
       ) : (
         <div className="mt-3 flex-1 min-h-0">
-          <div
-            className="h-full overflow-auto"
-            style={{ borderColor: '#dcdcdc' }}
-          >
+          <div className="h-full overflow-auto">
             <div className="space-y-2">
               {recent.map((r) => (
                 <div

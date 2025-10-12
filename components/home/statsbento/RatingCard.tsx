@@ -58,30 +58,33 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
           ? `+${rating.delta.toFixed(1)}`
           : `${rating.delta.toFixed(1)}`;
 
+  const pad = compact ? 'p-4' : 'p-6';
+  const titleCls = compact ? 'text-sm font-semibold' : 'text-xl md:text-2xl font-semibold';
+  const valueCls = compact ? 'text-2xl font-semibold tracking-tight' : 'text-4xl font-semibold tracking-tight';
+  const bodyH = compact ? 'h-[48%]' : 'h-[64%]';
+
   return (
-    <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
-      {/* Row 1: title left, +/- right */}
+    <div className={`h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] ${pad} shadow-sm`}>
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-xl md:text-2xl font-semibold text-[#0f0f0f]">Rating</h3>
+        <h3 className={`${titleCls} text-[#0f0f0f]`}>Rating</h3>
         {!loading && rating && (
-          <div className="text-sm md:text-base text-[#0f0f0f]/80 tabular-nums">{deltaText}</div>
+          <div className={`text-[#0f0f0f]/80 tabular-nums ${compact ? 'text-xs' : 'text-sm md:text-base'}`}>{deltaText}</div>
         )}
       </div>
 
-      {/* Row 2: big value, left-aligned like the other cards */}
       {loading ? (
-        <div className="h-[64%] mt-3 animate-pulse rounded-xl bg-[#e8e8e8]" />
+        <div className={`${bodyH} mt-2 animate-pulse rounded-xl ${compact ? 'bg-[#efefef]' : 'bg-[#e8e8e8]'}`} />
       ) : !rating ? (
-        <div className="h-[64%] mt-3 flex items-center">
-          <div className="text-sm md:text-base text-[#0f0f0f]/80">Play a lesson to get rated.</div>
+        <div className={`${bodyH} mt-2 flex items-center`}>
+          <div className={`${compact ? 'text-xs' : 'text-sm md:text-base'} text-[#0f0f0f]/80`}>Play a lesson to get rated.</div>
         </div>
       ) : (
-        <div className="h-[64%] mt-2 flex items-center">
-          <div className="text-4xl font-semibold tracking-tight tabular-nums">{rating.value}</div>
+        <div className={`${bodyH} mt-1 flex items-center`}>
+          <div className={`${valueCls}`}>{rating.value}</div>
         </div>
       )}
 
-      {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
+      {err ? <div className={`${compact ? 'mt-1 text-[11px]' : 'mt-3 text-sm'} text-[#dc2626]`}>{err}</div> : null}
     </div>
   );
 }
