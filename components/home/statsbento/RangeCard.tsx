@@ -32,16 +32,16 @@ export default function RangeCard() {
   }, [supabase]);
 
   return (
-    <div className="rounded-2xl border border-[#d2d2d2] bg-[#fcfcfc] p-6 shadow-sm">
+    <div className="h-full rounded-2xl border border-[#d2d2d2] bg-[#fcfcfc] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-xl font-semibold text-[#0f0f0f]">Range</h3>
-        <div className="text-xs text-[#0f0f0f]/60">Saved vocal range</div>
+        {/* subtitle removed */}
       </div>
       {loading ? (
-        <div className="h-[75%] mt-3 animate-pulse rounded-xl bg-[#efefef]" />
+        <div className="h-[64%] mt-3 animate-pulse rounded-xl bg-[#efefef]" />
       ) : (
-        <div className="h-[75%] mt-2 flex items-center justify-center">
-          <div className="text-4xl font-semibold tracking-tight">{label}</div>
+        <div className="h-[64%] mt-2 flex items-center">
+          <div className="text-3xl font-semibold tracking-tight">{label}</div>
         </div>
       )}
       {err ? <div className="mt-2 text-xs text-[#dc2626]">{err}</div> : null}

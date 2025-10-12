@@ -25,7 +25,9 @@ export default function MilestonesCard() {
 
   const [completedCount, setCompletedCount] = React.useState(0);
   const [masteredCount, setMasteredCount] = React.useState(0);
-  const [recent, setRecent] = React.useState<Array<{ slug: string; title: string; pct: number; letter: string; when: string }>>([]);
+  const [recent, setRecent] = React.useState<
+    Array<{ slug: string; title: string; pct: number; letter: string; when: string }>
+  >([]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -86,49 +88,65 @@ export default function MilestonesCard() {
   }, [supabase]);
 
   return (
-    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
+    <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm flex flex-col">
+      {/* Header */}
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Completed Lessons</h3>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]" style={{ borderColor: '#dcdcdc', background: '#fff' }}>
+          <span
+            className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]"
+            style={{ borderColor: '#dcdcdc', background: '#fff' }}
+          >
             {completedCount} completed
           </span>
-          <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]" style={{ borderColor: PR_COLORS.noteFill, background: '#fff' }}>
+          <span
+            className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]"
+            style={{ borderColor: PR_COLORS.noteFill, background: '#fff' }}
+          >
             {masteredCount} mastered
           </span>
         </div>
       </div>
 
+      {/* Body fills remaining height to match Intervals */}
       {loading ? (
-        <div className="h-[75%] mt-3 animate-pulse rounded-xl bg-[#e8e8e8]" />
+        <div className="mt-3 flex-1 animate-pulse rounded-xl bg-[#e8e8e8]" />
       ) : recent.length === 0 ? (
-        <div className="h-[75%] mt-3 flex items-center justify-center text-base text-[#0f0f0f]">
+        <div className="mt-3 flex-1 grid place-items-center text-base text-[#0f0f0f]">
           Complete a lesson to see it here.
         </div>
       ) : (
-        <div className="mt-4 grid grid-cols-1 gap-2">
-          {recent.map((r) => (
-            <div
-              key={r.slug}
-              className="flex items-center justify-between rounded-xl border bg-white px-3 py-2"
-              style={{ borderColor: '#dcdcdc' }}
-              title={`${r.title} — ${r.when}`}
-            >
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-[#0f0f0f] truncate">{r.title}</div>
-                <div className="text-xs text-[#0f0f0f]">{r.when}</div>
-              </div>
-              <span className="inline-flex items-center gap-2">
-                <span className="text-sm font-medium text-[#0f0f0f]">{r.pct}% ({r.letter})</span>
-                <span
-                  className="inline-block w-2.5 h-2.5 rounded-full"
-                  style={{ background: MASTERED.has(r.letter) ? PR_COLORS.noteFill : BLUE_COMPLETED }}
-                />
-              </span>
+        <div className="mt-3 flex-1 min-h-0">
+          <div
+            className="h-full overflow-auto"
+            style={{ borderColor: '#dcdcdc' }}
+          >
+            <div className="space-y-2">
+              {recent.map((r) => (
+                <div
+                  key={r.slug}
+                  className="flex items-center justify-between rounded-lg border bg-white px-3 py-2"
+                  style={{ borderColor: '#e5e7eb' }}
+                  title={`${r.title} — ${r.when}`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-[#0f0f0f] truncate">{r.title}</div>
+                    <div className="text-xs text-[#0f0f0f]/80">{r.when}</div>
+                  </div>
+                  <span className="inline-flex items-center gap-2 shrink-0">
+                    <span className="text-sm font-medium text-[#0f0f0f]">{r.pct}% ({r.letter})</span>
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-full"
+                      style={{ background: MASTERED.has(r.letter) ? PR_COLORS.noteFill : BLUE_COMPLETED }}
+                    />
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       )}
+
       {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
     </div>
   );

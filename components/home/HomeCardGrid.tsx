@@ -24,7 +24,7 @@ export default function HomeCardGrid() {
           className={[
             // match AllCoursesCard look, just smaller and 3-up
             'group text-left rounded-xl bg-[#f9f9f9] border border-[#dcdcdc]',
-            'aspect-[4/3] min-h-[160px]',
+            'aspect-[2/1] min-h-[160px]',
             'p-4 md:p-5 flex flex-col items-start justify-between',
             'hover:shadow-md shadow-sm active:scale-[0.99] transition',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
