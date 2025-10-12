@@ -43,7 +43,7 @@ function useCanvas2d(width: number, height: number) {
   return { ref, dpr };
 }
 
-function RadialGauge({ value, label, delta, pool, height = 340 }: { value: number; label: string; delta?: number; pool?: string; height?: number }) {
+function RadialGauge({ value, label, delta, height = 340 }: { value: number; label: string; delta?: number; height?: number }) {
   const { ref, width } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, height);
   const [t, setT] = React.useState(0);
@@ -55,7 +55,7 @@ function RadialGauge({ value, label, delta, pool, height = 340 }: { value: numbe
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return; const ctx = c.getContext('2d'); if (!ctx) return;
     const W = width, H = height;
-    ctx.clearRect(0, 0, W, H); // transparent canvas
+    ctx.clearRect(0, 0, W, H);
 
     const cx = W / 2, cy = H / 2 + 8;
     const r = Math.min(W, H) * 0.34;
@@ -73,22 +73,20 @@ function RadialGauge({ value, label, delta, pool, height = 340 }: { value: numbe
     ctx.strokeStyle = PR_COLORS.noteFill;
     ctx.beginPath(); ctx.arc(cx, cy, r, start, ang); ctx.stroke();
 
-    // label
+    // big number
     ctx.fillStyle = '#0f0f0f'; ctx.textAlign = 'center';
-    ctx.font = '700 44px ui-sans-serif, system-ui';
+    ctx.font = '700 48px ui-sans-serif, system-ui';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(label, cx, cy - 4);
 
-    // pool + delta
-    ctx.font = '14px ui-sans-serif, system-ui';
-    ctx.textBaseline = 'hanging';
-    const meta = pool ? `${pool}` : '—';
-    ctx.fillText(meta, cx, cy + 8);
+    // delta
     if (delta != null) {
       const txt = delta === 0 ? '±0.0' : delta > 0 ? `▲ +${delta.toFixed(1)}` : `▼ ${delta.toFixed(1)}`;
-      ctx.fillText(txt, cx, cy + 28);
+      ctx.font = '14px ui-sans-serif, system-ui';
+      ctx.textBaseline = 'hanging';
+      ctx.fillText(txt, cx, cy + 10);
     }
-  }, [canvasRef, width, height, value, label, delta, pool, t]);
+  }, [canvasRef, width, height, value, label, delta, t]);
 
   return <div ref={ref} className="relative w-full" style={{ height }}>
     <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block', borderRadius: 12 }} />
@@ -99,7 +97,7 @@ export default function RatingCard() {
   const supabase = React.useMemo(() => createClient(), []);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
-  const [rating, setRating] = React.useState<{ value: number; delta: number; pool: string } | null>(null);
+  const [rating, setRating] = React.useState<{ value: number; delta: number } | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -110,20 +108,23 @@ export default function RatingCard() {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id; if (!uid) throw new Error('No user');
 
+        // Pull all pools, pick overall as the highest current rating.
         const [ratings, events] = await Promise.all([
-          supabase.from('player_ratings').select('pool, rating, rd, vol, last_period').eq('uid', uid).order('rating', { ascending: false }),
-          supabase.from('rating_events').select('pool, period_end, rating_after, rating_before, uid').eq('uid', uid).order('period_end', { ascending: false }).limit(30),
+          supabase.from('player_ratings').select('pool, rating').eq('uid', uid),
+          supabase.from('rating_events').select('pool, period_end, rating_after, rating_before').eq('uid', uid).order('period_end', { ascending: false }).limit(100),
         ]);
         if (ratings.error) throw ratings.error;
         if (events.error) throw events.error;
 
-        const best = (ratings.data as any[] | null)?.[0] ?? null;
+        const all = (ratings.data as any[] | null) ?? [];
+        if (!all.length) { if (!cancelled) setRating(null); return; }
+
+        const best = all.reduce((a, b) => (a.rating >= b.rating ? a : b));
         let delta = 0;
-        if (best) {
-          const ev = (events.data as any[] | null)?.find(e => e.pool === best.pool);
-          if (ev) delta = Math.round((ev.rating_after - ev.rating_before) * 10) / 10;
-        }
-        if (!cancelled) setRating(best ? { value: Math.round(best.rating), delta, pool: best.pool } : null);
+        const ev = (events.data as any[] | null)?.find(e => e.pool === best.pool);
+        if (ev) delta = Math.round((ev.rating_after - ev.rating_before) * 10) / 10;
+
+        if (!cancelled) setRating({ value: Math.round(best.rating), delta });
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || String(e));
       } finally {
@@ -134,16 +135,10 @@ export default function RatingCard() {
   }, [supabase]);
 
   return (
-    <div
-      className={[
-        'relative rounded-2xl border p-6 shadow-sm',
-        'bg-gradient-to-b from-white to-[#f7f7f7] border-[#d2d2d2]',
-      ].join(' ')}
-    >
-      <div className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl" style={{ background: PR_COLORS.noteFill }} />
+    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Rating</h3>
-        <div className="text-sm text-[#0f0f0f]">{rating?.pool ?? '—'}</div>
+        {/* no pool/lesson labels — overall only */}
       </div>
       {loading ? (
         <div className="h-[75%] mt-4 animate-pulse rounded-xl bg-[#e8e8e8]" />
@@ -156,7 +151,6 @@ export default function RatingCard() {
           value={clamp((rating.value - 800) / (2300 - 800))}
           label={`${rating.value}`}
           delta={rating.delta}
-          pool={rating.pool}
           height={340}
         />
       )}

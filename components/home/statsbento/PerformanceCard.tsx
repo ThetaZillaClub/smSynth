@@ -52,8 +52,8 @@ function useCanvas2d(width: number, height: number) {
 /* ─────────── vertical thin bars canvas ─────────── */
 function VerticalTimeBars({
   rows,
-  height = 340,
-  stickW = 10,
+  height = 360,
+  stickW = 12,
   gap = 12,
 }: {
   rows: { day: string; final: number; avg: number }[];
@@ -71,21 +71,27 @@ function VerticalTimeBars({
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
     const W = width, H = height;
-    ctx.clearRect(0, 0, W, H); // ← transparent canvas (no gray fill)
+    ctx.clearRect(0, 0, W, H);
 
-    const pad = { l: 20, r: 20, t: 12, b: 42 };
+    const pad = { l: 48, r: 16, t: 12, b: 48 };
     const iw = Math.max(10, W - pad.l - pad.r);
     const ih = Math.max(10, H - pad.t - pad.b);
     const baseline = pad.t + ih;
 
-    // grid
+    // grid + Y labels (0–100%)
     const ticks = 4;
+    ctx.font = '13px ui-sans-serif, system-ui';
+    ctx.fillStyle = '#0f0f0f';
     for (let i = 0; i <= ticks; i++) {
       const y = Math.round(pad.t + (ih * i) / ticks) + 0.5;
       const major = i % 2 === 0;
       ctx.strokeStyle = major ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
       ctx.lineWidth = major ? 1.25 : 0.75;
       ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + iw, y); ctx.stroke();
+
+      const val = Math.round((100 * (ticks - i)) / ticks);
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(`${val}%`, pad.l - 8, y);
     }
 
     const n = rows.length;
@@ -105,7 +111,7 @@ function VerticalTimeBars({
     }
 
     const labelStep = Math.max(1, Math.ceil(n / 10));
-    ctx.fillStyle = '#0f0f0f'; ctx.font = '12px ui-sans-serif, system-ui';
+    ctx.fillStyle = '#0f0f0f'; ctx.font = '13px ui-sans-serif, system-ui';
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
 
     for (let i = 0; i < n; i++) {
@@ -118,16 +124,20 @@ function VerticalTimeBars({
       ctx.strokeStyle = PR_COLORS.noteStroke; ctx.lineWidth = 1;
       ctx.strokeRect(x + 0.5, y + 0.5, stickW, h);
 
-      if (i % labelStep === 0) ctx.fillText(rows[i].day, x + stickW / 2, baseline + 8);
+      if (i % labelStep === 0) ctx.fillText(rows[i].day, x + stickW / 2, baseline + 10);
     }
 
-    // latest dot accent
+    // latest dot + value label
     if (n >= 1) {
       const i = n - 1;
       const cx = x0 + i * (stickW + gap) + stickW / 2;
       const y = baseline - ih * clamp((rows[i].final / 100) * t);
       ctx.fillStyle = PR_COLORS.dotFill; ctx.beginPath(); ctx.arc(cx, y, 6, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = 1.25; ctx.strokeStyle = PR_COLORS.dotStroke; ctx.stroke();
+
+      ctx.fillStyle = '#0f0f0f'; ctx.font = '12px ui-sans-serif, system-ui';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(`${Math.round(rows[i].final)}%`, cx + 10, y);
     }
   }, [canvasRef, width, height, rows, stickW, gap, t]);
 
@@ -183,14 +193,7 @@ export default function PerformanceCard() {
   }, [supabase]);
 
   return (
-    <div
-      className={[
-        'relative rounded-2xl border p-6 shadow-sm',
-        'bg-gradient-to-b from-white to-[#f7f7f7] border-[#d2d2d2]',
-      ].join(' ')}
-    >
-      {/* left accent rail */}
-      <div className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl" style={{ background: PR_COLORS.noteFill }} />
+    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Session Performance</h3>
         <div className="text-sm text-[#0f0f0f]">Final score by day · 5-day avg</div>
@@ -202,7 +205,7 @@ export default function PerformanceCard() {
           No sessions yet — run an exercise to unlock your dashboard.
         </div>
       ) : (
-        <VerticalTimeBars rows={rows} height={340} stickW={10} gap={12} />
+        <VerticalTimeBars rows={rows} height={360} stickW={12} gap={12} />
       )}
       {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
     </div>

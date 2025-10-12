@@ -9,7 +9,8 @@ import { PR_COLORS } from '@/utils/stage';
 import { COURSES } from '@/lib/courses/registry';
 
 const PASSED = new Set(['A','A-','B+','B','B-']);
-const MASTERED = new Set(['A','A-']);
+const MASTERED = new Set(['A','A+']); // A- is NOT mastery
+const BLUE_COMPLETED = '#3b82f6'; // RhythmRoll blue
 
 const titleByLessonSlug: Record<string,string> = (() => {
   const m: Record<string,string> = {};
@@ -35,7 +36,6 @@ export default function MilestonesCard() {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id; if (!uid) throw new Error('No user');
 
-        // pull a decent slab, compute bests + recent passes
         const { data, error } = await supabase
           .from('lesson_results')
           .select('lesson_slug, created_at, final_percent')
@@ -86,17 +86,11 @@ export default function MilestonesCard() {
   }, [supabase]);
 
   return (
-    <div
-      className={[
-        'relative rounded-2xl border p-6 shadow-sm',
-        'bg-gradient-to-b from-white to-[#f7f7f7] border-[#d2d2d2]',
-      ].join(' ')}
-    >
-      <div className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl" style={{ background: PR_COLORS.noteFill }} />
+    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Completed Lessons</h3>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]" style={{ borderColor: PR_COLORS.gridMinor, background: '#fff' }}>
+          <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]" style={{ borderColor: '#dcdcdc', background: '#fff' }}>
             {completedCount} completed
           </span>
           <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-medium text-[#0f0f0f]" style={{ borderColor: PR_COLORS.noteFill, background: '#fff' }}>
@@ -106,9 +100,9 @@ export default function MilestonesCard() {
       </div>
 
       {loading ? (
-        <div className="h-[75%] mt-4 animate-pulse rounded-xl bg-[#e8e8e8]" />
+        <div className="h-[75%] mt-3 animate-pulse rounded-xl bg-[#e8e8e8]" />
       ) : recent.length === 0 ? (
-        <div className="h-[75%] mt-4 flex items-center justify-center text-base text-[#0f0f0f]">
+        <div className="h-[75%] mt-3 flex items-center justify-center text-base text-[#0f0f0f]">
           Complete a lesson to see it here.
         </div>
       ) : (
@@ -126,7 +120,10 @@ export default function MilestonesCard() {
               </div>
               <span className="inline-flex items-center gap-2">
                 <span className="text-sm font-medium text-[#0f0f0f]">{r.pct}% ({r.letter})</span>
-                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: MASTERED.has(r.letter) ? PR_COLORS.noteFill : PR_COLORS.dotFill }} />
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full"
+                  style={{ background: MASTERED.has(r.letter) ? PR_COLORS.noteFill : BLUE_COMPLETED }}
+                />
               </span>
             </div>
           ))}
