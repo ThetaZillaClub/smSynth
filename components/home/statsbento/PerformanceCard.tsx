@@ -245,9 +245,74 @@ function PerformanceLine({
     // Monotone slopes (no overshoot)
     const m = computeMonotoneSlopes(xs, ys);
 
+    // Helper to trace the curve
+    const traceCurve = () => {
+      ctx.moveTo(xs[0], ys[0]);
+      for (let i = 0; i < n - 1; i++) {
+        const x1 = xs[i],   y1 = ys[i];
+        const x2 = xs[i+1], y2 = ys[i+1];
+        const h = x2 - x1 || 1;
+
+        const cx1x = x1 + h/3;
+        let   cx1y = y1 + (m[i]   * h)/3;
+        const cx2x = x2 - h/3;
+        let   cx2y = y2 - (m[i+1] * h)/3;
+
+        cx1y = clamp(cx1y, pad.t, baseline);
+        cx2y = clamp(cx2y, pad.t, baseline);
+
+        ctx.bezierCurveTo(cx1x, cx1y, cx2x, cx2y, x2, y2);
+      }
+    };
+
     // Clip for chart content (labels drawn after)
     ctx.save();
     ctx.beginPath(); ctx.rect(plotL, pad.t, plotW, ih); ctx.clip();
+
+    /* ───── Elegant translucent area fill under the line ───── */
+    if (n >= 1) {
+      ctx.save();
+      // Build a closed path from baseline → curve → baseline
+      ctx.beginPath();
+      ctx.moveTo(xs[0], baseline);
+      ctx.lineTo(xs[0], ys[0]);
+      for (let i = 0; i < n - 1; i++) {
+        const x1 = xs[i],   y1 = ys[i];
+        const x2 = xs[i+1], y2 = ys[i+1];
+        const h = x2 - x1 || 1;
+
+        const cx1x = x1 + h/3;
+        let   cx1y = y1 + (m[i]   * h)/3;
+        const cx2x = x2 - h/3;
+        let   cx2y = y2 - (m[i+1] * h)/3;
+
+        cx1y = clamp(cx1y, pad.t, baseline);
+        cx2y = clamp(cx2y, pad.t, baseline);
+
+        ctx.bezierCurveTo(cx1x, cx1y, cx2x, cx2y, x2, y2);
+      }
+      ctx.lineTo(xs[n - 1], baseline);
+      ctx.closePath();
+
+      // Vertical gradient that softly fades to transparent at the baseline
+      const grad = ctx.createLinearGradient(0, pad.t, 0, baseline);
+      grad.addColorStop(0.00, 'rgba(34,197,94,0.22)'); // lush near the line
+      grad.addColorStop(0.60, 'rgba(34,197,94,0.10)');
+      grad.addColorStop(1.00, 'rgba(34,197,94,0.02)'); // whisper at the bottom
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Optional gentle glow just under the curve for extra elegance
+      ctx.beginPath();
+      traceCurve();
+      ctx.lineWidth = LINE_WIDTH + 3;
+      ctx.strokeStyle = 'rgba(34,197,94,0.18)';
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      ctx.restore();
+    }
 
     // Smooth dark-green line (rounded)
     ctx.lineWidth = LINE_WIDTH;
@@ -255,23 +320,7 @@ function PerformanceLine({
     ctx.lineCap = 'round';
     ctx.strokeStyle = LINE_COLOR;
     ctx.beginPath();
-    ctx.moveTo(xs[0], ys[0]);
-    for (let i = 0; i < n - 1; i++) {
-      const x1 = xs[i],   y1 = ys[i];
-      const x2 = xs[i+1], y2 = ys[i+1];
-      const h = x2 - x1 || 1;
-
-      const cx1x = x1 + h/3;           // ← const (never reassigned)
-      let   cx1y = y1 + (m[i]   * h)/3;
-      const cx2x = x2 - h/3;           // ← const (never reassigned)
-      let   cx2y = y2 - (m[i+1] * h)/3;
-
-      // keep curve within the 0–100 band
-      cx1y = clamp(cx1y, pad.t, baseline);
-      cx2y = clamp(cx2y, pad.t, baseline);
-
-      ctx.bezierCurveTo(cx1x, cx1y, cx2x, cx2y, x2, y2);
-    }
+    traceCurve();
     ctx.stroke();
 
     // Dots (light fill + dark stroke) with smooth cross-fade sizing

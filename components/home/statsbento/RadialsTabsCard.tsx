@@ -10,14 +10,11 @@ type TabKey = 'pitch' | 'intervals';
 export default function RadialsTabsCard() {
   const [active, setActive] = React.useState<TabKey>('pitch');
 
-  // Mirror the courses header tab styles
   const base =
-    // ⬇️ add rounded corners to just the outer buttons + better focus ring
     'w-full h-10 md:h-12 text-sm md:text-base font-medium flex items-center justify-center transition select-none first:rounded-tl-2xl last:rounded-tr-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-black/10';
   const activeCls = 'bg-[#f9f9f9] text-[#0f0f0f]';
   const idleCls = 'hover:bg-[#f5f5f5] active:bg-[#f5f5f5] text-[#0f0f0f]';
 
-  // Nudge chart libs when a hidden tab becomes visible
   React.useEffect(() => {
     const fire = () => {
       try {
@@ -34,43 +31,62 @@ export default function RadialsTabsCard() {
   }, [active]);
 
   const isPitch = active === 'pitch';
-
-  // Inner gutter to match other cards
   const innerPad = 'px-2 md:px-3 lg:px-4';
 
+  const onTablistKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setActive((prev) => (prev === 'pitch' ? 'intervals' : 'pitch'));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setActive('pitch');
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setActive('intervals');
+    }
+  };
+
   return (
-    // SINGLE shell using the same chrome as other cards
-    <div className="min-h[360px] rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] shadow-sm flex flex-col">
+    <div className="min-h-[360px] rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] shadow-sm flex flex-col">
       {/* Tabs */}
-      {/* ⬇️ give the header the same rounded top corners and clip inside backgrounds */}
       <div className="bg-[#f2f2f2] border-b border-[#d7d7d7] rounded-t-2xl overflow-hidden">
-        <div className="grid grid-cols-2">
+        <div
+          className="grid grid-cols-2"
+          role="tablist"
+          aria-orientation="horizontal"
+          aria-label="Radials tabs"
+          onKeyDown={onTablistKey}
+        >
           <button
             id="tab-pitch"
             type="button"
+            role="tab"
+            aria-selected={isPitch}
+            tabIndex={isPitch ? 0 : -1}
             className={[base, isPitch ? activeCls : idleCls].join(' ')}
             onClick={() => setActive('pitch')}
             aria-controls="panel-pitch"
-            aria-selected={isPitch}
           >
             Pitch Focus
           </button>
           <button
             id="tab-intervals"
             type="button"
+            role="tab"
+            aria-selected={!isPitch}
+            tabIndex={!isPitch ? 0 : -1}
             className={[base, !isPitch ? activeCls : idleCls].join(' ')}
             onClick={() => setActive('intervals')}
             aria-controls="panel-intervals"
-            aria-selected={!isPitch}
           >
             Intervals
           </button>
         </div>
       </div>
 
-      {/* Body: ghost sizer is in-flow (defines height); panels overlay & fade (no reflow) */}
+      {/* Body */}
       <div className="relative p-6">
-        {/* 👻 Ghost sizer — must mirror inner padding so the square matches real chart width */}
+        {/* 👻 Ghost sizer */}
         <div aria-hidden className={`invisible pointer-events-none ${innerPad}`}>
           <div className="flex items-baseline justify-between gap-3">
             <h3 className="text-2xl font-semibold">.</h3>
@@ -80,7 +96,7 @@ export default function RadialsTabsCard() {
           <div className="mt-3 h-5" />
         </div>
 
-        {/* Overlay container with the same inner gutters */}
+        {/* Overlay container */}
         <div className={`absolute inset-10 ${innerPad}`}>
           <div
             id="panel-pitch"
@@ -88,7 +104,6 @@ export default function RadialsTabsCard() {
             aria-labelledby="tab-pitch"
             className={`absolute inset-0 transition-opacity duration-150 transform-gpu ${isPitch ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           >
-            {/* frameless: content only; gutters provided by overlay container */}
             <PitchFocusCard frameless />
           </div>
 

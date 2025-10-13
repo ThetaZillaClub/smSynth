@@ -4,8 +4,6 @@ import * as React from 'react';
 import { HomeResultsProvider } from './data/HomeResultsProvider';
 import PerformanceCard from './statsbento/PerformanceCard';
 import RatingCard from './statsbento/RatingCard';
-import PitchFocusCard from './statsbento/PitchFocusCard';
-import IntervalsCard from './statsbento/IntervalsCard';
 import LessonsCard from './statsbento/LessonsCard';
 import RangeCard from './statsbento/RangeCard';
 import CompletedCountCard from './statsbento/CompletedCountCard';

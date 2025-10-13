@@ -9,7 +9,7 @@ import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 const PASSED = new Set(['A','A-','B+','B','B-']);
 const MASTERED = new Set(['A','A+']); // A- is NOT mastery
-const BLUE_COMPLETED = '#3b82f6'; // RhythmRoll blue
+const BLUE_COMPLETED = '#3b82f6';
 
 const titleByLessonSlug: Record<string,string> = (() => {
   const m: Record<string,string> = {};
@@ -20,28 +20,13 @@ const titleByLessonSlug: Record<string,string> = (() => {
 export default function LessonsCard() {
   const { rows: baseRows, loading, error: baseErr } = useHomeResults();
 
-  const { completedCount, masteredCount, recent } = React.useMemo(() => {
+  const recent = React.useMemo(() => {
     const rows = baseRows ?? [];
-
-    // Best score per lesson (for completed/mastered counts)
-    const bestBy: Record<string, number> = {};
-    for (const r of rows) {
-      const slug = String(r.lesson_slug ?? '');
-      if (!slug) continue;
-      const pct = Number(r.final_percent ?? 0);
-      bestBy[slug] = Math.max(bestBy[slug] ?? 0, pct);
-    }
-
-    const completedCount = Object.values(bestBy)
-      .filter(v => PASSED.has(letterFromPercent(v))).length;
-
-    const masteredCount = Object.values(bestBy)
-      .filter(v => MASTERED.has(letterFromPercent(v))).length;
 
     // Most recent *unique* passed lessons (up to 6)
     const seen = new Set<string>();
-    const recent: Array<{ slug: string; title: string; pct: number; letter: string; when: string }> = [];
-    for (let i = rows.length - 1; i >= 0 && recent.length < 6; i--) {
+    const out: Array<{ slug: string; title: string; pct: number; letter: string; when: string }> = [];
+    for (let i = rows.length - 1; i >= 0 && out.length < 6; i--) {
       const r = rows[i];
       const slug = String(r.lesson_slug ?? '');
       if (!slug || seen.has(slug)) continue;
@@ -50,7 +35,7 @@ export default function LessonsCard() {
       const letter = letterFromPercent(pct);
       if (PASSED.has(letter)) {
         seen.add(slug);
-        recent.push({
+        out.push({
           slug,
           title: titleByLessonSlug[slug] ?? slug,
           pct: Math.round(pct),
@@ -59,68 +44,97 @@ export default function LessonsCard() {
         });
       }
     }
-
-    return { completedCount, masteredCount, recent };
+    return out;
   }, [baseRows]);
+
+  /* Fixed-width progress bar so all rows align perfectly */
+  const Progress = ({ pct }: { pct: number }) => (
+    <div
+      className="relative h-2 w-full rounded-full bg-[#e9e9e9] overflow-hidden"
+      role="img"
+      aria-label={`Progress ${Math.round(pct)} percent`}
+      title={`${Math.round(pct)}%`}
+    >
+      <div
+        className="absolute inset-y-0 left-0 rounded-full"
+        style={{
+          width: `${Math.max(0, Math.min(100, pct))}%`,
+          background: 'linear-gradient(90deg, #bbf7d0, #22c55e)',
+        }}
+      />
+    </div>
+  );
+
+  /* Grade chip: blue ring, dot color = mastered? green : blue; text "<percent>% <letter>" */
+  const GradeChip = ({ pct, letter }: { pct: number; letter: string }) => {
+    const dotColor = MASTERED.has(letter) ? PR_COLORS.noteFill : BLUE_COMPLETED;
+    return (
+      <span
+        className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-white shadow-sm ring-1 ring-[#3b82f6] border border-transparent whitespace-nowrap leading-tight"
+        title={`${pct}% ${letter}`}
+      >
+        <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ background: dotColor }} />
+        {pct}% {letter}
+      </span>
+    );
+  };
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
-      {/* Header */}
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-2xl font-semibold text-[#0f0f0f]">Completed Lessons</h3>
-        <div className="flex items-center gap-2">
-          <span
-            className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-[#0f0f0f] whitespace-nowrap leading-tight"
-            style={{ borderColor: '#dcdcdc', background: '#fdfdfd' }}
-            title={`${completedCount} completed`}
-          >
-            {completedCount} completed
-          </span>
-          <span
-            className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-[#0f0f0f] whitespace-nowrap leading-tight"
-            style={{ borderColor: PR_COLORS.noteFill, background: '#fff' }}
-            title={`${masteredCount} mastered`}
-          >
-            {masteredCount} mastered
-          </span>
-        </div>
+      {/* Header — simple and contained */}
+      <div className="pb-3 border-b border-[#e5e7eb]">
+        <h3 className="text-xl md:text-2xl font-semibold tracking-tight text-[#0f0f0f]">
+          Completed Lessons
+        </h3>
       </div>
 
       {/* Body fills remaining height */}
       {loading ? (
-        <div className="mt-3 flex-1 animate-pulse rounded-xl bg-[#e8e8e8]" />
+        <div className="mt-3 flex-1 min-h-0">
+          <div className="space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-14 rounded-xl bg-[#e8e8e8] animate-pulse" />
+            ))}
+          </div>
+        </div>
       ) : recent.length === 0 ? (
         <div className="mt-3 flex-1 grid place-items-center text-base text-[#0f0f0f]">
           Complete a lesson to see it here.
         </div>
       ) : (
         <div className="mt-3 flex-1 min-h-0">
-          <div className="h-full overflow-auto">
+          <ul role="list" aria-label="Recent passed lessons" className="h-full overflow-auto">
             <div className="space-y-2">
               {recent.map((r) => (
-                <div
+                <li
                   key={r.slug}
-                  className="flex items-center justify-between rounded-lg border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8] shadow-sm px-3 py-2"
+                  role="listitem"
+                  /* Compact two-line left column; fixed middle column keeps bars aligned */
+                  className="grid grid-cols-[minmax(0,1fr)_8rem_auto] items-center gap-3
+                             rounded-xl border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8] px-4 py-3 shadow-sm transition
+                             hover:shadow-md hover:border-[#dcdcdc] focus-within:shadow-md focus-within:border-[#dcdcdc]"
                   style={{ borderColor: '#e5e7eb' }}
                   title={`${r.title} — ${r.when}`}
                 >
+                  {/* Left: title + date (second line) */}
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-[#0f0f0f] truncate">{r.title}</div>
-                    <div className="text-xs text-[#0f0f0f]/80">{r.when}</div>
+                    <div className="text-xs text-[#0f0f0f]/65">{r.when}</div>
                   </div>
-                  <span className="inline-flex items-center gap-2 shrink-0">
-                    <span className="text-sm font-medium text-[#0f0f0f]">
-                      {r.pct}% ({r.letter})
-                    </span>
-                    <span
-                      className="inline-block w-2.5 h-2.5 rounded-full"
-                      style={{ background: MASTERED.has(r.letter) ? PR_COLORS.noteFill : BLUE_COMPLETED }}
-                    />
-                  </span>
-                </div>
+
+                  {/* Middle: progress — fixed width so all bars line up */}
+                  <div className="w-full">
+                    <Progress pct={r.pct} />
+                  </div>
+
+                  {/* Right: grade chip with dot */}
+                  <div className="justify-self-end">
+                    <GradeChip pct={r.pct} letter={r.letter} />
+                  </div>
+                </li>
               ))}
             </div>
-          </div>
+          </ul>
         </div>
       )}
 

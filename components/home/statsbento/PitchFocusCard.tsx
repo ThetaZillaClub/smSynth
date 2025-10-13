@@ -53,6 +53,7 @@ export default function PitchFocusCard({
 
         if (pQ.error) throw pQ.error;
 
+        type PitchNoteRow = { result_id: number; midi: number; n: number | null; ratio: number | null; cents_mae: number | null };
         const rows: PitchNoteRow[] = (pQ.data ?? []) as PitchNoteRow[];
 
         const byMidi = new Map<number, { w: number; on: number; mae: number }>();
@@ -93,20 +94,26 @@ export default function PitchFocusCard({
   const isLoading = baseLoading || loading;
   const errorMsg = baseErr || err;
 
+  // Colors to match the rest of the UI
+  const BLUE = '#3b82f6';
+  const GREEN = PR_COLORS.noteFill;
+
+  const LegendPill = ({ dot, label, border }: { dot: string; label: string; border: string }) => (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-white text-[#0f0f0f] shadow-sm ring-1 ring-[#3b82f6] border"
+      style={{ borderColor: border }}
+    >
+      <span className="mr-1.5 inline-block w-2.5 h-2.5 rounded-full" style={{ background: dot }} />
+      {label}
+    </span>
+  );
+
   const Inner = () => (
     <>
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-2xl font-semibold text-[#0f0f0f]">Pitch Focus</h3>
-        <div className="text-sm text-[#0f0f0f] flex items-center gap-3">
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
-            On-pitch %
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }} />
-            MAE ¢
-          </span>
-        </div>
+      {/* No big heading — tabs already provide the context. Keep only the legend, right-aligned. */}
+      <div className="flex items-center justify-end gap-2 sm:gap-3">
+        <LegendPill dot={GREEN} label="On-pitch %" border={GREEN} />
+        <LegendPill dot={BLUE}  label="MAE ¢"     border={BLUE} />
       </div>
 
       {isLoading ? (

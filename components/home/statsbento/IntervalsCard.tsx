@@ -65,13 +65,8 @@ const normFromDataset = (vals: number[]): ((v: number) => number) => {
   return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
 };
 
-function PolarAreaIntervals({
-  items,
-}: {
-  items: Item[];
-}) {
+function PolarAreaIntervals({ items }: { items: Item[] }) {
   const { ref, width } = useMeasure();
-  // Use a pure CSS square; height derives from width → no fallback jumps
   const side = Math.max(0, width);
   const { ref: canvasRef } = useCanvas2d(side, side);
 
@@ -94,9 +89,8 @@ function PolarAreaIntervals({
     ctx.clearRect(0, 0, W, Hpx);
 
     const minSide = Math.min(W, Hpx);
-    if (minSide < 64) return; // guard very small first pass
+    if (minSide < 64) return;
 
-    // ── radii + ring bounds (smaller chart + reserve margin for outside labels)
     const ringPad = 8;
     const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
     const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
@@ -105,11 +99,10 @@ function PolarAreaIntervals({
 
     const cx = W / 2, cy = Hpx / 2;
 
-    // dataset-normalized radii (normalize to OUTER bounds)
     const vals = items.map(it => clamp01(it.pct / 100));
     const norm = normFromDataset(vals);
 
-    // circular background fill
+    // background circle
     ctx.save();
     ctx.fillStyle = '#f4f4f4';
     ctx.beginPath();
@@ -117,7 +110,7 @@ function PolarAreaIntervals({
     ctx.fill();
     ctx.restore();
 
-    // background rings (thicker)
+    // background rings
     ctx.save();
     ctx.translate(cx, cy);
     const rings = 4;
@@ -136,9 +129,7 @@ function PolarAreaIntervals({
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
-    // responsive label sizing
     const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
-    // place labels just outside the last ring
     const lblR = Rmax + labelOutset * 0.9;
 
     ctx.save();
@@ -152,7 +143,6 @@ function PolarAreaIntervals({
       const u = norm(vals[i]);
       const rFill = r0 + (Rmax - r0) * u * t;
 
-      // hover underlay
       if (hover === i) {
         ctx.save();
         ctx.fillStyle = 'rgba(16,24,40,0.06)';
@@ -163,7 +153,6 @@ function PolarAreaIntervals({
         ctx.restore();
       }
 
-      // filled sector
       ctx.save();
       ctx.globalAlpha = 0.62;
       ctx.fillStyle = PR_COLORS.noteFill;
@@ -174,7 +163,6 @@ function PolarAreaIntervals({
       ctx.fill();
       ctx.restore();
 
-      // rim (thicker)
       ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
       ctx.lineWidth = 3;
@@ -183,7 +171,6 @@ function PolarAreaIntervals({
       ctx.stroke();
       ctx.restore();
 
-      // labels OUTSIDE the last ring
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
@@ -196,7 +183,6 @@ function PolarAreaIntervals({
       ctx.restore();
     }
 
-    // focus ring (thicker)
     if (hover != null) {
       const i = hover;
       const a0 = startBase + i * (sector + gapRad);
@@ -377,11 +363,23 @@ export default function IntervalsCard({
   const isLoading = baseLoading || loading;
   const errorMsg = baseErr || err;
 
+  const GREEN = PR_COLORS.noteFill;
+
+  const LegendPill = ({ dot, label, border }: { dot: string; label: string; border: string }) => (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-white text-[#0f0f0f] shadow-sm ring-1 ring-[#3b82f6] border"
+      style={{ borderColor: border }}
+    >
+      <span className="mr-1.5 inline-block w-2.5 h-2.5 rounded-full" style={{ background: dot }} />
+      {label}
+    </span>
+  );
+
   const Inner = () => (
     <>
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-2xl font-semibold text-[#0f0f0f]">Intervals</h3>
-        <div className="text-sm text-[#0f0f0f]">Correct % by class</div>
+      {/* No big heading — tabs already describe the panel. Keep a tidy legend right-aligned. */}
+      <div className="flex items-center justify-end gap-2 sm:gap-3">
+        <LegendPill dot={GREEN} label="Correct %" border={GREEN} />
       </div>
 
       {isLoading ? (
