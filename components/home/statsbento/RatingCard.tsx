@@ -21,26 +21,53 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
         setLoading(true); setErr(null);
         await ensureSessionReady(supabase, 2000);
 
-        const [ratings, events] = await Promise.all([
-          supabase.from('player_ratings').select('pool, rating').eq('uid', uid),
-          supabase.from('rating_events')
-            .select('pool, period_end, rating_after, rating_before')
-            .eq('uid', uid)
-            .order('period_end', { ascending: false })
-            .limit(100),
-        ]);
-        if (ratings.error) throw ratings.error;
-        if (events.error) throw events.error;
+        // Single query: pull recent events and compute latest-per-pool + best pool
+        const evQ = await supabase
+          .from('rating_events')
+          .select('pool, period_end, rating_after, rating_before')
+          .eq('uid', uid)
+          .order('period_end', { ascending: false })
+          .limit(1000);
+        if (evQ.error) throw evQ.error;
 
-        const all = (ratings.data as any[] | null) ?? [];
-        if (!all.length) { if (!cancelled) setRating(null); return; }
+        const rows = (evQ.data as any[] | null) ?? [];
+        if (!rows.length) {
+          if (!cancelled) setRating(null);
+          return;
+        }
 
-        const best = all.reduce((a, b) => (a.rating >= b.rating ? a : b));
-        let delta = 0;
-        const ev = (events.data as any[] | null)?.find(e => e.pool === best.pool);
-        if (ev) delta = Math.round((ev.rating_after - ev.rating_before) * 10) / 10;
+        // Latest event per pool (since rows are desc by period_end)
+        const latestByPool = new Map<string, { after: number; before: number }>();
+        for (const r of rows) {
+          const p = String(r.pool ?? '');
+          if (!p || latestByPool.has(p)) continue;
+          latestByPool.set(p, {
+            after: Number(r.rating_after ?? 0),
+            before: Number(r.rating_before ?? 0),
+          });
+        }
 
-        if (!cancelled) setRating({ value: Math.round(best.rating), delta });
+        if (!latestByPool.size) {
+          if (!cancelled) setRating(null);
+          return;
+        }
+
+        // Pick the pool with the highest current rating (rating_after)
+        let bestPool: string | null = null;
+        let bestAfter = -Infinity;
+        let bestBefore = 0;
+        for (const [pool, v] of latestByPool.entries()) {
+          if (v.after >= bestAfter) {
+            bestAfter = v.after;
+            bestBefore = v.before;
+            bestPool = pool;
+          }
+        }
+
+        const value = Math.round(bestAfter);
+        const delta = Math.round((bestAfter - bestBefore) * 10) / 10;
+
+        if (!cancelled) setRating({ value, delta });
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || String(e));
       } finally {

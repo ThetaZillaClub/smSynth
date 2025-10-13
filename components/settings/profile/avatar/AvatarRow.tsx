@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { createClient } from '@/lib/supabase/client';
 import { useSupabaseUpload } from '@/hooks/setup/use-supabase-upload';
 import { Dropzone, DropzoneContent, DropzoneEmptyState } from '@/components/auth/dropzone';
+import { STUDENT_IMAGE_HINT_KEY } from '@/components/sidebar/types';
 
 type Props = {
   name: string;
@@ -22,12 +23,10 @@ export default function AvatarRow(props: Props) {
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(initialAvatarUrl);
   const [err, setErr] = React.useState<string | null>(null);
 
-  // Keep internal state in sync if parent updates props (e.g., after bootstrap finishes)
   React.useEffect(() => { setAvatarUrl(initialAvatarUrl ?? null); }, [initialAvatarUrl]);
 
-  // Dropzone is only relevant when authenticated
   const dz = useSupabaseUpload({
-    bucketName: 'avatars',
+    bucketName: 'model-images',
     path: uid ? uid : undefined,              // store under user folder (uid/filename)
     allowedMimeTypes: ['image/*'],
     maxFiles: 1,
@@ -36,18 +35,20 @@ export default function AvatarRow(props: Props) {
     upsert: true,
   });
 
-  // When upload succeeds, write image_path to the LATEST models row and resolve a signed URL
   React.useEffect(() => {
     (async () => {
-      if (!uid) return;                        // should always exist on /settings
+      if (!uid) return;
       if (!dz.isSuccess || dz.successes.length === 0) return;
 
       try {
         setErr(null);
         const filename = dz.successes[0];
-        const path = `${uid}/${filename}`;
 
-        // Find latest model id for this user
+        // Storage object key and full DB path (with bucket)
+        const objectKey = `${uid}/${filename}`;                  // storage object
+        const dbPath = `avatars/${objectKey}`;                   // what we persist & hint
+
+        // Find latest model id
         const { data: latest, error: findErr } = await supabase
           .from('models')
           .select('id')
@@ -59,22 +60,25 @@ export default function AvatarRow(props: Props) {
         if (findErr) throw findErr;
         if (!latest?.id) throw new Error('No model row to update.');
 
-        // Update models.image_path
+        // Update models.image_path to include the BUCKET prefix
         const { error: updErr } = await supabase
           .from('models')
-          .update({ image_path: path })
+          .update({ image_path: dbPath })
           .eq('id', latest.id);
 
         if (updErr) throw updErr;
 
-        // Resolve a signed URL for the new avatar
-        const { data, error } = await supabase.storage.from('avatars').createSignedUrl(path, 600);
+        // Resolve a signed URL for immediate preview
+        const { data, error } = await supabase.storage.from('model-images').createSignedUrl(objectKey, 600);
         if (error) throw error;
 
         const url = data?.signedUrl ?? null;
         setAvatarUrl(url);
-        try { localStorage.setItem('ptp:studentImagePath', path); } catch {}
-        onAvatarChanged?.(url, path);
+
+        // Persist hint (same value other readers expect)
+        try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, dbPath); } catch {}
+
+        onAvatarChanged?.(url, dbPath);
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : 'Failed to save new avatar.';
         setErr(message);
@@ -97,19 +101,16 @@ export default function AvatarRow(props: Props) {
             priority
           />
         ) : (
-          // No avatar yet -> square dropzone with big centered “?”
           <Dropzone
             {...dz}
             className="absolute inset-0 grid place-items-center bg-white border-none p-0"
           >
-            {/* Ensure the placeholder is perfectly centered */}
             <DropzoneEmptyState className="w-full h-full grid place-items-center" />
             <DropzoneContent className="w-full" />
           </Dropzone>
         )}
       </div>
 
-      {/* Display name aligned with top of avatar */}
       <div className="min-w-0">
         <h3 className="text-2xl font-semibold text-[#0f0f0f] truncate">{name}</h3>
         {err && <p className="text-sm text-red-600 mt-1">{err}</p>}

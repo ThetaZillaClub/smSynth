@@ -106,7 +106,8 @@ export function useSidebarBootstrap(opts: {
 
       if (imagePath) {
         try {
-          const url = await getImageUrlCached(supabase, imagePath);
+          const url = await getImageUrlCached(supabase, imagePath, { defaultBucket: 'model-images' });
+
           if (!cancelled) setStudentImgUrl(url ?? authAvatar ?? null);
           try {
             if (!hintedPath && row?.image_path) localStorage.setItem(STUDENT_IMAGE_HINT_KEY, row.image_path);

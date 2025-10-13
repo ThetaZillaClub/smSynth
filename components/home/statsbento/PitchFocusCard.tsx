@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { midiToNoteName } from '@/utils/pitch/pitchMath';
 import { PR_COLORS } from '@/utils/stage';
-import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
+import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
@@ -54,15 +54,12 @@ function useCanvas2d(width: number, height: number) {
 /* ---------------- polar area chart ---------------- */
 type Item = { label: string; v1: number; v2: number }; // v1 = on-pitch %, v2 = MAE ¢
 
-// Dataset-bounds normalization (min→0, max→1), with gentle gamma to
-// keep weak values visible without biasing everything near the outer rim.
 const GAMMA = 0.9;
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
   const vMin = Math.min(...vals);
   const vMax = Math.max(...vals);
   const spread = vMax - vMin;
   if (!isFinite(vMin) || !isFinite(vMax) || spread <= 1e-6) {
-    // all equal — give a consistent mid/high fill so the chart isn't invisible
     return () => Math.pow(0.75, GAMMA);
   }
   return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
@@ -71,7 +68,7 @@ const normFromDataset = (vals: number[]): ((v: number) => number) => {
 function PolarArea({
   items,
   max1 = 100,      // on-pitch %
-  max2 = 120,      // MAE ¢ (higher is worse; drawn inversely)
+  max2 = 120,      // MAE ¢
   height = 360,
 }: {
   items: Item[];
@@ -100,26 +97,23 @@ function PolarArea({
     const H = Math.max(1, height);
     ctx.clearRect(0, 0, W, H);
 
-    // Guard against the first tiny layout pass
     const minSide = Math.min(W, H);
     if (minSide < 64) return;
 
-    // Radii (safe clamps)
     const ringPad = 8;
     const Rraw = minSide * 0.42;
-    const R = Math.max(ringPad + 12, Rraw);        // outer usable radius
-    const r0 = Math.max(0, R * 0.20);               // inner radius (donut)
-    const Rmax = Math.max(r0 + 6, R - ringPad);     // ensure outer ≥ inner + margin
+    const R = Math.max(ringPad + 12, Rraw);
+    const r0 = Math.max(0, R * 0.20);
+    const Rmax = Math.max(r0 + 6, R - ringPad);
 
     const cx = W / 2, cy = H / 2;
 
-    // Build dataset-normalizers (to OUTER BOUNDS)
-    const onVals  = items.map(it => clamp01(it.v1 / max1));           // 0..1 (higher is better)
-    const maeGood = items.map(it => clamp01(1 - it.v2 / max2));       // 0..1 (lower MAE → higher "goodness")
+    const onVals  = items.map(it => clamp01(it.v1 / max1));
+    const maeGood = items.map(it => clamp01(1 - it.v2 / max2));
     const normOn  = normFromDataset(onVals);
     const normMae = normFromDataset(maeGood);
 
-    // background rings (grid)
+    // background rings
     ctx.save();
     ctx.translate(cx, cy);
     const rings = 4;
@@ -131,12 +125,12 @@ function PolarArea({
     }
     ctx.restore();
 
-    // chart angles
+    // sectors
     const n = Math.max(1, items.length);
-    const gapRad = (Math.PI / 180) * 6; // gap between sectors
+    const gapRad = (Math.PI / 180) * 6;
     const totalGap = gapRad * n;
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
-    const startBase = -Math.PI / 2; // start at top
+    const startBase = -Math.PI / 2;
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -146,14 +140,12 @@ function PolarArea({
       const a1 = a0 + sector;
       const mid = (a0 + a1) / 2;
 
-      const it = items[i];
-      const uOn  = normOn(onVals[i]);         // dataset-normalized on-pitch
-      const uMae = normMae(maeGood[i]);       // dataset-normalized inverted MAE
+      const uOn  = normOn(onVals[i]);
+      const uMae = normMae(maeGood[i]);
 
-      const rMae = r0 + (Rmax - r0) * uMae * t;    // MAE radius (base layer)
-      const rOn  = r0 + (Rmax - r0) * uOn  * t;    // On-pitch radius (over layer)
+      const rMae = r0 + (Rmax - r0) * uMae * t;
+      const rOn  = r0 + (Rmax - r0) * uOn  * t;
 
-      // hover highlight underlay
       if (hover === i) {
         ctx.save();
         ctx.fillStyle = 'rgba(16,24,40,0.06)';
@@ -164,10 +156,10 @@ function PolarArea({
         ctx.restore();
       }
 
-      // --- LAYER 1: MAE FILLED SECTOR (teal, translucent) ---
+      // MAE layer
       ctx.save();
       ctx.globalAlpha = 0.35;
-      ctx.fillStyle = '#14b8a6'; // teal
+      ctx.fillStyle = '#14b8a6';
       ctx.beginPath();
       ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
       ctx.arc(0, 0, r0, a1, a0, true);
@@ -175,7 +167,7 @@ function PolarArea({
       ctx.fill();
       ctx.restore();
 
-      // --- LAYER 2: ON-PITCH FILLED SECTOR (note color, over MAE) ---
+      // On-pitch layer
       ctx.save();
       ctx.globalAlpha = 0.60;
       ctx.fillStyle = PR_COLORS.noteFill;
@@ -186,7 +178,7 @@ function PolarArea({
       ctx.fill();
       ctx.restore();
 
-      // Optional subtle rim for On-Pitch edge (kept crisp, not dashed)
+      // rim
       ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
       ctx.lineWidth = 1;
@@ -195,18 +187,18 @@ function PolarArea({
       ctx.stroke();
       ctx.restore();
 
-      // labels (outside)
+      // label
       const lblR = Rmax + 16;
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = '14px ui-sans-serif, system-ui';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(it.label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
+      ctx.fillText(items[i].label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
       ctx.restore();
     }
 
-    // focus ring around hovered sector
+    // focus ring
     if (hover != null) {
       const i = hover;
       const a0 = startBase + i * (sector + gapRad);
@@ -247,7 +239,6 @@ function PolarArea({
 
     if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
 
-    // sector math
     const startBase = -Math.PI / 2;
     let ang = Math.atan2(dy, dx);
     let rel = ang - startBase;
@@ -265,15 +256,12 @@ function PolarArea({
 
     setHover(idx);
 
-    // Dataset-normalized On-Pitch for tooltip placement
+    // place tooltip using dataset-normalized on-pitch radius
     const onVals  = items.map(it => clamp01(it.v1 / max1));
-    const maeGood = items.map(it => clamp01(1 - it.v2 / max2));
     const normOn  = normFromDataset(onVals);
-    // const normMae = normFromDataset(maeGood); // not needed for tip position
-
     const it = items[idx];
     const uOn = normOn(onVals[idx]);
-    const Rdraw = r0 + (Rmax - r0) * uOn * (/* same easing phase */ 1);
+    const Rdraw = r0 + (Rmax - r0) * uOn;
 
     const mid = (startBase + idx * cluster) + sector / 2;
     const tipX = clamp(cx + Math.cos(mid) * (Rdraw + 12), 8, W - 8);
@@ -333,33 +321,34 @@ function PolarArea({
 /* ---------------- card ---------------- */
 export default function PitchFocusCard() {
   const supabase = React.useMemo(() => createClient(), []);
-  const { uid } = useHomeBootstrap();
+  const { recentIds, loading: baseLoading, error: baseErr } = useHomeResults();
 
+  const [items, setItems] = React.useState<Array<{ label: string; v1: number; v2: number }>>([]);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
-  const [items, setItems] = React.useState<Array<{ label: string; v1: number; v2: number }>>([]);
 
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        setLoading(true); setErr(null);
-        await ensureSessionReady(supabase, 2000);
+        // Wait for base results if still loading
+        if (baseLoading) { setLoading(true); setErr(baseErr ?? null); return; }
 
-        const { data: results, error: rErr } = await supabase
-          .from('lesson_results')
-          .select('id, created_at')
-          .eq('uid', uid)
-          .order('created_at', { ascending: true })
-          .limit(60);
-        if (rErr) throw rErr;
-        const recentIds = (results ?? []).slice(-30).map((r: any) => r.id);
-        if (!recentIds.length) { if (!cancelled) setItems([]); return; }
+        setLoading(true); setErr(null);
+
+        // No recent results → empty state, no fetch
+        if (!recentIds.length) {
+          if (!cancelled) { setItems([]); setLoading(false); setErr(baseErr ?? null); }
+          return;
+        }
+
+        await ensureSessionReady(supabase, 2000);
 
         const pQ = await supabase
           .from('lesson_result_pitch_notes')
           .select('result_id, midi, n, ratio, cents_mae')
           .in('result_id', recentIds);
+
         if (pQ.error) throw pQ.error;
 
         const byMidi = new Map<number, { w: number; on: number; mae: number }>();
@@ -369,14 +358,15 @@ export default function PitchFocusCard() {
           const wt = g.w + w;
           g.on  = (g.on  * g.w + (p.ratio ?? 0)     * w) / wt;
           g.mae = (g.mae * g.w + (p.cents_mae ?? 0) * w) / wt;
-          g.w   = wt; byMidi.set(p.midi, g);
+          g.w   = wt;
+          byMidi.set(p.midi, g);
         }
 
         const full = Array.from(byMidi.entries()).map(([m, v]) => ({
           midi: m,
           label: NOTE(m),
-          v1: Math.round(v.on * 100),     // on-pitch %
-          v2: Math.round(v.mae),          // MAE ¢
+          v1: Math.round(v.on * 100),
+          v2: Math.round(v.mae),
           score: (1 - clamp(v.on, 0, 1)) * 0.6 + Math.min(1, v.mae / 120) * 0.4,
         }));
 
@@ -394,7 +384,10 @@ export default function PitchFocusCard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [supabase, uid]);
+  }, [supabase, recentIds, baseLoading, baseErr]);
+
+  const isLoading = baseLoading || loading;
+  const errorMsg = baseErr || err;
 
   return (
     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
@@ -412,7 +405,7 @@ export default function PitchFocusCard() {
         </div>
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-[#e8e8e8]" />
       ) : items.length === 0 ? (
         <div className="h-[78%] mt-2 flex items-center justify-center text-base text-[#0f0f0f]">
@@ -422,7 +415,7 @@ export default function PitchFocusCard() {
         <PolarArea items={items} max1={100} max2={120} height={360} />
       )}
 
-      {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
+      {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
     </div>
   );
 }

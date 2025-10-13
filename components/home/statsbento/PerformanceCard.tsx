@@ -2,11 +2,9 @@
 'use client';
 
 import * as React from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { ensureSessionReady } from '@/lib/client-cache';
 import { PR_COLORS } from '@/utils/stage';
 import { COURSES } from '@/lib/courses/registry';
-import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
+import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 /* ─────────── small utils ─────────── */
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
@@ -56,24 +54,22 @@ function useCanvas2d(width: number, height: number) {
   return { ref, dpr };
 }
 
-/* ─────────── chart ─────────── */
+/* ─────────── types ─────────── */
 type Components = {
   pitch?: number;    // %
   melody?: number;   // %
   line?: number;     // %
   intervals?: number;// %
 };
-
 type Row = {
   ts: string;                // ISO
-  day: string;               // M/D (not rendered on axis; used in tooltip)
+  day: string;               // M/D
   final: number;             // %
   lessonSlug: string;
   lessonTitle: string;
   comps: Components;
 };
-
-type Hit = { x1: number; x2: number; cx: number; top: number; h: number; row: Row };
+type PointHit = { x1: number; x2: number; cx: number; y: number; row: Row };
 
 const SEG_COLOR: Record<keyof Components, string> = {
   pitch:     '#86efac', // green-300
@@ -82,34 +78,90 @@ const SEG_COLOR: Record<keyof Components, string> = {
   intervals: '#22c55e', // green-500
 };
 
-function VerticalTimeBars({
+/* ─────────── line chart ─────────── */
+// D3-like monotoneX slopes with Hyman filtering (prevents Bezier overshoot)
+function computeMonotoneSlopes(xs: number[], ys: number[]) {
+  const n = xs.length;
+  const ms = new Array<number>(n).fill(0);
+  if (n < 2) return ms;
+
+  const dx: number[] = new Array(n - 1);
+  const s: number[] = new Array(n - 1);
+  for (let i = 0; i < n - 1; ++i) {
+    dx[i] = xs[i + 1] - xs[i] || 1;
+    s[i] = (ys[i + 1] - ys[i]) / dx[i];
+  }
+
+  ms[0] = s[0];
+  for (let i = 1; i < n - 1; ++i) {
+    ms[i] = (s[i - 1] * s[i] <= 0) ? 0 : (s[i - 1] + s[i]) / 2;
+  }
+  ms[n - 1] = s[n - 2];
+
+  for (let i = 0; i < n - 1; ++i) {
+    if (s[i] === 0) { ms[i] = 0; ms[i + 1] = 0; continue; }
+    const a = ms[i] / s[i];
+    const b = ms[i + 1] / s[i];
+    const r = a * a + b * b;
+    if (r > 9) {
+      const t = 3 / Math.sqrt(r);
+      ms[i] = t * a * s[i];
+      ms[i + 1] = t * b * s[i];
+    }
+  }
+  return ms;
+}
+
+function PerformanceLine({
   rows,
   height = 360,
-  stickW = 12,
-  gap = 12,
+  gap = 10,
 }: {
   rows: Row[];
-  height?: number; stickW?: number; gap?: number;
+  height?: number;
+  gap?: number;
 }) {
   const { ref, width } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, height);
 
-  const [t, setT] = React.useState(0);
-  const [hover, setHover] = React.useState<number | null>(null);
-  const [tip, setTip] = React.useState<{
-    x: number; y: number;
-    title: string;
-    day: string;
-    final: number;
-    comps: Components;
-  } | null>(null);
-  const hitsRef = React.useRef<Hit[]>([]);
+  const [t, setT] = React.useState(0);                 // intro animation
+  const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
+  const [animPrevIdx, setAnimPrevIdx] = React.useState<number | null>(null);
+  const [animU, setAnimU] = React.useState(1);         // 0..1 between prev and current hover
 
+  const [tip, setTip] = React.useState<{
+    x: number; y: number; title: string; day: string; final: number; comps: Components;
+  } | null>(null);
+
+  const hitsRef = React.useRef<PointHit[]>([]);
+  const lastHoverRef = React.useRef<number | null>(null);
+
+  // intro anim
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
     const tick = (now: number) => { const u = ease((now - start) / 800); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
   }, [rows.length]);
+
+  // hover transition anim (smooth grow/shrink between points)
+  React.useEffect(() => {
+    const prev = lastHoverRef.current;
+    if (prev === hoverIdx) return;
+    lastHoverRef.current = hoverIdx;
+    setAnimPrevIdx(prev);
+    setAnimU(0);
+
+    let raf = 0;
+    const start = performance.now();
+    const duration = 200;
+    const tick = (now: number) => {
+      const p = clamp01((now - start) / duration);
+      setAnimU(ease(p));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [hoverIdx]);
 
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
@@ -117,10 +169,9 @@ function VerticalTimeBars({
     const W = width, H = height;
     ctx.clearRect(0, 0, W, H);
 
-    // Layout paddings & gutters (match other cards)
+    // Layout
     const pad = { l: 66, r: 48, t: 10, b: 22 };
-    const innerGutter = 16;  // padding between Y labels and plot
-    const labelGap = 16;     // Y label text offset
+    const innerGutter = 16, labelGap = 16;
     const iw = Math.max(10, W - pad.l - pad.r);
     const ih = Math.max(10, H - pad.t - pad.b);
     const baseline = pad.t + ih;
@@ -148,11 +199,9 @@ function VerticalTimeBars({
     }
     ctx.restore();
 
-    // Downsample only if necessary (always keep latest)
-    const MIN_STICK = 4;
-    const MIN_GAP = 4;
-    const capacity = Math.max(1, Math.floor((plotW + MIN_GAP) / (MIN_STICK + MIN_GAP)));
-
+    // Downsample by available width (always keep latest)
+    const MIN_GAP = Math.max(6, gap);
+    const capacity = Math.max(2, Math.floor(plotW / MIN_GAP));
     let toDraw: Row[] = rows;
     if (rows.length > capacity) {
       const step = Math.ceil(rows.length / capacity);
@@ -163,120 +212,127 @@ function VerticalTimeBars({
       }
       toDraw = sampled;
     }
-
-    // Fit bars
     const n = toDraw.length;
-    const baseTotal = n * stickW + Math.max(0, n - 1) * gap;
-    let scale = baseTotal > plotW ? plotW / baseTotal : 1;
+    if (!n) { hitsRef.current = []; return; }
 
-    let sW = Math.max(MIN_STICK, Math.floor(stickW * scale));
-    let g = Math.max(MIN_GAP, Math.floor(gap * scale));
-    let total = n * sW + Math.max(0, n - 1) * g;
+    // Keep dots inside edges + give room for stroke
+    const R_SMALL = 3, R_HOVER = 7;
+    const R_LATEST = 6, R_LATEST_HOVER = 9;
+    const X_MARGIN = Math.max(R_LATEST_HOVER, 10);
+    const Y_MARGIN = Math.max(R_LATEST_HOVER, 10);
 
-    if (total > plotW) {
-      g = MIN_GAP;
-      const targetForBars = plotW - Math.max(0, n - 1) * g;
-      sW = Math.max(MIN_STICK, Math.floor(targetForBars / n));
-      total = n * sW + Math.max(0, n - 1) * g;
-      while (total > plotW && sW > MIN_STICK) {
-        sW -= 1;
-        total = n * sW + Math.max(0, n - 1) * g;
-      }
-    }
+    const xStart = plotL + X_MARGIN;
+    const xEnd   = plotR - X_MARGIN;
+    const dx = n > 1 ? (xEnd - xStart) / (n - 1) : 0;
 
-    const x0 = plotL + Math.max(0, Math.floor((plotW - total) / 2));
-
-    // Latest dot colors (lighter green)
-    const DOT_FILL = '#86efac';   // green-300
-    const DOT_STROKE = '#22c55e'; // green-500
-
-    // DRAW
-    hitsRef.current = [];
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(plotL + 0.5, pad.t + 0.5, plotW - 1, ih - 1);
-    ctx.clip();
-
+    const xs: number[] = new Array(n);
+    const ys: number[] = new Array(n);
+    const pts: { x: number; y: number; r: Row }[] = [];
     for (let i = 0; i < n; i++) {
       const r = toDraw[i];
-      const x = x0 + i * (sW + g);
+      const x = xStart + i * dx;
+      const yRaw = baseline - ih * clamp01((r.final / 100) * t);
+      const y = clamp(yRaw, pad.t + Y_MARGIN, baseline - Y_MARGIN);
+      xs[i] = x; ys[i] = y; pts.push({ x, y, r });
+    }
 
-      const h = ih * clamp01((r.final / 100) * t);
-      const yTop = baseline - h;
+    // Monotone slopes (no overshoot)
+    const m = computeMonotoneSlopes(xs, ys);
 
-      // hover band
-      if (hover === i) {
-        ctx.save();
-        ctx.fillStyle = 'rgba(16,24,40,0.06)';
-        const bandPad = 6;
-        ctx.fillRect(x - bandPad, pad.t + 2, sW + bandPad * 2, ih - 2);
-        ctx.restore();
+    // Clip for chart content (labels drawn after)
+    ctx.save();
+    ctx.beginPath(); ctx.rect(plotL, pad.t, plotW, ih); ctx.clip();
+
+    // Smooth dark-green line
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#22c55e';
+    ctx.beginPath();
+    ctx.moveTo(xs[0], ys[0]);
+    for (let i = 0; i < n - 1; i++) {
+      const x1 = xs[i],   y1 = ys[i];
+      const x2 = xs[i+1], y2 = ys[i+1];
+      const h = x2 - x1 || 1;
+
+      let cx1x = x1 + h/3;
+      let cx1y = y1 + (m[i]   * h)/3;
+      let cx2x = x2 - h/3;
+      let cx2y = y2 - (m[i+1] * h)/3;
+
+      // keep curve within the 0–100 band
+      cx1y = clamp(cx1y, pad.t, baseline);
+      cx2y = clamp(cx2y, pad.t, baseline);
+
+      ctx.bezierCurveTo(cx1x, cx1y, cx2x, cx2y, x2, y2);
+    }
+    ctx.stroke();
+
+    // Dots (light fill + dark stroke) with smooth cross-fade sizing
+    ctx.fillStyle = '#86efac';
+    ctx.strokeStyle = '#22c55e';
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const isLatest = i === n - 1;
+      const base = isLatest ? R_LATEST : R_SMALL;
+      const target = isLatest ? R_LATEST_HOVER : R_HOVER;
+
+      // animated amplitude for this point
+      let amp = 0;
+      if (hoverIdx != null && animPrevIdx == null) {
+        amp = i === hoverIdx ? animU : 0;                 // entering from nothing
+      } else if (hoverIdx == null && animPrevIdx != null) {
+        amp = i === animPrevIdx ? 1 - animU : 0;          // leaving to nothing
+      } else if (hoverIdx != null && animPrevIdx != null) {
+        amp = i === hoverIdx ? animU : (i === animPrevIdx ? 1 - animU : 0); // switching
       }
+      const r = base + (target - base) * clamp01(amp);
 
-      // single-color bar (no stacked segments)
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.08)';
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetY = 2;
-      ctx.fillStyle = PR_COLORS.noteFill;
-      ctx.fillRect(Math.round(x), Math.round(yTop), sW, Math.max(0, Math.round(h)));
-      ctx.restore();
-
-      // crisp outer stroke
-      ctx.strokeStyle = PR_COLORS.noteStroke; ctx.lineWidth = 1;
-      ctx.strokeRect(x + 0.5, yTop + 0.5, sW - 1, Math.max(0, Math.round(h) - 1));
-
-      hitsRef.current.push({ x1: x, x2: x + sW, cx: x + sW / 2, top: yTop, h, row: r });
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = isLatest ? 1.5 : 1;
+      ctx.stroke();
     }
 
-    // Latest dot + inline value
-    if (n >= 1) {
-      const i = n - 1;
-      const cx = x0 + i * (sW + g) + sW / 2;
-      const y = baseline - ih * clamp01((toDraw[i].final / 100) * t);
+    ctx.restore(); // end clip
 
-      ctx.fillStyle = DOT_FILL; ctx.beginPath(); ctx.arc(cx, y, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.lineWidth = 1.5; ctx.strokeStyle = DOT_STROKE; ctx.stroke();
+    // Latest value label outside clip (auto-flip to stay on-canvas)
+    const last = pts[n - 1];
+    const latestVal = Math.round(toDraw[n - 1].final);
+    const label = `${latestVal}%`;
+    ctx.font = '12px ui-sans-serif, system-ui';
+    const tw = ctx.measureText(label).width;
+    const rightSpace = W - (last.x + 10);
+    const placeLeft = rightSpace < tw + 6;
 
-      ctx.fillStyle = '#0f0f0f'; ctx.font = '12px ui-sans-serif, system-ui';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(`${Math.round(toDraw[i].final)}%`, cx + 10, y);
-    }
+    ctx.fillStyle = '#0f0f0f';
+    ctx.textBaseline = 'middle';
+    if (placeLeft) { ctx.textAlign = 'right'; ctx.fillText(label, last.x - 10, last.y); }
+    else { ctx.textAlign = 'left'; ctx.fillText(label, last.x + 10, last.y); }
 
-    // Focus ring
-    if (hover != null && hitsRef.current[hover]) {
-      const h = hitsRef.current[hover];
-      const left = h.x1 - 6, right = h.x2 + 6;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(16,24,40,0.25)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(left + 0.5, pad.t + 1.5, Math.max(0, right - left), ih - 3);
-      ctx.restore();
-    }
-
-    ctx.restore(); // end plot clip
-
-    // ❌ No X labels (intentionally omitted to avoid overlap)
-  }, [canvasRef, width, height, rows, stickW, gap, t, hover]);
+    // Build hover hit zones (midpoint splits)
+    const half = Math.max(6, dx / 2);
+    hitsRef.current = pts.map((p, i) => {
+      const left  = i === 0     ? p.x - half : (p.x + pts[i - 1].x) / 2;
+      const right = i === n - 1 ? p.x + half : (p.x + pts[i + 1].x) / 2;
+      return { cx: p.x, x1: left, x2: right, y: p.y, row: p.r };
+    });
+  }, [canvasRef, width, height, rows, gap, t, hoverIdx, animPrevIdx, animU]);
 
   // hover + tooltip
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const rect = el.getBoundingClientRect();
+    const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     let idx: number | null = null;
     for (let i = 0; i < hitsRef.current.length; i++) {
       const h = hitsRef.current[i];
-      if (x >= h.x1 - 8 && x <= h.x2 + 8) { idx = i; break; }
+      if (x >= h.x1 && x <= h.x2) { idx = i; break; }
     }
-    setHover(idx);
+    setHoverIdx(idx);
     if (idx != null) {
       const h = hitsRef.current[idx];
-      const tipX = clamp(h.cx, 8, rect.width - 8);
-      const tipY = h.top - 14;
       setTip({
-        x: tipX,
-        y: Math.max(12, tipY),
+        x: clamp(h.cx, 8, rect.width - 8),
+        y: Math.max(12, h.y - 14),
         title: h.row.lessonTitle,
         day: h.row.day,
         final: Math.round(h.row.final),
@@ -286,7 +342,7 @@ function VerticalTimeBars({
       setTip(null);
     }
   }, []);
-  const onMouseLeave = React.useCallback(() => { setHover(null); setTip(null); }, []);
+  const onMouseLeave = React.useCallback(() => { setHoverIdx(null); setTip(null); }, []);
 
   return (
     <div
@@ -353,74 +409,46 @@ function VerticalTimeBars({
 
 /* ─────────── card ─────────── */
 export default function PerformanceCard() {
-  const supabase = React.useMemo(() => createClient(), []);
-  const { uid } = useHomeBootstrap();
+  const { rows: baseRows, loading: baseLoading, error: baseErr } = useHomeResults();
 
-  const [loading, setLoading] = React.useState(true);
-  const [err, setErr] = React.useState<string | null>(null);
-  const [rows, setRows] = React.useState<Row[]>([]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true); setErr(null);
-        // Ensure auth session is ready for RLS; uid is provided by bootstrap (no getUser)
-        await ensureSessionReady(supabase, 2000);
-
-        // Pull individual results with component details (no daily averaging)
-        const { data, error } = await supabase
-          .from('lesson_results')
-          .select('created_at, lesson_slug, final_percent, pitch_percent, rhythm_melody_percent, rhythm_line_percent, intervals_correct_ratio')
-          .eq('uid', uid)
-          .order('created_at', { ascending: true })
-          .limit(400);
-        if (error) throw error;
-
-        const out: Row[] = (data ?? []).map((r: any) => {
-          const ts = new Date(r.created_at).toISOString();
-          const slug = String(r.lesson_slug || '');
-          const comps: Components = {
-            pitch: Number.isFinite(r.pitch_percent) ? Number(r.pitch_percent) : undefined,
-            melody: Number.isFinite(r.rhythm_melody_percent) ? Number(r.rhythm_melody_percent) : undefined,
-            line: Number.isFinite(r.rhythm_line_percent) ? Number(r.rhythm_line_percent) : undefined,
-            intervals: Number.isFinite(r.intervals_correct_ratio) ? Math.round(Number(r.intervals_correct_ratio) * 10000) / 100 : undefined,
-          };
-          return {
-            ts,
-            day: fmtDay(ts),
-            final: clamp(Number(r.final_percent ?? 0), 0, 100),
-            lessonSlug: slug,
-            lessonTitle: (titleByLessonSlug[slug] ?? (slug || 'Unknown Lesson')),
-            comps,
-          };
-        });
-
-        if (!cancelled) setRows(out);
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [supabase, uid]);
+  const rows = React.useMemo<Row[]>(() => {
+    return (baseRows ?? []).map((r: any) => {
+      const ts = new Date(r.created_at).toISOString();
+      const slug = String(r.lesson_slug || '');
+      const comps: Components = {
+        pitch: Number.isFinite(r.pitch_percent) ? Number(r.pitch_percent) : undefined,
+        melody: Number.isFinite(r.rhythm_melody_percent) ? Number(r.rhythm_melody_percent) : undefined,
+        line: Number.isFinite(r.rhythm_line_percent) ? Number(r.rhythm_line_percent) : undefined,
+        intervals: Number.isFinite(r.intervals_correct_ratio)
+          ? Math.round(Number(r.intervals_correct_ratio) * 10000) / 100
+          : undefined,
+      };
+      return {
+        ts,
+        day: fmtDay(ts),
+        final: clamp(Number(r.final_percent ?? 0), 0, 100),
+        lessonSlug: slug,
+        lessonTitle: (titleByLessonSlug[slug] ?? (slug || 'Unknown Lesson')),
+        comps,
+      };
+    });
+  }, [baseRows]);
 
   return (
     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Session Performance</h3>
       </div>
-      {loading ? (
+      {baseLoading ? (
         <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-[#e8e8e8]" />
       ) : rows.length === 0 ? (
         <div className="h-[78%] mt-2 flex items-center justify-center text-base text-[#0f0f0f]">
           No sessions yet — run an exercise to unlock your dashboard.
         </div>
       ) : (
-        <VerticalTimeBars rows={rows} height={360} stickW={12} gap={12} />
+        <PerformanceLine rows={rows} height={360} gap={10} />
       )}
-      {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
+      {baseErr ? <div className="mt-3 text-sm text-[#dc2626]">{baseErr}</div> : null}
     </div>
   );
 }

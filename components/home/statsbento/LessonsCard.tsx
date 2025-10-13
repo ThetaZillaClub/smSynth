@@ -2,12 +2,10 @@
 'use client';
 
 import * as React from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { ensureSessionReady } from '@/lib/client-cache';
 import { letterFromPercent } from '@/utils/scoring/grade';
 import { PR_COLORS } from '@/utils/stage';
 import { COURSES } from '@/lib/courses/registry';
-import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
+import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 const PASSED = new Set(['A','A-','B+','B','B-']);
 const MASTERED = new Set(['A','A+']); // A- is NOT mastery
@@ -20,74 +18,50 @@ const titleByLessonSlug: Record<string,string> = (() => {
 })();
 
 export default function LessonsCard() {
-  const supabase = React.useMemo(() => createClient(), []);
-  const { uid } = useHomeBootstrap();
+  const { rows: baseRows, loading, error: baseErr } = useHomeResults();
 
-  const [loading, setLoading] = React.useState(true);
-  const [err, setErr] = React.useState<string | null>(null);
+  const { completedCount, masteredCount, recent } = React.useMemo(() => {
+    const rows = baseRows ?? [];
 
-  const [completedCount, setCompletedCount] = React.useState(0);
-  const [masteredCount, setMasteredCount] = React.useState(0);
-  const [recent, setRecent] = React.useState<
-    Array<{ slug: string; title: string; pct: number; letter: string; when: string }>
-  >([]);
+    // Best score per lesson (for completed/mastered counts)
+    const bestBy: Record<string, number> = {};
+    for (const r of rows) {
+      const slug = String(r.lesson_slug ?? '');
+      if (!slug) continue;
+      const pct = Number(r.final_percent ?? 0);
+      bestBy[slug] = Math.max(bestBy[slug] ?? 0, pct);
+    }
 
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true); setErr(null);
-        // allow auth to hydrate tokens for RLS; do not call getUser (uid is from bootstrap)
-        await ensureSessionReady(supabase, 2000);
+    const completedCount = Object.values(bestBy)
+      .filter(v => PASSED.has(letterFromPercent(v))).length;
 
-        const { data, error } = await supabase
-          .from('lesson_results')
-          .select('lesson_slug, created_at, final_percent')
-          .eq('uid', uid)
-          .order('created_at', { ascending: false })
-          .limit(400);
-        if (error) throw error;
+    const masteredCount = Object.values(bestBy)
+      .filter(v => MASTERED.has(letterFromPercent(v))).length;
 
-        const bestBy: Record<string, number> = {};
-        const recentPasses: Array<{ slug: string; pct: number; letter: string; when: string }> = [];
-        const seen = new Set<string>();
+    // Most recent *unique* passed lessons (up to 6)
+    const seen = new Set<string>();
+    const recent: Array<{ slug: string; title: string; pct: number; letter: string; when: string }> = [];
+    for (let i = rows.length - 1; i >= 0 && recent.length < 6; i--) {
+      const r = rows[i];
+      const slug = String(r.lesson_slug ?? '');
+      if (!slug || seen.has(slug)) continue;
 
-        for (const r of (data ?? []) as any[]) {
-          const slug = String(r.lesson_slug ?? '');
-          const pct = Number(r.final_percent ?? 0);
-          if (slug) bestBy[slug] = Math.max(bestBy[slug] ?? 0, pct);
-
-          if (!seen.has(slug)) {
-            const letter = letterFromPercent(pct);
-            if (PASSED.has(letter)) {
-              seen.add(slug);
-              recentPasses.push({
-                slug,
-                pct: Math.round(pct),
-                letter,
-                when: new Date(r.created_at).toISOString().slice(0, 10),
-              });
-            }
-          }
-          if (recentPasses.length >= 6) break;
-        }
-
-        const completed = Object.values(bestBy).filter(v => PASSED.has(letterFromPercent(v))).length;
-        const mastered = Object.values(bestBy).filter(v => MASTERED.has(letterFromPercent(v))).length;
-
-        if (!cancelled) {
-          setCompletedCount(completed);
-          setMasteredCount(mastered);
-          setRecent(recentPasses.map(x => ({ ...x, title: titleByLessonSlug[x.slug] ?? x.slug })));
-        }
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
+      const pct = Number(r.final_percent ?? 0);
+      const letter = letterFromPercent(pct);
+      if (PASSED.has(letter)) {
+        seen.add(slug);
+        recent.push({
+          slug,
+          title: titleByLessonSlug[slug] ?? slug,
+          pct: Math.round(pct),
+          letter,
+          when: new Date(r.created_at).toISOString().slice(0, 10),
+        });
       }
-    })();
-    return () => { cancelled = true; };
-  }, [supabase, uid]);
+    }
+
+    return { completedCount, masteredCount, recent };
+  }, [baseRows]);
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm flex flex-col">
@@ -135,7 +109,9 @@ export default function LessonsCard() {
                     <div className="text-xs text-[#0f0f0f]/80">{r.when}</div>
                   </div>
                   <span className="inline-flex items-center gap-2 shrink-0">
-                    <span className="text-sm font-medium text-[#0f0f0f]">{r.pct}% ({r.letter})</span>
+                    <span className="text-sm font-medium text-[#0f0f0f]">
+                      {r.pct}% ({r.letter})
+                    </span>
                     <span
                       className="inline-block w-2.5 h-2.5 rounded-full"
                       style={{ background: MASTERED.has(r.letter) ? PR_COLORS.noteFill : BLUE_COMPLETED }}
@@ -148,7 +124,7 @@ export default function LessonsCard() {
         </div>
       )}
 
-      {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
+      {baseErr ? <div className="mt-3 text-sm text-[#dc2626]">{baseErr}</div> : null}
     </div>
   );
 }

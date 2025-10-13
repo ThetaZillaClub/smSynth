@@ -81,7 +81,11 @@ export default function HomePage() {
     <HomeBootstrapProvider value={{ uid: bootstrap.uid }}>
       <div className="min-h-dvh bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
         <div className="px-6 pt-8 pb-12 max-w-7xl mx-auto">
-          <HomeHeader displayName={bootstrap.displayName} avatarUrl={bootstrap.avatarUrl} />
+          <HomeHeader
+            displayName={bootstrap.displayName}
+            avatarUrl={bootstrap.avatarUrl}
+            studentImagePath={bootstrap.studentImagePath}
+          />
 
           <div className="mt-6">
             <StatsBento />

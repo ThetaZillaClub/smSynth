@@ -5,7 +5,7 @@ import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { PR_COLORS } from '@/utils/stage';
-import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
+import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
@@ -301,33 +301,35 @@ function PolarAreaIntervals({
 /* ---------------- card + data ---------------- */
 export default function IntervalsCard() {
   const supabase = React.useMemo(() => createClient(), []);
-  const { uid } = useHomeBootstrap();
+  const { recentIds, loading: baseLoading, error: baseErr } = useHomeResults();
+
+  const [items, setItems] = React.useState<Item[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
-  const [items, setItems] = React.useState<Item[]>([]);
 
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        setLoading(true); setErr(null);
-        // allow auth token to hydrate, but don't fetch the user — we have uid from bootstrap
-        await ensureSessionReady(supabase, 2000);
+        // If the base results are still loading, wait.
+        if (baseLoading) { setLoading(true); setErr(baseErr ?? null); return; }
 
-        const { data: results, error: rErr } = await supabase
-          .from('lesson_results')
-          .select('id, created_at')
-          .eq('uid', uid)
-          .order('created_at', { ascending: true })
-          .limit(60);
-        if (rErr) throw rErr;
-        const recentIds = (results ?? []).slice(-30).map((r: any) => r.id);
-        if (!recentIds.length) { if (!cancelled) setItems([]); return; }
+        setLoading(true); setErr(null);
+
+        // No recent results → empty chart, no fetch
+        if (!recentIds.length) {
+          if (!cancelled) { setItems([]); setLoading(false); setErr(baseErr ?? null); }
+          return;
+        }
+
+        // ensure session (RLS) then fetch interval classes for those IDs
+        await ensureSessionReady(supabase, 2000);
 
         const iQ = await supabase
           .from('lesson_result_interval_classes')
           .select('result_id, semitones, attempts, correct')
           .in('result_id', recentIds);
+
         if (iQ.error) throw iQ.error;
 
         const by = new Map<number, { a: number; c: number }>(); for (let i = 0; i <= 12; i++) by.set(i,{a:0,c:0});
@@ -355,7 +357,10 @@ export default function IntervalsCard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [supabase, uid]);
+  }, [supabase, recentIds, baseLoading, baseErr]);
+
+  const isLoading = baseLoading || loading;
+  const errorMsg = baseErr || err;
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
@@ -363,7 +368,7 @@ export default function IntervalsCard() {
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Intervals</h3>
         <div className="text-sm text-[#0f0f0f]">Correct % by class</div>
       </div>
-      {loading ? (
+      {isLoading ? (
         <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-[#e8e8e8]" />
       ) : items.length === 0 ? (
         <div className="h-[78%] mt-2 flex items-center justify-center text-base text-[#0f0f0f]">
@@ -372,7 +377,7 @@ export default function IntervalsCard() {
       ) : (
         <PolarAreaIntervals items={items} height={360} />
       )}
-      {err ? <div className="mt-3 text-sm text-[#dc2626]">{err}</div> : null}
+      {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
     </div>
   );
 }

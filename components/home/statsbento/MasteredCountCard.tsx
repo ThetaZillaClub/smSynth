@@ -2,54 +2,24 @@
 'use client';
 
 import * as React from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { ensureSessionReady } from '@/lib/client-cache';
 import { letterFromPercent } from '@/utils/scoring/grade';
-import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
+import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
-const MASTERED = new Set(['A','A+']); // mastery only A/A+
+const MASTERED = new Set(['A', 'A+']); // mastery only A/A+
 
 export default function MasteredCountCard({ compact = false }: { compact?: boolean }) {
-  const supabase = React.useMemo(() => createClient(), []);
-  const { uid } = useHomeBootstrap();
+  const { rows, loading, error: err } = useHomeResults();
 
-  const [loading, setLoading] = React.useState(true);
-  const [err, setErr] = React.useState<string | null>(null);
-  const [count, setCount] = React.useState<number>(0);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true); setErr(null);
-        // Ensure auth is ready for RLS, but do not call getUser (uid comes from bootstrap)
-        await ensureSessionReady(supabase, 2000);
-
-        const { data, error } = await supabase
-          .from('lesson_results')
-          .select('lesson_slug, final_percent')
-          .eq('uid', uid)
-          .order('created_at', { ascending: false })
-          .limit(400);
-        if (error) throw error;
-
-        const bestBy: Record<string, number> = {};
-        for (const r of (data ?? []) as any[]) {
-          const slug = String(r.lesson_slug ?? '');
-          const pct = Number(r.final_percent ?? 0);
-          if (!slug) continue;
-          bestBy[slug] = Math.max(bestBy[slug] ?? 0, pct);
-        }
-        const mastered = Object.values(bestBy).filter(v => MASTERED.has(letterFromPercent(v))).length;
-        if (!cancelled) setCount(mastered);
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [supabase, uid]);
+  const count = React.useMemo(() => {
+    const bestBy: Record<string, number> = {};
+    for (const r of rows) {
+      const slug = String(r.lesson_slug ?? '');
+      const pct = Number(r.final_percent ?? 0);
+      if (!slug) continue;
+      bestBy[slug] = Math.max(bestBy[slug] ?? 0, pct);
+    }
+    return Object.values(bestBy).filter((v) => MASTERED.has(letterFromPercent(v))).length;
+  }, [rows]);
 
   const pad = compact ? 'p-4' : 'p-6';
   const titleCls = compact ? 'text-sm font-semibold' : 'text-xl font-semibold';

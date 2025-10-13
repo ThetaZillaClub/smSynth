@@ -1,267 +1,223 @@
 // lib/client-cache.ts
-import type { SupabaseClient } from "@supabase/supabase-js";
 
-type Gender = "male" | "female" | "other" | "unspecified";
-type Privacy = "public" | "private";
+/**
+ * Small client-side cache utilities used across the dashboard.
+ * - ensureSessionReady: waits briefly for Supabase auth to hydrate
+ * - getCurrentStudentRowCached: in-flight deduped fetch of /api/students/current with short TTL
+ * - getImageUrlCached: resolves storage path -> URL with caching & in-flight dedupe
+ */
 
-export type ModelRow = {
-  id: string;
-  name: string;
-  creator_display_name: string;
-  privacy: Privacy;
-  image_path: string | null;
-  gender?: Gender;
+type SupabaseLike = {
+  auth: {
+    getSession: () => Promise<{ data: { session: any | null } }>;
+    onAuthStateChange: (cb: (evt: string, session: any | null) => void) => { data: { subscription: { unsubscribe: () => void } } };
+  };
+  storage: {
+    from: (bucket: string) => {
+      getPublicUrl: (path: string) => { data: { publicUrl: string } };
+      createSignedUrl: (path: string, expiresIn: number) => Promise<{ data: { signedUrl: string } | null; error: any | null }>;
+    };
+  };
 };
 
-type Entry<T> = {
-  v?: T | null;
-  exp: number;
-  inflight?: Promise<T | null>;
-};
-
-const modelCache = new Map<string, Entry<ModelRow>>();
-const imageCache = new Map<string, Entry<string | null>>();
-
-// NEW: current student + current range caches (dedupe & TTL)
-export type CurrentStudentRow = {
-  id?: string;
-  creator_display_name?: string;
-  image_path?: string | null;
-  gender?: Gender;
-  range_low?: string | null;
-  range_high?: string | null;
-  updated_at?: string;
-} | null;
-
-export type CurrentRangeRow = {
-  range_low: string | null;
-  range_high: string | null;
-} | null;
-
-const currentStudentCache: Entry<CurrentStudentRow> = { exp: 0 };
-const currentRangeCache: Entry<CurrentRangeRow> = { exp: 0 };
-
-const now = () => Date.now();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Local-only check (no network). */
-async function hasSession(supabase: SupabaseClient): Promise<boolean> {
-  const { data } = await supabase.auth.getSession();
-  return !!data.session?.user;
-}
-
 /**
- * Wait (locally) for the initial auth session to hydrate.
- * Resolves TRUE only when a user exists; times out FALSE.
+ * Wait up to `timeoutMs` for a session to exist (for RLS). If none appears,
+ * resolve anyway so callers can keep going. Never throws.
  */
-export async function ensureSessionReady(
-  supabase: SupabaseClient,
-  timeoutMs = 3500
-): Promise<boolean> {
-  if (await hasSession(supabase)) return true;
+export async function ensureSessionReady(supabase: SupabaseLike, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
 
-  return await new Promise<boolean>((resolve) => {
-    let done = false;
-    const finish = (ok: boolean) => {
-      if (!done) {
-        done = true;
-        resolve(ok);
-      }
-    };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return;
+  } catch {}
 
-    const timer = setTimeout(() => finish(false), timeoutMs);
-
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (
-        session?.user &&
-        (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED")
-      ) {
-        clearTimeout(timer);
-        sub.subscription.unsubscribe();
-        finish(true);
-      }
-    });
+  let done = false;
+  const sub = supabase.auth.onAuthStateChange((_evt, session) => {
+    if (session && !done) done = true;
   });
+
+  while (!done && Date.now() - start < timeoutMs) {
+    await sleep(50);
+  }
+
+  try { sub.data.subscription.unsubscribe(); } catch {}
 }
+
+/* ───────────────────────── current student row ───────────────────────── */
+
+export type CurrentStudentRow = {
+  id: string;
+  creator_display_name: string | null;
+  image_path: string | null;
+  range_low: string | null;
+  range_high: string | null;
+  updated_at: string | null;
+} | null;
+
+let __rowValue: CurrentStudentRow = null;
+let __rowTs = 0;
+let __rowInflight: Promise<CurrentStudentRow> | null = null;
+const ROW_TTL_MS = 30_000;
+
+export async function getCurrentStudentRowCached(
+  _supabase: SupabaseLike,
+  opts?: { force?: boolean }
+): Promise<CurrentStudentRow> {
+  const now = Date.now();
+  if (!opts?.force && __rowValue && now - __rowTs < ROW_TTL_MS) {
+    return __rowValue;
+  }
+  if (__rowInflight) return __rowInflight;
+
+  __rowInflight = (async () => {
+    const res = await fetch('/api/students/current', { method: 'GET', cache: 'no-store' });
+    if (!res.ok) {
+      __rowInflight = null;
+      throw new Error(`current student ${res.status}`);
+    }
+    const row = (await res.json()) as CurrentStudentRow;
+    __rowValue = row;
+    __rowTs = Date.now();
+    __rowInflight = null;
+    return row;
+  })();
+
+  return __rowInflight;
+}
+
+export function patchCurrentStudentRow(partial: Partial<NonNullable<CurrentStudentRow>>): void {
+  if (!__rowValue) return;
+  __rowValue = { ...__rowValue, ...partial };
+}
+
+export function invalidateCurrentStudentRow(): void {
+  __rowValue = null;
+  __rowTs = 0;
+  __rowInflight = null;
+}
+
+/* ───────────────────────── image url resolver ───────────────────────── */
+
+const ABS_URL = /^https?:\/\//i;
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isAbsoluteUrl(x: string) { return ABS_URL.test(x); }
+
+// cache entry for image URLs
+type ImgCacheEntry = { url: string; ts: number; ttl: number };
+const __imgCache = new Map<string, ImgCacheEntry>();
+const __imgInflight = new Map<string, Promise<string>>();
+
+const DEFAULT_SIGNED_TTL_S = 900; // 15 minutes
+
+type GetImageUrlOpts = {
+  /** When the path is missing a bucket (e.g. "uid/file.jpg"), prefix this. */
+  defaultBucket?: string;          // <- we'll pass "model-images" from callers
+  /** Signed URL lifetime (seconds). */
+  signedTtlSec?: number;
+};
 
 /**
- * Cache a model row by id.
- * - Waits for session hydration.
- * - If the first read returns null while the session is still not ready,
- *   waits a short grace window and re-fetches once when the session appears.
- * - Short TTLs for nulls to avoid poisoning the cache during auth races.
+ * Resolve a storage path to a usable URL.
+ * - Absolute URLs → returned as-is.
+ * - "bucket/key/…" → use that bucket.
+ * - "uid/file" → assume `defaultBucket` (we pass "model-images").
+ * - Always try a SIGNED URL first (works for private/public), then fall back to public URL.
+ * - Caches + in-flight dedupe.
  */
-export async function getModelCached(
-  supabase: SupabaseClient,
-  id: string,
-  ttlMs = 60_000
-): Promise<ModelRow | null> {
-  if (!id) return null;
+export async function getImageUrlCached(
+  supabase: SupabaseLike,
+  rawPath: string,
+  opts?: GetImageUrlOpts
+): Promise<string> {
+  if (!rawPath) return '';
 
-  const cached = modelCache.get(id);
-  if (cached && cached.exp > now()) return cached.v ?? null;
-  if (cached?.inflight) return cached.inflight;
+  // normalize (strip leading slash)
+  const normalized = rawPath.replace(/^\/+/, '');
+  if (isAbsoluteUrl(normalized)) return normalized;
 
-  const task: Promise<ModelRow | null> = (async () => {
-    const hadSessionInitially = await hasSession(supabase);
-    const readyNow = await ensureSessionReady(supabase, 3500);
+  // serve from cache if fresh
+  const now = Date.now();
+  const hit = __imgCache.get(normalized);
+  if (hit && now - hit.ts < hit.ttl) return hit.url;
 
-    const fetchOnce = async (): Promise<ModelRow | null> => {
-      const { data, error } = await supabase
-        .from("models")
-        .select("id,name,creator_display_name,image_path,privacy")
-        .eq("id", id)
-        .maybeSingle();
-      if (error) throw error;
-      return (data ?? null) as ModelRow | null;
+  const inflight = __imgInflight.get(normalized);
+  if (inflight) return inflight;
+
+  const p = (async () => {
+    const defBucket = opts?.defaultBucket ?? 'model-images';
+    const signedTtl = Math.max(60, Math.min(60 * 60 * 24, opts?.signedTtlSec ?? DEFAULT_SIGNED_TTL_S));
+
+    // parse bucket/key, repairing if necessary
+    const slash = normalized.indexOf('/');
+    let bucket: string;
+    let key: string;
+
+    if (slash <= 0) {
+      // no bucket: treat the whole thing as key under default bucket
+      bucket = defBucket;
+      key = normalized;
+    } else {
+      bucket = normalized.slice(0, slash);
+      key = normalized.slice(slash + 1);
+
+      // if first segment looks like a UUID, this was probably "uid/file" → no bucket
+      if (UUID_LIKE.test(bucket)) {
+        key = normalized;     // keep full "uid/file"
+        bucket = defBucket;   // repair to default bucket
+      }
+    }
+
+    // try SIGNED (works for private/public)
+    const trySigned = async (b: string, k: string) => {
+      try {
+        const s = await supabase.storage.from(b).createSignedUrl(k, signedTtl);
+        return s?.data?.signedUrl || '';
+      } catch {
+        return '';
+      }
     };
 
-    let value = await fetchOnce();
+    // try PUBLIC
+    const tryPublic = (b: string, k: string) => {
+      try {
+        return supabase.storage.from(b).getPublicUrl(k)?.data?.publicUrl || '';
+      } catch {
+        return '';
+      }
+    };
 
-    // If null and we still didn't have a session, do a one-shot grace retry.
-    if (value === null && !hadSessionInitially && !readyNow) {
-      const retryReady = await ensureSessionReady(supabase, 1500);
-      if (!retryReady) await sleep(150);
-      if (await hasSession(supabase)) {
-        value = await fetchOnce();
+    // 1) preferred: signed for parsed bucket/key
+    let url = await trySigned(bucket, key);
+
+    // 1b) if that failed AND the bucket differs from default, but the key starts with a UUID
+    //     (common stale hint like "avatars/uid/file"), try default bucket as a fallback
+    if (!url && bucket !== defBucket) {
+      const firstKeySeg = key.split('/')[0] || '';
+      if (UUID_LIKE.test(firstKeySeg)) {
+        url = await trySigned(defBucket, key);
       }
     }
 
-    // TTL logic: keep nulls very short when the session was absent
-    const stillNoSession = !(await hasSession(supabase));
-    const expiry =
-      value === null && (!hadSessionInitially || !readyNow) && stillNoSession
-        ? now() + 900
-        : now() + ttlMs;
+    // 2) fallbacks to public
+    if (!url) url = tryPublic(bucket, key);
+    if (!url && bucket !== defBucket) url = tryPublic(defBucket, key);
 
-    modelCache.set(id, { v: value, exp: expiry });
-    return value;
+    // cache (shorter TTL for public; near-expiry buffer for signed)
+    const ttl = url.includes('token=') ? signedTtl * 1000 - 5_000 : 10 * 60_000;
+    __imgCache.set(normalized, { url, ts: Date.now(), ttl });
+    __imgInflight.delete(normalized);
+    return url;
   })();
 
-  modelCache.set(id, { exp: now() + ttlMs, inflight: task });
-
+  __imgInflight.set(normalized, p);
   try {
-    return await task;
+    return await p;
   } finally {
-    const cur = modelCache.get(id);
-    if (cur) modelCache.set(id, { v: cur.v, exp: cur.exp });
+    __imgInflight.delete(normalized);
   }
 }
 
-/** Cache signed URL ~5m before expiry; fallback to public URL. */
-export async function getImageUrlCached(
-  supabase: SupabaseClient,
-  imagePath: string,
-  signSeconds = 60 * 60
-): Promise<string | null> {
-  if (!imagePath) return null;
-
-  const early = Math.max(5 * 60, signSeconds - 5 * 60);
-  const ttlMs = early * 1000;
-
-  const cached = imageCache.get(imagePath);
-  if (cached && cached.exp > now()) return cached.v ?? null;
-  if (cached?.inflight) return cached.inflight;
-
-  const task: Promise<string | null> = (async () => {
-    try {
-      const { data: signed, error: signErr } = await supabase
-        .storage.from("model-images")
-        .createSignedUrl(imagePath, signSeconds);
-
-      if (!signErr && signed?.signedUrl) {
-        const url = signed.signedUrl;
-        imageCache.set(imagePath, { v: url, exp: now() + ttlMs });
-        return url;
-      }
-
-      const { data: pub } = supabase.storage.from("model-images").getPublicUrl(imagePath);
-      const url = pub?.publicUrl ?? null;
-      imageCache.set(imagePath, { v: url, exp: now() + ttlMs });
-      return url;
-    } catch {
-      imageCache.set(imagePath, { v: null, exp: now() + 10_000 });
-      return null;
-    }
-  })();
-
-  imageCache.set(imagePath, { exp: now() + ttlMs, inflight: task });
-
-  try {
-    return await task;
-  } finally {
-    const cur = imageCache.get(imagePath);
-    if (cur) imageCache.set(imagePath, { v: cur.v, exp: cur.exp });
-  }
-}
-
-/* ──────────────────────────────────────────────────────────────
-   NEW: Cached helpers to collapse duplicate /api calls
-   ────────────────────────────────────────────────────────────── */
-
-/** One in-memory, inflight-deduped read of /api/students/current (TTL default 30s). */
-export async function getCurrentStudentRowCached(
-  supabase: SupabaseClient,
-  ttlMs = 30_000
-): Promise<CurrentStudentRow> {
-  const valid = currentStudentCache.exp > now();
-  if (valid) return currentStudentCache.v ?? null;
-  if (currentStudentCache.inflight) return currentStudentCache.inflight;
-
-  const task: Promise<CurrentStudentRow> = (async () => {
-    // Wait for session so we don't get a spurious 401 from fetch()
-    await ensureSessionReady(supabase, 2500);
-
-    try {
-      const res = await fetch("/api/students/current", { credentials: "include", cache: "no-store" });
-      const data = res.ok ? ((await res.json().catch(() => null)) as CurrentStudentRow) : null;
-      currentStudentCache.v = data ?? null;
-      currentStudentCache.exp = now() + ttlMs;
-      return currentStudentCache.v;
-    } catch {
-      currentStudentCache.v = null;
-      currentStudentCache.exp = now() + 1500; // quick retry window
-      return null;
-    }
-  })();
-
-  currentStudentCache.inflight = task;
-  try {
-    return await task;
-  } finally {
-    currentStudentCache.inflight = undefined;
-  }
-}
-
-/** One in-memory, inflight-deduped read of /api/students/current/range (TTL default 30s). */
-export async function getCurrentRangeCached(
-  supabase: SupabaseClient,
-  ttlMs = 30_000
-): Promise<CurrentRangeRow> {
-  const valid = currentRangeCache.exp > now();
-  if (valid) return currentRangeCache.v ?? null;
-  if (currentRangeCache.inflight) return currentRangeCache.inflight;
-
-  const task: Promise<CurrentRangeRow> = (async () => {
-    await ensureSessionReady(supabase, 2500);
-
-    try {
-      const res = await fetch("/api/students/current/range", { credentials: "include", cache: "no-store" });
-      const data = res.ok ? ((await res.json().catch(() => null)) as CurrentRangeRow) : null;
-      currentRangeCache.v = data ?? null;
-      currentRangeCache.exp = now() + ttlMs;
-      return currentRangeCache.v;
-    } catch {
-      currentRangeCache.v = null;
-      currentRangeCache.exp = now() + 1500;
-      return null;
-    }
-  })();
-
-  currentRangeCache.inflight = task;
-  try {
-    return await task;
-  } finally {
-    currentRangeCache.inflight = undefined;
-  }
-}
