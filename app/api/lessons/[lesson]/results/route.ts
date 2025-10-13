@@ -7,12 +7,32 @@ import { glicko2Update, type GlickoRating, pairwiseFromScores } from "@/lib/rati
 const BASE_RATING: GlickoRating = { rating: 1500, rd: 350, vol: 0.06 };
 const dateStr = (d: Date) => d.toISOString().slice(0, 10);
 
+// small helpers for safe extraction
+const get = (o: unknown, k: string): unknown =>
+  o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined;
+
+const toNum = (v: unknown, def = 0): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+const toInt = (v: unknown, def = 0): number => Math.round(toNum(v, def));
+const toOptionalInt = (v: unknown): number | null => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? Math.round(n) : null;
+};
+
+// local row shapes to avoid loose casts
+type InsertedLessonResult = { id: number; final_percent: number };
+type LessonBestRow = { result_id: number; final_percent: number; created_at: string };
+type LessonResultMin = { uid: string; final_percent: number };
+type PlayerRatingRow = { uid: string; rating: number; rd: number; vol: number };
+
 export async function POST(req: Request, ctx: { params: Promise<{ lesson: string }> }) {
   const { lesson } = await ctx.params;
   const supabase = await createClient();
 
   const { data: claims } = await supabase.auth.getClaims();
-  const uid = claims?.claims?.sub as string | undefined;
+  const uid = (claims?.claims?.sub as string | undefined) ?? undefined;
   if (!uid) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
   type Body = {
@@ -37,7 +57,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ lesson: string
       take_index: Number.isFinite(body.takeIndex) ? Math.max(0, Math.floor(body.takeIndex!)) : 0,
 
       final_percent: Math.round(s.final.percent * 100) / 100,
-      final_letter: s.final.letter as any,
+      // ensure a plain string for DB text/varchar column
+      final_letter: String(s.final.letter),
 
       pitch_percent: Math.round(s.pitch.percent * 100) / 100,
       pitch_time_on_ratio: Math.max(0, Math.min(1, s.pitch.timeOnPitchRatio)),
@@ -56,97 +77,102 @@ export async function POST(req: Request, ctx: { params: Promise<{ lesson: string
 
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
 
-  const resultId = inserted!.id;
+  const insertedRow = inserted as InsertedLessonResult;
+  const resultId = insertedRow.id;
 
   // 1a) Insert child-table details (best-effort; do not fail the request)
   // Pitch notes
   try {
+    const perNote = Array.isArray(s.pitch.perNote) ? (s.pitch.perNote as unknown[]) : [];
     const pitchRows =
-      (s.pitch.perNote ?? [])
-        .filter((p: any) => Number.isFinite(p?.midi))
-        .map((p: any) => ({
+      perNote
+        .filter((p) => Number.isFinite(toNum(get(p, "midi"), NaN)))
+        .map((p) => ({
           result_id: resultId,
-          midi: Math.round(Number(p.midi)),
-          n: Math.max(1, Math.round(Number(p.n ?? 1))),
-          ratio: Number(p.ratio ?? 0),
-          cents_mae: Number(p.centsMae ?? 0),
+          midi: Math.round(toNum(get(p, "midi"))),
+          n: Math.max(1, Math.round(toNum(get(p, "n") ?? 1))),
+          ratio: toNum(get(p, "ratio")),
+          cents_mae: toNum(get(p, "centsMae")),
         })) ?? [];
 
     if (pitchRows.length) {
       const { error } = await supabase.from("lesson_result_pitch_notes").insert(pitchRows);
       if (error) console.warn("pitch_notes insert error:", error.message);
     }
-  } catch (e: any) {
-    console.warn("pitch_notes insert exception:", e?.message || e);
+  } catch (e: unknown) {
+    console.warn("pitch_notes insert exception:", e instanceof Error ? e.message : e);
   }
 
   // Melody per-note
   try {
+    const melArr = Array.isArray(s.rhythm.perNoteMelody) ? (s.rhythm.perNoteMelody as unknown[]) : [];
     const melRows =
-      (s.rhythm.perNoteMelody ?? []).map((r: any, i: number) => ({
+      melArr.map((r, i: number) => ({
         result_id: resultId,
         idx: i,
-        coverage: Number(r.coverage ?? 0),
-        onset_err_ms: Number.isFinite(r.onsetErrMs) ? Math.round(Number(r.onsetErrMs)) : null,
+        coverage: toNum(get(r, "coverage")),
+        onset_err_ms: toOptionalInt(get(r, "onsetErrMs")),
       })) ?? [];
 
     if (melRows.length) {
       const { error } = await supabase.from("lesson_result_melody_per_note").insert(melRows);
       if (error) console.warn("melody_per_note insert error:", error.message);
     }
-  } catch (e: any) {
-    console.warn("melody_per_note insert exception:", e?.message || e);
+  } catch (e: unknown) {
+    console.warn("melody_per_note insert exception:", e instanceof Error ? e.message : e);
   }
 
   // Rhythm line per-event
   try {
+    const lineArr = Array.isArray(s.rhythm.linePerEvent) ? (s.rhythm.linePerEvent as unknown[]) : [];
     const lineRows =
-      (s.rhythm.linePerEvent ?? []).map((r: any) => ({
+      lineArr.map((r) => ({
         result_id: resultId,
-        value: String(r.value ?? "unknown"),
-        n: Math.max(1, Math.round(Number(r.n ?? 1))),
-        credit: Number(r.credit ?? 0),
-        err_ms: Number.isFinite(r.errMs) ? Math.round(Number(r.errMs)) : null,
+        value: String(get(r, "value") ?? "unknown"),
+        n: Math.max(1, Math.round(toNum(get(r, "n") ?? 1))),
+        credit: toNum(get(r, "credit")),
+        err_ms: toOptionalInt(get(r, "errMs")),
       })) ?? [];
 
     if (lineRows.length) {
       const { error } = await supabase.from("lesson_result_rhythm_per_event").insert(lineRows);
       if (error) console.warn("rhythm_per_event insert error:", error.message);
     }
-  } catch (e: any) {
-    console.warn("rhythm_per_event insert exception:", e?.message || e);
+  } catch (e: unknown) {
+    console.warn("rhythm_per_event insert exception:", e instanceof Error ? e.message : e);
   }
 
   // Interval classes
   try {
+    const icArr = Array.isArray(s.intervals.classes) ? (s.intervals.classes as unknown[]) : [];
     const icRows =
-      (s.intervals.classes ?? []).map((c: any) => ({
+      icArr.map((c) => ({
         result_id: resultId,
-        semitones: Math.round(Number(c.semitones ?? 0)),
-        attempts: Math.max(0, Math.round(Number(c.attempts ?? 0))),
-        correct: Math.max(0, Math.round(Number(c.correct ?? 0))),
+        semitones: toInt(get(c, "semitones")),
+        attempts: Math.max(0, toInt(get(c, "attempts"))),
+        correct: Math.max(0, toInt(get(c, "correct"))),
       })) ?? [];
 
     if (icRows.length) {
       const { error } = await supabase.from("lesson_result_interval_classes").insert(icRows);
       if (error) console.warn("interval_classes insert error:", error.message);
     }
-  } catch (e: any) {
-    console.warn("interval_classes insert exception:", e?.message || e);
+  } catch (e: unknown) {
+    console.warn("interval_classes insert exception:", e instanceof Error ? e.message : e);
   }
 
   // 2) Upsert per-lesson best
-  const { data: currentBest } = await supabase
+  const { data: currentBestRaw } = await supabase
     .from("lesson_bests")
     .select("result_id, final_percent, created_at")
     .eq("uid", uid)
     .eq("lesson_slug", lesson)
     .maybeSingle();
 
+  const currentBest = (currentBestRaw ?? null) as LessonBestRow | null;
+
   const isBetter =
-    !currentBest ||
-    Number(inserted!.final_percent) > Number((currentBest as any).final_percent) ||
-    Number(inserted!.final_percent) === Number((currentBest as any).final_percent);
+    !currentBest || insertedRow.final_percent >= Number(currentBest.final_percent);
 
   if (isBetter) {
     const up = await supabase
@@ -155,7 +181,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ lesson: string
         uid,
         lesson_slug: lesson,
         result_id: resultId,
-        final_percent: inserted!.final_percent,
+        final_percent: insertedRow.final_percent,
       })
       .select("uid")
       .single();
@@ -169,7 +195,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ lesson: string
   periodEnd.setUTCHours(23, 59, 59, 999);
 
   // Best today per uid in this lesson
-  const { data: todaysBests, error: qErr } = await supabase
+  const { data: todaysBestsRaw, error: qErr } = await supabase
     .from("lesson_results")
     .select("uid, final_percent")
     .gte("created_at", periodStart.toISOString())
@@ -178,11 +204,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ lesson: string
 
   if (qErr) return NextResponse.json({ error: qErr.message }, { status: 500 });
 
+  const todaysBests = (todaysBestsRaw ?? []) as LessonResultMin[];
   const byUid = new Map<string, number>();
-  for (const r of todaysBests ?? []) {
-    const fp = Number((r as any).final_percent);
-    const prev = byUid.get((r as any).uid) ?? -Infinity;
-    if (fp > prev) byUid.set((r as any).uid, fp);
+  for (const r of todaysBests) {
+    const fp = Number(r.final_percent);
+    const prev = byUid.get(r.uid) ?? -Infinity;
+    if (fp > prev) byUid.set(r.uid, fp);
   }
 
   const pool = `lesson:${lesson}`;
@@ -227,7 +254,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ lesson: string
         rating_after: BASE_RATING.rating,
         rd_after: BASE_RATING.rd,
         vol_after: BASE_RATING.vol,
-        opponents: [],
+        opponents: [] as Array<unknown>,
       });
       if (seedEvent.error) console.warn("rating_events seed insert error:", seedEvent.error.message);
     }
@@ -235,17 +262,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ lesson: string
 
   // Compute and persist only *my* update (RLS-safe). Others can be done by a service-role job.
   if (involved.length >= 2) {
-    const { data: ratingRows } = await supabase
+    const { data: ratingRowsRaw } = await supabase
       .from("player_ratings")
       .select("uid, rating, rd, vol")
       .in("uid", involved)
       .eq("pool", pool);
 
+    const ratingRows = (ratingRowsRaw ?? []) as PlayerRatingRow[];
+
     const current: Record<string, GlickoRating> = {};
     for (const u of involved) {
-      const row = ratingRows?.find((r) => (r as any).uid === u);
+      const row = ratingRows.find((r) => r.uid === u);
       current[u] = row
-        ? { rating: Number((row as any).rating), rd: Number((row as any).rd), vol: Number((row as any).vol) }
+        ? { rating: Number(row.rating), rd: Number(row.rd), vol: Number(row.vol) }
         : { ...BASE_RATING };
     }
 

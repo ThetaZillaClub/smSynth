@@ -8,6 +8,14 @@ import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 import { PolarArea, NOTE, clamp } from './pitch'; // ← compose from the subfolder
 
+type PitchNoteRow = {
+  result_id: number;
+  midi: number;
+  n: number | null;
+  ratio: number | null;
+  cents_mae: number | null;
+};
+
 export default function PitchFocusCard() {
   const supabase = React.useMemo(() => createClient(), []);
   const { recentIds, loading: baseLoading, error: baseErr } = useHomeResults();
@@ -38,9 +46,11 @@ export default function PitchFocusCard() {
 
         if (pQ.error) throw pQ.error;
 
+        const rows: PitchNoteRow[] = (pQ.data ?? []) as PitchNoteRow[];
+
         const byMidi = new Map<number, { w: number; on: number; mae: number }>();
-        for (const p of (pQ.data ?? []) as any[]) {
-          const w = Math.max(1, Number(p.n || 1));
+        for (const p of rows) {
+          const w = Math.max(1, Number(p.n ?? 1));
           const g = byMidi.get(p.midi) ?? { w: 0, on: 0, mae: 0 };
           const wt = g.w + w;
           g.on  = (g.on  * g.w + (p.ratio ?? 0)     * w) / wt;
@@ -63,8 +73,9 @@ export default function PitchFocusCard() {
         if (!cancelled) {
           setItems(midiOrdered.map(({ label, v1, v2 }) => ({ label, v1, v2 })));
         }
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || String(e));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!cancelled) setErr(msg);
       } finally {
         if (!cancelled) setLoading(false);
       }

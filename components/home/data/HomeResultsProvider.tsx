@@ -50,14 +50,16 @@ export function HomeResultsProvider({ children }: { children: React.ReactNode })
 
         if (error) throw error;
 
-        const rows = (data ?? []) as any[];
+        type Row = HomeResultsCtx['rows'][number];
+        const rows: Row[] = (data ?? []) as Row[];
         const recentIds = rows.slice(-30).map(r => r.id);
 
         if (!cancelled) {
           setState({ rows, recentIds, loading: false, error: null });
         }
-      } catch (e: any) {
-        if (!cancelled) setState(s => ({ ...s, loading: false, error: e?.message || String(e) }));
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (!cancelled) setState(s => ({ ...s, loading: false, error: message }));
       }
     })();
     return () => { cancelled = true; };

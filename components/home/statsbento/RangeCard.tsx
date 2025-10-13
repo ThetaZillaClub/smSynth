@@ -30,8 +30,9 @@ export default function RangeCard({ compact = false }: { compact?: boolean }) {
         setStudentRowId(row?.id ?? null);
         setLowLabel(row?.range_low ?? null);
         setHighLabel(row?.range_high ?? null);
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || String(e));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!cancelled) setErr(msg);
       } finally {
         if (!cancelled) setLoading(false);
       }

@@ -30,11 +30,7 @@ import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 import type { TakeScore } from "@/utils/scoring/score";
 import { letterFromPercent } from "@/utils/scoring/grade";
-
-// 🔑 mode-aware solfège (used for the arp button label)
 import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
-
-// Vision settings + calibrated latency
 import { useVisionEnabled } from "@/components/settings/vision/vision-layout";
 import useVisionLatency from "@/hooks/vision/useVisionLatency";
 
@@ -87,85 +83,79 @@ const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const mean = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
 
-function aggregateForSubmission(scores: TakeScore[], snaps: TakeSnapshot[]): TakeScore {
+function intervalLabel(semitones: number): string {
+  switch (semitones) {
+    case 0: return "P1";
+    case 1: return "m2";
+    case 2: return "M2";
+    case 3: return "m3";
+    case 4: return "M3";
+    case 5: return "P4";
+    case 6: return "TT";
+    case 7: return "P5";
+    case 8: return "m6";
+    case 9: return "M6";
+    case 10: return "m7";
+    case 11: return "M7";
+    case 12: return "P8";
+    default: return `${semitones}`;
+  }
+}
+
+/**
+ * Aggregate multiple takes into a single TakeScore suitable for submission.
+ * Provides all required scalar fields for RhythmScore and IntervalScore,
+ * and leaves the detail arrays empty but correctly typed.
+ */
+function aggregateForSubmission(scores: TakeScore[]): TakeScore {
   // Top-level means
   const finalPct = mean(scores.map((s) => s.final.percent));
   const pitchPct = mean(scores.map((s) => s.pitch.percent));
   const pitchOn = clamp01(mean(scores.map((s) => s.pitch.timeOnPitchRatio)));
   const pitchMae = mean(scores.map((s) => s.pitch.centsMae));
   const melPct = mean(scores.map((s) => s.rhythm.melodyPercent));
-  const lineCandidates = scores.filter((s) => s.rhythm.lineEvaluated);
-  const linePct = lineCandidates.length ? mean(lineCandidates.map((s) => s.rhythm.linePercent)) : 0;
-  const lineEvaluated = lineCandidates.length > 0;
-  const intervalsRatio = clamp01(mean(scores.map((s) => s.intervals.correctRatio)));
 
-  // Aggregated arrays (not from a single best take):
-  // Pitch per-note: group by rounded MIDI across all takes
-  type PitchAgg = { count: number; ratio: number; mae: number };
-  const pitchByMidi = new Map<number, PitchAgg>();
-  scores.forEach((s, i) => {
-    const snap = snaps[i];
-    const per = s.pitch.perNote ?? [];
-    const notes = snap?.phrase?.notes ?? [];
-    for (let j = 0; j < per.length && j < notes.length; j++) {
-      const p = per[j]!;
-      const midi = Math.round(notes[j]!.midi);
-      const g = pitchByMidi.get(midi) ?? { count: 0, ratio: 0, mae: 0 };
-      const n = g.count + 1;
-      g.ratio += (p.ratio - g.ratio) / n;
-      g.mae += (p.centsMae - g.mae) / n;
-      g.count = n;
-      pitchByMidi.set(midi, g);
-    }
-  });
-  const aggregatedPerNotePitch = Array.from(pitchByMidi.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([midi, g]) => ({ midi, ratio: r2(g.ratio), centsMae: r2(g.mae), n: g.count })) as any[];
+  // Rhythm extras (hit rates and mean abs error), derived from per-take details when present,
+  // otherwise fall back to percent-based approximations.
+  const melodyCoverages: number[] = [];
+  const melodyAbsErrs: number[] = [];
+  const lineHits: number[] = [];
+  const lineAbsErrs: number[] = [];
+  let anyLineEvaluated = false;
 
-  // Melody per-note rhythm: aggregate across all notes in all takes
-  type MelAgg = { count: number; coverage: number; onsetAbs: number };
-  const melAgg: MelAgg = { count: 0, coverage: 0, onsetAbs: 0 };
-  scores.forEach((s) => {
+  for (const s of scores) {
     (s.rhythm.perNoteMelody ?? []).forEach((r) => {
-      melAgg.count++;
-      melAgg.coverage += (r.coverage - melAgg.coverage) / melAgg.count;
-      if (Number.isFinite(r.onsetErrMs)) {
-        const abs = Math.abs(r.onsetErrMs!);
-        melAgg.onsetAbs += (abs - melAgg.onsetAbs) / melAgg.count;
+      if (typeof r.coverage === "number") melodyCoverages.push(r.coverage);
+      if (typeof r.onsetErrMs === "number" && Number.isFinite(r.onsetErrMs)) {
+        melodyAbsErrs.push(Math.abs(r.onsetErrMs));
       }
     });
-  });
-  const aggregatedPerNoteMelody =
-    melAgg.count > 0 ? [{ coverage: r2(melAgg.coverage), onsetErrMs: Math.round(melAgg.onsetAbs) }] : [];
+    if (s.rhythm.lineEvaluated) {
+      anyLineEvaluated = true;
+      (s.rhythm.linePerEvent ?? []).forEach((e) => {
+        lineHits.push((e.credit ?? 0) > 0 ? 1 : 0);
+        if (typeof e.errMs === "number" && Number.isFinite(e.errMs)) {
+          lineAbsErrs.push(Math.abs(e.errMs));
+        }
+      });
+    }
+  }
 
-  // Rhythm line per-event: aggregate by event value label across takes if present
-  type LineAgg = { count: number; credit: number; absErr: number; value: string };
-  const lineMap = new Map<string, LineAgg>();
-  scores.forEach((s, i) => {
-    if (!s.rhythm.lineEvaluated) return;
-    const rows = s.rhythm.linePerEvent ?? [];
-    const evs = snaps[i]?.rhythm ?? [];
-    rows.forEach((row) => {
-      const ev = evs[row.idx];
-      const label = ev ? String(ev.value) : "unknown";
-      const g = lineMap.get(label) ?? { count: 0, credit: 0, absErr: 0, value: label };
-      const n = g.count + 1;
-      const hit = (row.credit ?? 0) > 0 ? 1 : 0;
-      g.credit += (hit - g.credit) / n;
-      if (Number.isFinite(row.errMs)) {
-        const abs = Math.abs(row.errMs!);
-        g.absErr += (abs - g.absErr) / n;
-      }
-      g.count = n;
-      lineMap.set(label, g);
-    });
-  });
-  const aggregatedLinePerEvent = Array.from(lineMap.values()).map((g) => ({
-    value: g.value,
-    credit: r2(g.credit),
-    errMs: Math.round(g.absErr),
-    n: g.count,
-  })) as any[];
+  const melodyHitRate = melodyCoverages.length
+    ? clamp01(mean(melodyCoverages))
+    : clamp01(melPct / 100);
+
+  const melodyMeanAbsMs = melodyAbsErrs.length ? Math.round(mean(melodyAbsErrs)) : 0;
+
+  const avgLinePct = mean(scores.filter((s) => s.rhythm.lineEvaluated).map((s) => s.rhythm.linePercent));
+  const lineHitRate = lineHits.length ? clamp01(mean(lineHits)) : clamp01((avgLinePct || 0) / 100);
+  const lineMeanAbsMs = lineAbsErrs.length ? Math.round(mean(lineAbsErrs)) : 0;
+
+  const linePercent = anyLineEvaluated ? r2(avgLinePct || 0) : 0;
+  const lineEvaluated = anyLineEvaluated;
+
+  // combinedPercent: if a line was evaluated, average melody+line; otherwise melody only.
+  const combinedPercent = lineEvaluated ? r2((melPct + linePercent) / 2) : r2(melPct);
 
   // Intervals by class: sum attempts/correct across all takes
   const byClass = new Map<number, { attempts: number; correct: number }>();
@@ -177,9 +167,25 @@ function aggregateForSubmission(scores: TakeScore[], snaps: TakeSnapshot[]): Tak
       cell.correct += c.correct || 0;
     });
   });
-  const aggregatedIntervals = Array.from(byClass.entries())
+
+  const intervalsClasses: TakeScore["intervals"]["classes"] = Array.from(byClass.entries())
     .filter(([, v]) => v.attempts > 0)
-    .map(([k, v]) => ({ semitones: k, attempts: v.attempts, correct: v.correct }));
+    .map(([semitones, v]) => ({
+      semitones,
+      attempts: v.attempts,
+      correct: v.correct,
+      label: intervalLabel(semitones),
+      percent: v.attempts > 0 ? r2((v.correct / v.attempts) * 100) : 0,
+    }));
+
+  const intervalsTotal = intervalsClasses.reduce((acc, c) => acc + c.attempts, 0);
+  const intervalsCorrect = intervalsClasses.reduce((acc, c) => acc + c.correct, 0);
+  const intervalsRatio = intervalsTotal > 0 ? clamp01(intervalsCorrect / intervalsTotal) : 0;
+
+  // Build the TakeScore with correctly typed empty arrays for details we aren’t aggregating here
+  const perNotePitchEmpty: TakeScore["pitch"]["perNote"] = [];
+  const perNoteMelodyEmpty: TakeScore["rhythm"]["perNoteMelody"] = [];
+  const linePerEventEmpty: TakeScore["rhythm"]["linePerEvent"] = [];
 
   return {
     final: { percent: r2(finalPct), letter: letterFromPercent(finalPct) },
@@ -187,20 +193,27 @@ function aggregateForSubmission(scores: TakeScore[], snaps: TakeSnapshot[]): Tak
       percent: r2(pitchPct),
       timeOnPitchRatio: r2(pitchOn),
       centsMae: r2(pitchMae),
-      perNote: aggregatedPerNotePitch as any,
+      perNote: perNotePitchEmpty,
     },
     rhythm: {
       melodyPercent: r2(melPct),
+      melodyHitRate,
+      melodyMeanAbsMs,
       lineEvaluated,
-      linePercent: lineEvaluated ? r2(linePct) : 0,
-      perNoteMelody: aggregatedPerNoteMelody as any,
-      linePerEvent: aggregatedLinePerEvent as any,
+      linePercent,
+      lineHitRate,
+      lineMeanAbsMs,
+      combinedPercent,
+      perNoteMelody: perNoteMelodyEmpty,
+      linePerEvent: linePerEventEmpty,
     },
     intervals: {
+      total: intervalsTotal,
+      correct: intervalsCorrect,
       correctRatio: r2(intervalsRatio),
-      classes: aggregatedIntervals as any,
+      classes: intervalsClasses,
     },
-  } as TakeScore;
+  };
 }
 
 export default function TrainingGame({
@@ -224,7 +237,6 @@ export default function TrainingGame({
     highHz: highHz ?? null,
   });
 
-  // prefer-as-const: literal assertion instead of explicit string literal type
   const step = "play" as const;
   const {
     bpm, ts, leadBars, restBars, noteValue, noteDurSec, view,
@@ -424,11 +436,9 @@ export default function TrainingGame({
       const usedRhythm = rhythmForTakeRef.current ?? rhythmEffective;
       if (usedPhrase) {
         const pitchLagSec = (DEFAULT_PITCH_LATENCY_MS || 0) / 1000;
-        // Gesture latency is compensated inside useHandBeat via latencyMs
         const gestureLagSec = 0;
 
-        // Build shared scoring args
-        const scoringArgs = {
+        const score = scoreTake({
           phrase: usedPhrase,
           bpm,
           den: ts.den,
@@ -440,10 +450,7 @@ export default function TrainingGame({
           melodyOnsetsSec: usedPhrase.notes.map((n) => n.startSec),
           rhythmOnsetsSec: makeOnsetsFromRhythm(usedRhythm, bpm, ts.den),
           align: alignForScoring,
-        };
-
-        // Compute locally and stash
-        const score = scoreTake(scoringArgs);
+        });
 
         // Submit ONE aggregated row when exerciseLoops reached
         const totalTakesNow = sessionScores.length + 1; // include this score
@@ -458,14 +465,7 @@ export default function TrainingGame({
           sessionSubmittedRef.current = true;
 
           const allScores = [...sessionScores, score];
-          const aggScore = aggregateForSubmission(allScores, [
-            ...takeSnapshots,
-            {
-              phrase: usedPhrase,
-              rhythm: usedRhythm ?? null,
-              melodyRhythm: melodyRhythmForTakeRef.current ?? null,
-            },
-          ]);
+          const aggScore = aggregateForSubmission(allScores);
 
           const snapshots = {
             perTakeFinals: allScores.map((s, i) => ({ i, final: s.final.percent })),
@@ -508,7 +508,7 @@ export default function TrainingGame({
     hand,
     rhythmEffective,
     scoreTake,
-    sessionScores.length,
+    sessionScores, // include full array to satisfy exhaustive-deps
     lessonSlug,
     sessionId,
     exerciseLoops,
@@ -571,22 +571,22 @@ export default function TrainingGame({
     return [r, r + triadThird, r + triadFifth, r + triadThird, r];
   }, [footerTonicMidi, triadThird, triadFifth]);
 
-  // ✅ Arp button label: show ONLY the first solfège (mode-aware for ANY scale)
+  // Arp button label: show ONLY the first solfège (mode-aware for ANY scale)
   const footerArpLabel = useMemo(() => {
     const scaleName = (sessionEff.scale?.name ?? "major") as SolfegeScaleName;
     const tonicPc = sessionEff.scale?.tonicPc ?? 0;
-    return pcToSolfege(tonicPc, tonicPc, scaleName); // e.g., do / la / re / …
+    return pcToSolfege(tonicPc, tonicPc, scaleName);
   }, [sessionEff.scale?.name, sessionEff.scale?.tonicPc]);
 
   const playFooterTonic = useCallback(async () => {
     if (footerTonicMidi == null) return;
-    try { await playMidiList([footerTonicMidi], Math.max(0.25, Math.min(1.0, secPerBeat))); } catch {}
-  }, [footerTonicMidi, playMidiList, secPerBeat]);
+    try { await playMidiList([footerTonicMidi], Math.max(0.25, Math.min(1.0, secondsPerBeat(bpm, ts.den)))); } catch {}
+  }, [footerTonicMidi, playMidiList, bpm, ts.den]);
 
   const playFooterArp = useCallback(async () => {
     if (!footerArpMidis) return;
-    try { await playMidiList(footerArpMidis, Math.max(0.2, Math.min(0.75, secPerBeat))); } catch {}
-  }, [footerArpMidis, playMidiList, secPerBeat]);
+    try { await playMidiList(footerArpMidis, Math.max(0.2, Math.min(0.75, secondsPerBeat(bpm, ts.den)))); } catch {}
+  }, [footerArpMidis, playMidiList, bpm, ts.den]);
 
   const sidePanel = {
     pretest: {

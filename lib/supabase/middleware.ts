@@ -1,54 +1,97 @@
 // lib/supabase/middleware.ts
-import { createServerClient } from '@supabase/ssr';
-import { NextResponse, type NextRequest } from 'next/server';
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
 
 const SKIP_PREFIXES = [
-  '/api',
-  '/_next',
-  '/favicon.ico',
-  '/robots.txt',
-  '/sitemap.xml',
-  '/opengraph-image',
-  '/icon',
+  "/api",
+  "/_next",
+  "/favicon.ico",
+  "/robots.txt",
+  "/sitemap.xml",
+  "/opengraph-image",
+  "/icon",
 ];
 
 // Best effort: reproduce Supabase auth cookie attributes when re-setting on a new response.
 function applySupabaseCookieDefaults(
   _name: string,
   request: NextRequest
-): { path: string; httpOnly: boolean; sameSite: 'lax'; secure: boolean } {
-  const xfProto = request.headers.get('x-forwarded-proto');
-  const isHttps = request.nextUrl.protocol === 'https:' || xfProto === 'https';
-  return { path: '/', httpOnly: true, sameSite: 'lax', secure: !!isHttps };
+): { path: string; httpOnly: boolean; sameSite: "lax"; secure: boolean } {
+  const xfProto = request.headers.get("x-forwarded-proto");
+  const isHttps = request.nextUrl.protocol === "https:" || xfProto === "https";
+  return { path: "/", httpOnly: true, sameSite: "lax", secure: !!isHttps };
 }
+
+/** Shape we *may* see on cookies returned by `NextResponse.cookies.getAll()` */
+type ResponseCookieBase = ReturnType<
+  NextResponse["cookies"]["getAll"]
+>[number];
+
+type SameSiteOpt = "lax" | "strict" | "none";
+
+type ResponseCookieWithOptions = ResponseCookieBase &
+  Partial<{
+    path: string;
+    httpOnly: boolean;
+    sameSite: SameSiteOpt;
+    secure: boolean;
+    maxAge: number;
+    expires: Date | string | number;
+  }>;
 
 /**
  * Forward cookies from one response to another while preserving important attributes.
  */
 function forwardCookies(from: NextResponse, to: NextResponse, req: NextRequest) {
   const all = from.cookies.getAll();
+  const defaults = applySupabaseCookieDefaults("", req);
+
   for (const c of all) {
-    to.cookies.set({
-      name: c.name,
-      value: c.value,
-      path: (c as any).path ?? '/',
-      httpOnly: (c as any).httpOnly ?? true,
-      sameSite: ((c as any).sameSite as 'lax' | 'strict' | 'none' | undefined) ?? 'lax',
-      secure: (c as any).secure ?? applySupabaseCookieDefaults(c.name, req).secure,
-      ...(typeof (c as any).maxAge !== 'undefined' ? { maxAge: (c as any).maxAge } : {}),
-      ...(typeof (c as any).expires !== 'undefined' ? { expires: (c as any).expires } : {}),
-    });
+    const src = c as ResponseCookieWithOptions;
+
+    const path = typeof src.path === "string" ? src.path : "/";
+    const httpOnly = typeof src.httpOnly === "boolean" ? src.httpOnly : true;
+    const sameSite: SameSiteOpt = (src.sameSite as SameSiteOpt) ?? "lax";
+    const secure =
+      typeof src.secure === "boolean" ? src.secure : defaults.secure;
+
+    // Build explicit, typed options object (no `any`, no overload hacks)
+    const options: {
+      path: string;
+      httpOnly: boolean;
+      sameSite: SameSiteOpt;
+      secure: boolean;
+      maxAge?: number;
+      expires?: Date;
+    } = {
+      path,
+      httpOnly,
+      sameSite,
+      secure,
+      ...(typeof src.maxAge !== "undefined" ? { maxAge: Number(src.maxAge) } : {}),
+      ...(typeof src.expires !== "undefined"
+        ? {
+            // normalize expires to a Date if possible
+            expires:
+              src.expires instanceof Date
+                ? src.expires
+                : new Date(src.expires),
+          }
+        : {}),
+    };
+
+    to.cookies.set(src.name, src.value, options);
   }
 }
 
 export async function updateSession(request: NextRequest) {
   // Only handle top-level navigations (HTML documents). Skip prefetch/HEAD/background fetches.
-  const dest = request.headers.get('sec-fetch-dest') || '';
-  const isDoc = dest === 'document';
-  const isHead = request.method === 'HEAD';
+  const dest = request.headers.get("sec-fetch-dest") || "";
+  const isDoc = dest === "document";
+  const isHead = request.method === "HEAD";
   const isPrefetch =
-    request.headers.get('purpose') === 'prefetch' ||
-    request.headers.get('next-router-prefetch') === '1';
+    request.headers.get("purpose") === "prefetch" ||
+    request.headers.get("next-router-prefetch") === "1";
 
   const { pathname, search } = request.nextUrl;
 
@@ -76,9 +119,14 @@ export async function updateSession(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           // keep the request & response cookie views in sync
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          );
+
           supabaseResponse = NextResponse.next({ request });
+
           cookiesToSet.forEach(({ name, value, options }) => {
+            // @supabase/ssr provides the original options here
             supabaseResponse.cookies.set(name, value, options);
           });
         },
@@ -87,18 +135,18 @@ export async function updateSession(request: NextRequest) {
   );
 
   // If we arrived with an OAuth/PKCE `code`, exchange it on the server.
-  const code = request.nextUrl.searchParams.get('code');
+  const code = request.nextUrl.searchParams.get("code");
   if (code) {
     try {
-      await supabase.auth.exchangeCodeForSession(code); // <-- pass code to fix TS2554
+      await supabase.auth.exchangeCodeForSession(code);
     } catch {
       // continue; user will be treated as unauthenticated below if exchange failed
     }
 
     // Clean the URL (remove code/state) so refreshes don't re-exchange.
     const cleanUrl = request.nextUrl.clone();
-    cleanUrl.searchParams.delete('code');
-    cleanUrl.searchParams.delete('state');
+    cleanUrl.searchParams.delete("code");
+    cleanUrl.searchParams.delete("state");
 
     const res = NextResponse.redirect(cleanUrl);
     forwardCookies(supabaseResponse, res, request);
@@ -113,33 +161,34 @@ export async function updateSession(request: NextRequest) {
   {
     const resCookies = supabaseResponse.cookies;
     resCookies.set({
-      name: 'ptp_a',
-      value: user ? '1' : '0',
-      path: '/',
+      name: "ptp_a",
+      value: user ? "1" : "0",
+      path: "/",
       httpOnly: false,
-      sameSite: 'lax',
-      secure: applySupabaseCookieDefaults('', request).secure,
+      sameSite: "lax",
+      secure: applySupabaseCookieDefaults("", request).secure,
     });
   }
 
   // Redirect logged-in users away from "/" → "/home"
-  const isRoot = pathname === '/';
+  const isRoot = pathname === "/";
   if (user && isRoot) {
-    const res = NextResponse.redirect(new URL('/home', request.url));
+    const res = NextResponse.redirect(new URL("/home", request.url));
     forwardCookies(supabaseResponse, res, request);
     return res;
   }
 
   // Public routes
-  const isAuthRoute = pathname.startsWith('/auth') || pathname.startsWith('/login');
-  const isPublic = pathname === '/' || isAuthRoute;
+  const isAuthRoute =
+    pathname.startsWith("/auth") || pathname.startsWith("/login");
+  const isPublic = pathname === "/" || isAuthRoute;
 
   // Enforce auth on private routes
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
-    url.pathname = '/auth/login';
-    const next = pathname + (search || '');
-    if (next && next !== '/') url.searchParams.set('next', next);
+    url.pathname = "/auth/login";
+    const next = pathname + (search || "");
+    if (next && next !== "/") url.searchParams.set("next", next);
 
     const res = NextResponse.redirect(url);
     forwardCookies(supabaseResponse, res, request);

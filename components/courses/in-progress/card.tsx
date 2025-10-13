@@ -67,6 +67,11 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
     );
   }
 
+  // pre-typed CSS var so we don't need `as any`
+  const btnStyle: React.CSSProperties & Record<'--tw-before-bg', string> = {
+    '--tw-before-bg': PR_COLORS.noteFill,
+  };
+
   // Wide stacked list — bigger type, dark text only, piano-roll accent
   return (
     <div className="grid grid-cols-1 gap-4 md:gap-5">
@@ -82,7 +87,7 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
             // left accent rail
             'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1.5 before:rounded-l-2xl',
           ].join(' ')}
-          style={{ ['--tw-before-bg' as any]: PR_COLORS.noteFill } as React.CSSProperties}
+          style={btnStyle}
         >
           <div
             className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl"

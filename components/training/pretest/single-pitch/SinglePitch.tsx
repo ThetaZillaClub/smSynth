@@ -7,7 +7,6 @@ import PlayProgressButton from "@/components/training/pretest/PlayProgressButton
 import useSinglePitchGate from "@/components/training/pretest/single-pitch/hooks/useSinglePitchGate";
 
 export default function SinglePitch({
-  statusText, // kept for prop compatibility; not shown
   running,
   inResponse,
   onStart,

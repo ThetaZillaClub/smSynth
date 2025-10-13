@@ -9,7 +9,6 @@ import PlayProgressButton from "@/components/training/pretest/PlayProgressButton
 import type { ScaleName } from "@/utils/phrase/scales";
 
 export default function GuidedArpeggio({
-  statusText, // kept for prop compatibility; not shown
   running,
   inResponse,
   onStart,

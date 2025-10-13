@@ -5,6 +5,7 @@ import * as React from 'react';
 import { PR_COLORS } from '@/utils/stage';
 import { COURSES } from '@/lib/courses/registry';
 import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
+import type { HomeResultsCtx } from '@/components/home/data/HomeResultsProvider';
 
 /* ─────────── small utils ─────────── */
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
@@ -260,10 +261,10 @@ function PerformanceLine({
       const x2 = xs[i+1], y2 = ys[i+1];
       const h = x2 - x1 || 1;
 
-      let cx1x = x1 + h/3;
-      let cx1y = y1 + (m[i]   * h)/3;
-      let cx2x = x2 - h/3;
-      let cx2y = y2 - (m[i+1] * h)/3;
+      const cx1x = x1 + h/3;           // ← const (never reassigned)
+      let   cx1y = y1 + (m[i]   * h)/3;
+      const cx2x = x2 - h/3;           // ← const (never reassigned)
+      let   cx2y = y2 - (m[i+1] * h)/3;
 
       // keep curve within the 0–100 band
       cx1y = clamp(cx1y, pad.t, baseline);
@@ -279,7 +280,7 @@ function PerformanceLine({
     for (let i = 0; i < n; i++) {
       const p = pts[i];
       const isLatest = i === n - 1;
-      const base = isLatest ? R_LATEST : R_SMALL;
+      const base = isLatest ?  R_LATEST : R_SMALL;
       const target = isLatest ? R_LATEST_HOVER : R_HOVER;
 
       // animated amplitude for this point
@@ -419,15 +420,15 @@ export default function PerformanceCard() {
   const { rows: baseRows, loading: baseLoading, error: baseErr } = useHomeResults();
 
   const rows = React.useMemo<Row[]>(() => {
-    return (baseRows ?? []).map((r: any) => {
+    return (baseRows ?? []).map((r: HomeResultsCtx['rows'][number]) => {
       const ts = new Date(r.created_at).toISOString();
       const slug = String(r.lesson_slug || '');
       const comps: Components = {
-        pitch: Number.isFinite(r.pitch_percent) ? Number(r.pitch_percent) : undefined,
-        melody: Number.isFinite(r.rhythm_melody_percent) ? Number(r.rhythm_melody_percent) : undefined,
-        line: Number.isFinite(r.rhythm_line_percent) ? Number(r.rhythm_line_percent) : undefined,
-        intervals: Number.isFinite(r.intervals_correct_ratio)
-          ? Math.round(Number(r.intervals_correct_ratio) * 10000) / 100
+        pitch: typeof r.pitch_percent === 'number' && Number.isFinite(r.pitch_percent) ? r.pitch_percent : undefined,
+        melody: typeof r.rhythm_melody_percent === 'number' && Number.isFinite(r.rhythm_melody_percent) ? r.rhythm_melody_percent : undefined,
+        line: typeof r.rhythm_line_percent === 'number' && Number.isFinite(r.rhythm_line_percent) ? r.rhythm_line_percent : undefined,
+        intervals: typeof r.intervals_correct_ratio === 'number' && Number.isFinite(r.intervals_correct_ratio)
+          ? Math.round(r.intervals_correct_ratio * 10000) / 100
           : undefined,
       };
       return {

@@ -203,8 +203,8 @@ export default function PolarArea({
     if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
 
     const startBase = -Math.PI / 2;
-    let ang = Math.atan2(dy, dx);
-    let rel = ang - startBase;
+const ang = Math.atan2(dy, dx);
+let rel = ang - startBase;
     while (rel < 0) rel += Math.PI * 2;
     while (rel >= Math.PI * 2) rel -= Math.PI * 2;
 

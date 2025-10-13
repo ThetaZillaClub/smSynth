@@ -58,7 +58,6 @@ export default function GameFooter({
   highHz = null,
   sessionPanel,
   scaleName = null,
-  tonicPc = null, // accepted for future use; not rendered directly here
   tonicAction,
   arpAction,
 }: FooterProps) {

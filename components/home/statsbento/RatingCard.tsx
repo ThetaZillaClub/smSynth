@@ -6,6 +6,13 @@ import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { useHomeBootstrap } from '../HomeBootstrap';
 
+type RatingEventRow = {
+  pool: string | null;
+  period_end: string | null;
+  rating_after: number | null;
+  rating_before: number | null;
+};
+
 export default function RatingCard({ compact = false }: { compact?: boolean }) {
   const supabase = React.useMemo(() => createClient(), []);
   const { uid } = useHomeBootstrap();
@@ -21,7 +28,7 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
         setLoading(true); setErr(null);
         await ensureSessionReady(supabase, 2000);
 
-        // Single query: pull recent events and compute latest-per-pool + best pool
+        // Pull recent events and compute latest-per-pool
         const evQ = await supabase
           .from('rating_events')
           .select('pool, period_end, rating_after, rating_before')
@@ -30,13 +37,13 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
           .limit(1000);
         if (evQ.error) throw evQ.error;
 
-        const rows = (evQ.data as any[] | null) ?? [];
+        const rows: RatingEventRow[] = (evQ.data ?? []) as RatingEventRow[];
         if (!rows.length) {
           if (!cancelled) setRating(null);
           return;
         }
 
-        // Latest event per pool (since rows are desc by period_end)
+        // Latest event per pool (rows are desc by period_end)
         const latestByPool = new Map<string, { after: number; before: number }>();
         for (const r of rows) {
           const p = String(r.pool ?? '');
@@ -53,14 +60,12 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
         }
 
         // Pick the pool with the highest current rating (rating_after)
-        let bestPool: string | null = null;
         let bestAfter = -Infinity;
         let bestBefore = 0;
-        for (const [pool, v] of latestByPool.entries()) {
+        for (const [, v] of latestByPool.entries()) {
           if (v.after >= bestAfter) {
             bestAfter = v.after;
             bestBefore = v.before;
-            bestPool = pool;
           }
         }
 
@@ -68,8 +73,9 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
         const delta = Math.round((bestAfter - bestBefore) * 10) / 10;
 
         if (!cancelled) setRating({ value, delta });
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || String(e));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!cancelled) setErr(msg);
       } finally {
         if (!cancelled) setLoading(false);
       }

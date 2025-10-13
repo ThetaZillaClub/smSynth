@@ -7,7 +7,6 @@ import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
 import PlayProgressButton from "@/components/training/pretest/PlayProgressButton";
 
 export default function DerivedTonic({
-  statusText, // kept for prop compatibility; not shown
   running,
   inResponse,
   onStart,

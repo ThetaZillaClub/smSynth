@@ -6,6 +6,7 @@ import StudentImage from '@/components/student-home/StudentImage';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady, getImageUrlCached } from '@/lib/client-cache';
 import { STUDENT_IMAGE_HINT_KEY, pickAuthAvatarUrl } from '@/components/sidebar/types';
+import type { User } from '@supabase/supabase-js';
 
 export default function HomeHeader({
   displayName,
@@ -22,7 +23,7 @@ export default function HomeHeader({
     let cancelled = false;
     const supabase = createClient();
 
-    async function resolveAndSet(userArg?: any) {
+    async function resolveAndSet(userArg?: User | null) {
       if (cancelled) return;
 
       // Prefer bootstrap-provided path
@@ -36,12 +37,16 @@ export default function HomeHeader({
       // Resolve to URL (default bucket = avatars if missing)
       let resolved: string | null = null;
       if (path) {
-        try { resolved = await getImageUrlCached(supabase, path, { defaultBucket: 'model-images' }); } catch { resolved = null; }
+        try {
+          resolved = await getImageUrlCached(supabase, path, { defaultBucket: 'model-images' });
+        } catch {
+          resolved = null;
+        }
       }
 
       // Fallback to provider avatar
       if (!resolved) {
-        let user = userArg;
+        let user = userArg ?? null;
         if (!user) {
           const { data: { session } } = await supabase.auth.getSession();
           user = session?.user ?? null;

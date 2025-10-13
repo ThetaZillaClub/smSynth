@@ -1,6 +1,7 @@
+// components/training/pretest/internal-arpeggio/InternalArpeggio.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import usePitchTuneDurations from "@/components/games/pitch-tune/hooks/usePitchTuneDurations";
 import useSustainPass from "@/hooks/call-response/useSustainPass";
 import { hzToMidi, midiToHz, midiToNoteName } from "@/utils/pitch/pitchMath";
@@ -26,7 +27,6 @@ function triadOffsetsForScale(name?: ScaleName) {
 }
 
 export default function InternalArpeggio({
-  statusText, // kept for prop compatibility; not shown
   running,
   inResponse,
   onStart,
@@ -40,7 +40,7 @@ export default function InternalArpeggio({
   confidence,
   playMidiList, // A440 cue
 }: {
-  statusText: string;
+  statusText: string; // kept for external prop compatibility (not destructured)
   running: boolean;
   inResponse: boolean;
   onStart: () => void;
@@ -76,29 +76,36 @@ export default function InternalArpeggio({
   }, [tonicMidi]);
 
   // ---- Solfège mapping (mode-tonic) ----
-  const labelForDegree = (deg: 1 | 3 | 5): string => {
-    switch (scaleName) {
-      case "lydian":
-        return deg === 1 ? "fa" : deg === 3 ? "la" : "do";
-      case "mixolydian":
-        return deg === 1 ? "sol" : deg === 3 ? "ti" : "re";
-      case "dorian":
-        return deg === 1 ? "re" : deg === 3 ? "fa" : "la";
-      case "phrygian":
-        return deg === 1 ? "mi" : deg === 3 ? "sol" : "ti";
-      case "locrian":
-        return deg === 1 ? "ti" : deg === 3 ? "re" : "fa";
-      case "natural_minor":
-      case "harmonic_minor":
-      case "melodic_minor":
-      case "minor_pentatonic":
-        return deg === 1 ? "la" : deg === 3 ? "do" : "mi";
-      default:
-        return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
-    }
-  };
-  const targetDegrees = [1, 3, 5, 3, 1] as const;
-  const patternLabel = useMemo(() => targetDegrees.map(labelForDegree).join("–"), [scaleName]);
+  const labelForDegree = useCallback(
+    (deg: 1 | 3 | 5): string => {
+      switch (scaleName) {
+        case "lydian":
+          return deg === 1 ? "fa" : deg === 3 ? "la" : "do";
+        case "mixolydian":
+          return deg === 1 ? "sol" : deg === 3 ? "ti" : "re";
+        case "dorian":
+          return deg === 1 ? "re" : deg === 3 ? "fa" : "la";
+        case "phrygian":
+          return deg === 1 ? "mi" : deg === 3 ? "sol" : "ti";
+        case "locrian":
+          return deg === 1 ? "ti" : deg === 3 ? "re" : "fa";
+        case "natural_minor":
+        case "harmonic_minor":
+        case "melodic_minor":
+        case "minor_pentatonic":
+          return deg === 1 ? "la" : deg === 3 ? "do" : "mi";
+        default:
+          return deg === 1 ? "do" : deg === 3 ? "mi" : "sol";
+      }
+    },
+    [scaleName]
+  );
+
+  const targetDegrees = useMemo(() => [1, 3, 5, 3, 1] as const, []);
+  const patternLabel = useMemo(
+    () => targetDegrees.map(labelForDegree).join("–"),
+    [targetDegrees, labelForDegree]
+  );
 
   // ---- Phase control ----
   const [phase, setPhase] = useState<"tonic" | "arp">("tonic");

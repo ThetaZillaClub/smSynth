@@ -234,7 +234,7 @@ function PolarAreaIntervals({
     if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
 
     const startBase = -Math.PI / 2;
-    let ang = Math.atan2(dy, dx);
+    const ang = Math.atan2(dy, dx); // was `let`, never reassigned
     let rel = ang - startBase;
     while (rel < 0) rel += Math.PI * 2;
     while (rel >= Math.PI * 2) rel -= Math.PI * 2;
@@ -341,8 +341,11 @@ export default function IntervalsCard() {
 
         if (iQ.error) throw iQ.error;
 
+        type IntervalRow = { result_id: number; semitones: number; attempts: number; correct: number };
+        const rows: IntervalRow[] = (iQ.data ?? []) as IntervalRow[];
+
         const by = new Map<number, { a: number; c: number }>(); for (let i = 0; i <= 12; i++) by.set(i,{a:0,c:0});
-        for (const r of (iQ.data ?? []) as any[]) {
+        for (const r of rows) {
           const g = by.get(r.semitones)!;
           g.a += Number(r.attempts || 0);
           g.c += Number(r.correct || 0);
@@ -358,8 +361,9 @@ export default function IntervalsCard() {
           .map(({ label, pct, attempts }) => ({ label, pct, attempts }));
 
         if (!cancelled) setItems(list);
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || String(e));
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!cancelled) setErr(msg);
       } finally {
         if (!cancelled) setLoading(false);
       }
