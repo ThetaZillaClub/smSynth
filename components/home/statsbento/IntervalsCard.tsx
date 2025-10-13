@@ -66,13 +66,15 @@ const normFromDataset = (vals: number[]): ((v: number) => number) => {
 
 function PolarAreaIntervals({
   items,
-  height = 360,
+  height = 360, // fallback before width is measured
 }: {
   items: Item[];
   height?: number;
 }) {
   const { ref, width } = useMeasure();
-  const { ref: canvasRef } = useCanvas2d(width, height);
+  // square size: use measured width; fallback to provided height on first pass
+  const sqH = (width > 0 ? width : height);
+  const { ref: canvasRef } = useCanvas2d(width, sqH);
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
@@ -89,33 +91,33 @@ function PolarAreaIntervals({
     const ctx = c.getContext('2d'); if (!ctx) return;
 
     const W = Math.max(1, width);
-    const H = Math.max(1, height);
-    ctx.clearRect(0, 0, W, H);
+    const Hpx = Math.max(1, sqH); // use measured square height
+    ctx.clearRect(0, 0, W, Hpx);
 
-    const minSide = Math.min(W, H);
+    const minSide = Math.min(W, Hpx);
     if (minSide < 64) return; // guard first small pass
 
     // radii + ring bounds
     const ringPad = 8;
-    const Rraw = minSide * 0.42;
-    const R = Math.max(ringPad + 12, Rraw);
+    // Fill (almost) the whole square: radius ~= minSide/2 - padding
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
-    const cx = W / 2, cy = H / 2;
+    const cx = W / 2, cy = Hpx / 2;
 
     // dataset-normalized radii (normalize to OUTER bounds)
     const vals = items.map(it => clamp01(it.pct / 100));
     const norm = normFromDataset(vals);
 
-    // background rings
+    // background rings (thicker)
     ctx.save();
     ctx.translate(cx, cy);
     const rings = 4;
     for (let i = 1; i <= rings; i++) {
       const r = Math.max(1, r0 + (Rmax - r0) * (i / rings));
       ctx.strokeStyle = i % 2 === 0 ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
-      ctx.lineWidth = i % 2 === 0 ? 1.25 : 0.75;
+      ctx.lineWidth = i % 2 === 0 ? 3 : 2;
       ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.restore();
@@ -126,6 +128,10 @@ function PolarAreaIntervals({
     const totalGap = gapRad * n;
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
+
+    // responsive label sizing/padding (bigger + more inset) + bold
+    const labelPad = Math.max(20, Math.min(30, minSide * 0.05));
+    const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -160,34 +166,34 @@ function PolarAreaIntervals({
       ctx.fill();
       ctx.restore();
 
-      // subtle rim
+      // rim (thicker)
       ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
       ctx.stroke();
       ctx.restore();
 
-      // label outside
-      const lblR = Rmax + 16;
+      // label inside the circle (bold)
+      const lblR = Rmax - labelPad;
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
-      ctx.font = '14px ui-sans-serif, system-ui';
+      ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(items[i].label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
       ctx.restore();
     }
 
-    // focus ring
+    // focus ring (thicker)
     if (hover != null) {
       const i = hover;
       const a0 = startBase + i * (sector + gapRad);
       const a1 = a0 + sector;
       ctx.save();
       ctx.strokeStyle = 'rgba(16,24,40,0.25)';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(0, 0, Rmax + 5, a0, a1, false);
       ctx.arc(0, 0, Math.max(0, r0 - 5), a1, a0, true);
@@ -197,7 +203,7 @@ function PolarAreaIntervals({
     }
 
     ctx.restore();
-  }, [canvasRef, width, height, items, t, hover]);
+  }, [canvasRef, width, sqH, items, t, hover]);
 
   // hit detection + tooltip
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -210,7 +216,7 @@ function PolarAreaIntervals({
     if (minSide < 64) { setHover(null); setTip(null); return; }
 
     const ringPad = 8;
-    const R = Math.max(ringPad + 12, minSide * 0.42);
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
@@ -263,14 +269,14 @@ function PolarAreaIntervals({
   return (
     <div
       ref={ref}
-      className="relative w-full"
-      style={{ height }}
+      className="relative w-full bg-transparent"
+      style={{ height: sqH }} // make the drawing area square
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block', borderRadius: 12 }}
+        style={{ width: '100%', height: '100%', display: 'block', borderRadius: '50%' }}
       />
       {tip ? (
         <div
@@ -311,18 +317,15 @@ export default function IntervalsCard() {
     let cancelled = false;
     (async () => {
       try {
-        // If the base results are still loading, wait.
         if (baseLoading) { setLoading(true); setErr(baseErr ?? null); return; }
 
         setLoading(true); setErr(null);
 
-        // No recent results → empty chart, no fetch
         if (!recentIds.length) {
           if (!cancelled) { setItems([]); setLoading(false); setErr(baseErr ?? null); }
           return;
         }
 
-        // ensure session (RLS) then fetch interval classes for those IDs
         await ensureSessionReady(supabase, 2000);
 
         const iQ = await supabase
@@ -339,7 +342,6 @@ export default function IntervalsCard() {
           g.c += Number(r.correct || 0);
         }
 
-        // Keep anchors (even if 0%) so chart has context
         const anchors = new Set([0, 2, 3, 7, 12]);
         const list = Array.from({ length: 13 }, (_, s) => {
           const v = by.get(s)!;
@@ -363,7 +365,7 @@ export default function IntervalsCard() {
   const errorMsg = baseErr || err;
 
   return (
-    <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
+     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f7f7f7] to-[#f4f4f4] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Intervals</h3>
         <div className="text-sm text-[#0f0f0f]">Correct % by class</div>
@@ -375,7 +377,7 @@ export default function IntervalsCard() {
           No interval attempts yet.
         </div>
       ) : (
-        <PolarAreaIntervals items={items} height={360} />
+        <PolarAreaIntervals items={items} />
       )}
       {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
     </div>

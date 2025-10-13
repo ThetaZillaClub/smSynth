@@ -79,6 +79,11 @@ const SEG_COLOR: Record<keyof Components, string> = {
 };
 
 /* ─────────── line chart ─────────── */
+const LINE_WIDTH = 3;          // keep 3px stroke
+const LINE_COLOR = '#22c55e';  // dark green
+const DOT_FILL = '#86efac';    // light green
+const DOT_STROKE = '#22c55e';  // dark green
+
 // D3-like monotoneX slopes with Hyman filtering (prevents Bezier overshoot)
 function computeMonotoneSlopes(xs: number[], ys: number[]) {
   const n = xs.length;
@@ -114,7 +119,7 @@ function computeMonotoneSlopes(xs: number[], ys: number[]) {
 
 function PerformanceLine({
   rows,
-  height = 360,
+  height = 240,       // ↓ requested chart height
   gap = 10,
 }: {
   rows: Row[];
@@ -243,9 +248,11 @@ function PerformanceLine({
     ctx.save();
     ctx.beginPath(); ctx.rect(plotL, pad.t, plotW, ih); ctx.clip();
 
-    // Smooth dark-green line
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#22c55e';
+    // Smooth dark-green line (rounded)
+    ctx.lineWidth = LINE_WIDTH;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = LINE_COLOR;
     ctx.beginPath();
     ctx.moveTo(xs[0], ys[0]);
     for (let i = 0; i < n - 1; i++) {
@@ -267,8 +274,8 @@ function PerformanceLine({
     ctx.stroke();
 
     // Dots (light fill + dark stroke) with smooth cross-fade sizing
-    ctx.fillStyle = '#86efac';
-    ctx.strokeStyle = '#22c55e';
+    ctx.fillStyle = DOT_FILL;
+    ctx.strokeStyle = DOT_STROKE;
     for (let i = 0; i < n; i++) {
       const p = pts[i];
       const isLatest = i === n - 1;
@@ -278,18 +285,18 @@ function PerformanceLine({
       // animated amplitude for this point
       let amp = 0;
       if (hoverIdx != null && animPrevIdx == null) {
-        amp = i === hoverIdx ? animU : 0;                 // entering from nothing
+        amp = i === hoverIdx ? animU : 0;
       } else if (hoverIdx == null && animPrevIdx != null) {
-        amp = i === animPrevIdx ? 1 - animU : 0;          // leaving to nothing
+        amp = i === animPrevIdx ? 1 - animU : 0;
       } else if (hoverIdx != null && animPrevIdx != null) {
-        amp = i === hoverIdx ? animU : (i === animPrevIdx ? 1 - animU : 0); // switching
+        amp = i === hoverIdx ? animU : (i === animPrevIdx ? 1 - animU : 0);
       }
       const r = base + (target - base) * clamp01(amp);
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.lineWidth = isLatest ? 1.5 : 1;
+      ctx.lineWidth = isLatest ? 2 : 1.5;
       ctx.stroke();
     }
 
@@ -371,7 +378,7 @@ function PerformanceLine({
             <div className="font-semibold">{tip.title}</div>
             <div className="opacity-70">{tip.day}</div>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: '#22c55e' }} />
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: LINE_COLOR }} />
               Final: {tip.final}%
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-0.5">
@@ -434,20 +441,26 @@ export default function PerformanceCard() {
     });
   }, [baseRows]);
 
+  // ↓ Requested: chart height 240, add the 80px difference to the header–chart gap.
+  const CHART_H = 280;
+  const HEADER_GAP = 56;
+
   return (
     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex items-baseline justify-between gap-3" style={{ marginBottom: HEADER_GAP }}>
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Session Performance</h3>
       </div>
+
       {baseLoading ? (
-        <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-[#e8e8e8]" />
+        <div className="rounded-xl bg-[#e8e8e8] animate-pulse" style={{ height: CHART_H }} />
       ) : rows.length === 0 ? (
-        <div className="h-[78%] mt-2 flex items-center justify-center text-base text-[#0f0f0f]">
+        <div className="flex items-center justify-center text-base text-[#0f0f0f]" style={{ height: CHART_H }}>
           No sessions yet — run an exercise to unlock your dashboard.
         </div>
       ) : (
-        <PerformanceLine rows={rows} height={360} gap={10} />
+        <PerformanceLine rows={rows} height={CHART_H} gap={10} />
       )}
+
       {baseErr ? <div className="mt-3 text-sm text-[#dc2626]">{baseErr}</div> : null}
     </div>
   );

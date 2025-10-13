@@ -77,7 +77,9 @@ function PolarArea({
   height?: number;
 }) {
   const { ref, width } = useMeasure();
-  const { ref: canvasRef } = useCanvas2d(width, height);
+  // square size: use measured width; fallback to provided height on first pass
+  const sqH = (width > 0 ? width : height);
+  const { ref: canvasRef } = useCanvas2d(width, sqH);
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
@@ -94,33 +96,33 @@ function PolarArea({
     const ctx = c.getContext('2d'); if (!ctx) return;
 
     const W = Math.max(1, width);
-    const H = Math.max(1, height);
-    ctx.clearRect(0, 0, W, H);
+    const Hpx = Math.max(1, sqH); // use measured square height
+    ctx.clearRect(0, 0, W, Hpx);
 
-    const minSide = Math.min(W, H);
+    const minSide = Math.min(W, Hpx);
     if (minSide < 64) return;
 
     const ringPad = 8;
-    const Rraw = minSide * 0.42;
-    const R = Math.max(ringPad + 12, Rraw);
+    // Fill (almost) the whole square
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
-    const cx = W / 2, cy = H / 2;
+    const cx = W / 2, cy = Hpx / 2;
 
     const onVals  = items.map(it => clamp01(it.v1 / max1));
     const maeGood = items.map(it => clamp01(1 - it.v2 / max2));
     const normOn  = normFromDataset(onVals);
     const normMae = normFromDataset(maeGood);
 
-    // background rings
+    // background rings (thicker)
     ctx.save();
     ctx.translate(cx, cy);
     const rings = 4;
     for (let i = 1; i <= rings; i++) {
       const r = Math.max(1, r0 + (Rmax - r0) * (i / rings));
       ctx.strokeStyle = i % 2 === 0 ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
-      ctx.lineWidth = i % 2 === 0 ? 1.25 : 0.75;
+      ctx.lineWidth = i % 2 === 0 ? 3 : 2;
       ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.restore();
@@ -131,6 +133,10 @@ function PolarArea({
     const totalGap = gapRad * n;
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
+
+    // responsive label sizing/padding (bigger + more inset) + bold
+    const labelPad = Math.max(20, Math.min(30, minSide * 0.05));
+    const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -178,34 +184,34 @@ function PolarArea({
       ctx.fill();
       ctx.restore();
 
-      // rim
+      // rim (thicker)
       ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(0, 0, Math.max(r0, rOn), a0, a1, false);
       ctx.stroke();
       ctx.restore();
 
-      // label
-      const lblR = Rmax + 16;
+      // label (inside the circle, bold)
+      const lblR = Rmax - labelPad;
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
-      ctx.font = '14px ui-sans-serif, system-ui';
+      ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(items[i].label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
       ctx.restore();
     }
 
-    // focus ring
+    // focus ring (thicker)
     if (hover != null) {
       const i = hover;
       const a0 = startBase + i * (sector + gapRad);
       const a1 = a0 + sector;
       ctx.save();
       ctx.strokeStyle = 'rgba(16,24,40,0.25)';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(0, 0, Rmax + 5, a0, a1, false);
       ctx.arc(0, 0, Math.max(0, r0 - 5), a1, a0, true);
@@ -215,7 +221,7 @@ function PolarArea({
     }
 
     ctx.restore();
-  }, [canvasRef, width, height, items, max1, max2, t, hover]);
+  }, [canvasRef, width, sqH, items, max1, max2, t, hover]);
 
   // hit detection + tooltip
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -228,7 +234,7 @@ function PolarArea({
     if (minSide < 64) { setHover(null); setTip(null); return; }
 
     const ringPad = 8;
-    const R = Math.max(ringPad + 12, minSide * 0.42);
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
@@ -281,14 +287,14 @@ function PolarArea({
   return (
     <div
       ref={ref}
-      className="relative w-full"
-      style={{ height }}
+      className="relative w-full bg-transparent"
+      style={{ height: sqH }} // keep the chart area square
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block', borderRadius: 12 }}
+        style={{ width: '100%', height: '100%', display: 'block', borderRadius: '50%' }}
       />
       {tip ? (
         <div
@@ -331,12 +337,10 @@ export default function PitchFocusCard() {
     let cancelled = false;
     (async () => {
       try {
-        // Wait for base results if still loading
         if (baseLoading) { setLoading(true); setErr(baseErr ?? null); return; }
 
         setLoading(true); setErr(null);
 
-        // No recent results → empty state, no fetch
         if (!recentIds.length) {
           if (!cancelled) { setItems([]); setLoading(false); setErr(baseErr ?? null); }
           return;
@@ -370,7 +374,6 @@ export default function PitchFocusCard() {
           score: (1 - clamp(v.on, 0, 1)) * 0.6 + Math.min(1, v.mae / 120) * 0.4,
         }));
 
-        // Top 8 by "fragile" score, then order by MIDI
         const topFragile = [...full].sort((a, b) => b.score - a.score).slice(0, 8);
         const midiOrdered = topFragile.sort((a, b) => a.midi - b.midi);
 
@@ -390,7 +393,7 @@ export default function PitchFocusCard() {
   const errorMsg = baseErr || err;
 
   return (
-    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
+    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f7f7f7] to-[#f4f4f4] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Pitch Focus</h3>
         <div className="text-sm text-[#0f0f0f] flex items-center gap-3">
@@ -412,7 +415,7 @@ export default function PitchFocusCard() {
           No per-note data yet.
         </div>
       ) : (
-        <PolarArea items={items} max1={100} max2={120} height={360} />
+        <PolarArea items={items} max1={100} max2={120} />
       )}
 
       {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
