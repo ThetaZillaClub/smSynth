@@ -1,3 +1,4 @@
+// components/home/statsbento/PitchFocusCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -16,7 +17,13 @@ type PitchNoteRow = {
   cents_mae: number | null;
 };
 
-export default function PitchFocusCard() {
+export default function PitchFocusCard({
+  frameless = false,
+  className = '',
+}: {
+  frameless?: boolean;
+  className?: string;
+}) {
   const supabase = React.useMemo(() => createClient(), []);
   const { recentIds, loading: baseLoading, error: baseErr } = useHomeResults();
 
@@ -86,8 +93,8 @@ export default function PitchFocusCard() {
   const isLoading = baseLoading || loading;
   const errorMsg = baseErr || err;
 
-  return (
-    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm">
+  const Inner = () => (
+    <>
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Pitch Focus</h3>
         <div className="text-sm text-[#0f0f0f] flex items-center gap-3">
@@ -103,16 +110,32 @@ export default function PitchFocusCard() {
       </div>
 
       {isLoading ? (
-        <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
+        <div className="mt-2 w-full aspect-square animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
       ) : items.length === 0 ? (
-        <div className="h-[78%] mt-2 flex items-center justify-center text-base text-[#0f0f0f]">
+        <div className="mt-2 w-full aspect-square flex items-center justify-center text-base text-[#0f0f0f] rounded-xl bg-[#f5f5f5]">
           No per-note data yet.
         </div>
       ) : (
-        <PolarArea items={items} max1={100} max2={120} />
+        <div className="mt-2 relative w-full aspect-square">
+          <PolarArea items={items} max1={100} max2={120} />
+        </div>
       )}
 
       {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
+    </>
+  );
+
+  if (frameless) {
+    return (
+      <div className={`w-full ${className}`}>
+        <Inner />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm ${className}`}>
+      <Inner />
     </div>
   );
 }

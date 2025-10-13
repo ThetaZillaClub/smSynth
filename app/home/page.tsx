@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import HomeHeader from '@/components/home/HomeHeader';
 import StatsBento from '@/components/home/StatsBento';
-import HomeCardGrid from '@/components/home/HomeCardGrid';
+// ⬇️ REMOVE this import:
+// import HomeCardGrid from '@/components/home/HomeCardGrid';
 import { STUDENT_IMAGE_HINT_KEY } from '@/components/sidebar/types';
 import { HomeBootstrapProvider } from '@/components/home/HomeBootstrap';
 
@@ -91,9 +92,12 @@ export default function HomePage() {
             <StatsBento />
           </div>
 
+          {/* ⬇️ REMOVE this block to eliminate the horizontal cards */}
+          {/*
           <div className="mt-6">
             <HomeCardGrid />
           </div>
+          */}
         </div>
       </div>
     </HomeBootstrapProvider>

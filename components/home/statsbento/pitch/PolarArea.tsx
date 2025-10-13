@@ -1,3 +1,4 @@
+// components/home/statsbento/pitch/PolarArea.tsx
 'use client';
 
 import * as React from 'react';
@@ -54,8 +55,10 @@ export default function PolarArea({
     const minSide = Math.min(W, Hpx);
     if (minSide < 64) return;
 
+    // ── smaller chart radius + reserved margin for outside labels
     const ringPad = 8;
-    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
+    const labelOutset = Math.max(20, Math.min(30, minSide * 0.05)); // similar visual gap as before, now outside
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
@@ -70,7 +73,7 @@ export default function PolarArea({
     ctx.save();
     ctx.fillStyle = '#f4f4f4';
     ctx.beginPath();
-    ctx.arc(cx, cy, Rmax /* push to the edge */, 0, Math.PI * 2);
+    ctx.arc(cx, cy, Rmax, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
@@ -93,8 +96,9 @@ export default function PolarArea({
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
-    const labelPad = Math.max(20, Math.min(30, minSide * 0.05));
+    // label sizing; keep similar to before but moved outside the last ring
     const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
+    const lblR = Rmax + labelOutset * 0.9;
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -110,6 +114,7 @@ export default function PolarArea({
       const rMae = r0 + (Rmax - r0) * uMae * t;
       const rOn  = r0 + (Rmax - r0) * uOn  * t;
 
+      // hover underlay
       if (hover === i) {
         ctx.save();
         ctx.fillStyle = 'rgba(16,24,40,0.06)';
@@ -151,14 +156,16 @@ export default function PolarArea({
       ctx.stroke();
       ctx.restore();
 
-      // label
-      const lblR = Rmax - labelPad;
+      // labels OUTSIDE the last ring
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
-      ctx.textAlign = 'center';
+      const cosMid = Math.cos(mid), sinMid = Math.sin(mid);
+      ctx.textAlign = cosMid > 0 ? 'left' : (cosMid < 0 ? 'right' : 'center');
       ctx.textBaseline = 'middle';
-      ctx.fillText(items[i].label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
+      const x = cosMid * lblR;
+      const y = sinMid * lblR;
+      ctx.fillText(items[i].label, x, y);
       ctx.restore();
     }
 
@@ -191,7 +198,8 @@ export default function PolarArea({
     if (minSide < 64) { setHover(null); setTip(null); return; }
 
     const ringPad = 8;
-    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
+    const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
@@ -203,8 +211,8 @@ export default function PolarArea({
     if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
 
     const startBase = -Math.PI / 2;
-const ang = Math.atan2(dy, dx);
-let rel = ang - startBase;
+    const ang = Math.atan2(dy, dx);
+    let rel = ang - startBase;
     while (rel < 0) rel += Math.PI * 2;
     while (rel >= Math.PI * 2) rel -= Math.PI * 2;
 
@@ -250,7 +258,8 @@ let rel = ang - startBase;
     >
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block', borderRadius: '50%' }}
+        // remove circular clipping so outside labels aren’t cut off
+        style={{ width: '100%', height: '100%', display: 'block' }}
       />
       {tip ? (
         <div

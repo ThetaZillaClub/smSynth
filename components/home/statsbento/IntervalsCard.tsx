@@ -21,7 +21,8 @@ function useMeasure() {
   React.useLayoutEffect(() => {
     const el = ref.current; if (!el) return;
     const ro = new ResizeObserver(() => setW(el.clientWidth || 0));
-    ro.observe(el); setW(el.clientWidth || 0);
+    ro.observe(el);
+    setW(el.clientWidth || 0); // read once on mount before paint
     return () => ro.disconnect();
   }, []);
   return { ref, width: w };
@@ -66,15 +67,13 @@ const normFromDataset = (vals: number[]): ((v: number) => number) => {
 
 function PolarAreaIntervals({
   items,
-  height = 360, // fallback before width is measured
 }: {
   items: Item[];
-  height?: number;
 }) {
   const { ref, width } = useMeasure();
-  // square size: use measured width; fallback to provided height on first pass
-  const sqH = (width > 0 ? width : height);
-  const { ref: canvasRef } = useCanvas2d(width, sqH);
+  // Use a pure CSS square; height derives from width → no fallback jumps
+  const side = Math.max(0, width);
+  const { ref: canvasRef } = useCanvas2d(side, side);
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
@@ -90,17 +89,17 @@ function PolarAreaIntervals({
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
 
-    const W = Math.max(1, width);
-    const Hpx = Math.max(1, sqH); // use measured square height
+    const W = Math.max(1, side);
+    const Hpx = Math.max(1, side);
     ctx.clearRect(0, 0, W, Hpx);
 
     const minSide = Math.min(W, Hpx);
-    if (minSide < 64) return; // guard first small pass
+    if (minSide < 64) return; // guard very small first pass
 
-    // radii + ring bounds
+    // ── radii + ring bounds (smaller chart + reserve margin for outside labels)
     const ringPad = 8;
-    // Fill (almost) the whole square: radius ~= minSide/2 - padding
-    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
+    const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
@@ -109,13 +108,15 @@ function PolarAreaIntervals({
     // dataset-normalized radii (normalize to OUTER bounds)
     const vals = items.map(it => clamp01(it.pct / 100));
     const norm = normFromDataset(vals);
+
     // circular background fill
     ctx.save();
     ctx.fillStyle = '#f4f4f4';
     ctx.beginPath();
-    ctx.arc(cx, cy, Rmax /* push to the edge */, 0, Math.PI * 2);
+    ctx.arc(cx, cy, Rmax, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+
     // background rings (thicker)
     ctx.save();
     ctx.translate(cx, cy);
@@ -135,9 +136,10 @@ function PolarAreaIntervals({
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
-    // responsive label sizing/padding (bigger + more inset) + bold
-    const labelPad = Math.max(20, Math.min(30, minSide * 0.05));
+    // responsive label sizing
     const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
+    // place labels just outside the last ring
+    const lblR = Rmax + labelOutset * 0.9;
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -181,14 +183,16 @@ function PolarAreaIntervals({
       ctx.stroke();
       ctx.restore();
 
-      // label inside the circle (bold)
-      const lblR = Rmax - labelPad;
+      // labels OUTSIDE the last ring
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
-      ctx.textAlign = 'center';
+      const cosMid = Math.cos(mid), sinMid = Math.sin(mid);
+      ctx.textAlign = cosMid > 0 ? 'left' : (cosMid < 0 ? 'right' : 'center');
       ctx.textBaseline = 'middle';
-      ctx.fillText(items[i].label, Math.cos(mid) * lblR, Math.sin(mid) * lblR);
+      const x = cosMid * lblR;
+      const y = sinMid * lblR;
+      ctx.fillText(items[i].label, x, y);
       ctx.restore();
     }
 
@@ -209,9 +213,8 @@ function PolarAreaIntervals({
     }
 
     ctx.restore();
-  }, [canvasRef, width, sqH, items, t, hover]);
+  }, [canvasRef, side, items, t, hover]);
 
-  // hit detection + tooltip
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const c = canvasRef.current; if (!c) return;
     const rect = c.getBoundingClientRect();
@@ -222,7 +225,8 @@ function PolarAreaIntervals({
     if (minSide < 64) { setHover(null); setTip(null); return; }
 
     const ringPad = 8;
-    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad);
+    const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
@@ -234,7 +238,7 @@ function PolarAreaIntervals({
     if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
 
     const startBase = -Math.PI / 2;
-    const ang = Math.atan2(dy, dx); // was `let`, never reassigned
+    const ang = Math.atan2(dy, dx);
     let rel = ang - startBase;
     while (rel < 0) rel += Math.PI * 2;
     while (rel >= Math.PI * 2) rel -= Math.PI * 2;
@@ -250,24 +254,18 @@ function PolarAreaIntervals({
 
     setHover(idx);
 
-    // tooltip near normalized radius
     const vals = items.map(it => clamp01(it.pct / 100));
     const norm = normFromDataset(vals);
     const u = norm(vals[idx]);
 
-    const Rdraw = r0 + (Rmax - r0) * u; // current radius (no easing needed for tip)
+    const Rdraw = r0 + (Rmax - r0) * u;
     const mid = (startBase + idx * cluster) + sector / 2;
 
     const tipX = clamp(cx + Math.cos(mid) * (Rdraw + 12), 8, W - 8);
     const tipY = clamp(cy + Math.sin(mid) * (Rdraw + 12), 8, H - 8);
 
     const it = items[idx];
-    setTip({
-      x: tipX, y: tipY,
-      label: it.label,
-      pct: Math.round(it.pct),
-      attempts: it.attempts,
-    });
+    setTip({ x: tipX, y: tipY, label: it.label, pct: Math.round(it.pct), attempts: it.attempts });
   }, [items, canvasRef]);
 
   const onMouseLeave = React.useCallback(() => { setHover(null); setTip(null); }, []);
@@ -275,14 +273,13 @@ function PolarAreaIntervals({
   return (
     <div
       ref={ref}
-      className="relative w-full bg-transparent"
-      style={{ height: sqH }} // make the drawing area square
+      className="relative w-full bg-transparent aspect-square"
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block', borderRadius: '50%' }}
+        style={{ width: '100%', height: '100%', display: 'block' }}
       />
       {tip ? (
         <div
@@ -311,7 +308,13 @@ function PolarAreaIntervals({
 }
 
 /* ---------------- card + data ---------------- */
-export default function IntervalsCard() {
+export default function IntervalsCard({
+  frameless = false,
+  className = '',
+}: {
+  frameless?: boolean;
+  className?: string;
+}) {
   const supabase = React.useMemo(() => createClient(), []);
   const { recentIds, loading: baseLoading, error: baseErr } = useHomeResults();
 
@@ -374,22 +377,40 @@ export default function IntervalsCard() {
   const isLoading = baseLoading || loading;
   const errorMsg = baseErr || err;
 
-  return (
-     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm">
+  const Inner = () => (
+    <>
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Intervals</h3>
         <div className="text-sm text-[#0f0f0f]">Correct % by class</div>
       </div>
+
       {isLoading ? (
-        <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
+        <div className="mt-2 w-full aspect-square animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
       ) : items.length === 0 ? (
-        <div className="h-[78%] mt-2 flex items-center justify-center text-base text-[#0f0f0f]">
+        <div className="mt-2 w-full aspect-square flex items-center justify-center text-base text-[#0f0f0f] rounded-xl bg-[#f5f5f5]">
           No interval attempts yet.
         </div>
       ) : (
-        <PolarAreaIntervals items={items} />
+        <div className="mt-2">
+          <PolarAreaIntervals items={items} />
+        </div>
       )}
+
       {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
+    </>
+  );
+
+  if (frameless) {
+    return (
+      <div className={`w-full ${className}`}>
+        <Inner />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm ${className}`}>
+      <Inner />
     </div>
   );
 }
