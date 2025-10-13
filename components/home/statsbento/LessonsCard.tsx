@@ -64,14 +64,14 @@ export default function LessonsCard() {
   }, [baseRows]);
 
   return (
-    <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm flex flex-col">
+    <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
       {/* Header */}
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Completed Lessons</h3>
         <div className="flex items-center gap-2">
           <span
             className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-[#0f0f0f] whitespace-nowrap leading-tight"
-            style={{ borderColor: '#dcdcdc', background: '#fff' }}
+            style={{ borderColor: '#dcdcdc', background: '#fdfdfd' }}
             title={`${completedCount} completed`}
           >
             {completedCount} completed
@@ -100,7 +100,7 @@ export default function LessonsCard() {
               {recent.map((r) => (
                 <div
                   key={r.slug}
-                  className="flex items-center justify-between rounded-lg border bg-white px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8] shadow-sm px-3 py-2"
                   style={{ borderColor: '#e5e7eb' }}
                   title={`${r.title} — ${r.when}`}
                 >

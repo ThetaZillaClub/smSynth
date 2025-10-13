@@ -25,7 +25,7 @@ export default function HomeCardGrid() {
           aria-label={c.title}
           className={[
             // Match compact stat cards: subtle gradient, slim height, tight padding
-            'group text-left rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7]',
+            'group text-left rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]',
             'h-[90px] md:h-[96px] p-4',
             'w-full flex items-center justify-between gap-3',
             'hover:shadow-md shadow-sm active:scale-[0.99] transition',

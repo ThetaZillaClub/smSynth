@@ -446,7 +446,7 @@ export default function PerformanceCard() {
   const HEADER_GAP = 56;
 
   return (
-    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">
+    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3" style={{ marginBottom: HEADER_GAP }}>
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Session Performance</h3>
       </div>

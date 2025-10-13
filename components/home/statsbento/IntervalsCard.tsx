@@ -109,7 +109,13 @@ function PolarAreaIntervals({
     // dataset-normalized radii (normalize to OUTER bounds)
     const vals = items.map(it => clamp01(it.pct / 100));
     const norm = normFromDataset(vals);
-
+    // circular background fill
+    ctx.save();
+    ctx.fillStyle = '#f4f4f4';
+    ctx.beginPath();
+    ctx.arc(cx, cy, Rmax /* push to the edge */, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
     // background rings (thicker)
     ctx.save();
     ctx.translate(cx, cy);
@@ -365,13 +371,13 @@ export default function IntervalsCard() {
   const errorMsg = baseErr || err;
 
   return (
-     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f7f7f7] to-[#f4f4f4] p-6 shadow-sm">
+     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Intervals</h3>
         <div className="text-sm text-[#0f0f0f]">Correct % by class</div>
       </div>
       {isLoading ? (
-        <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-[#e8e8e8]" />
+        <div className="h-[78%] mt-2 animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
       ) : items.length === 0 ? (
         <div className="h-[78%] mt-2 flex items-center justify-center text-base text-[#0f0f0f]">
           No interval attempts yet.

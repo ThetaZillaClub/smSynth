@@ -27,7 +27,7 @@ export default function CompletedCountCard({ compact = false }: { compact?: bool
   const bodyH = compact ? 'h-[48%]' : 'h-[64%]';
 
   return (
-    <div className={`h-full rounded-2xl border border-[#d2d2d2] bg-[#fcfcfc] ${pad} shadow-sm`}>
+    <div className={`h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] ${pad} shadow-sm`}>
       <div className="flex items-baseline justify-between gap-3">
         <h3 className={`${titleCls} text-[#0f0f0f]`}>Completed</h3>
       </div>
