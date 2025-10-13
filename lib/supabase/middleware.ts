@@ -22,18 +22,27 @@ function applySupabaseCookieDefaults(
   return { path: '/', httpOnly: true, sameSite: 'lax', secure: !!isHttps };
 }
 
-// Copy cookies from one NextResponse to another (used for redirects)
-function copyCookies(from: NextResponse, to: NextResponse, req: NextRequest) {
-  for (const c of from.cookies.getAll()) {
-    const opts = applySupabaseCookieDefaults(c.name, req);
-    to.cookies.set({ name: c.name, value: c.value, ...opts });
+/**
+ * Forward cookies from one response to another while preserving important attributes.
+ */
+function forwardCookies(from: NextResponse, to: NextResponse, req: NextRequest) {
+  const all = from.cookies.getAll();
+  for (const c of all) {
+    to.cookies.set({
+      name: c.name,
+      value: c.value,
+      path: (c as any).path ?? '/',
+      httpOnly: (c as any).httpOnly ?? true,
+      sameSite: ((c as any).sameSite as 'lax' | 'strict' | 'none' | undefined) ?? 'lax',
+      secure: (c as any).secure ?? applySupabaseCookieDefaults(c.name, req).secure,
+      ...(typeof (c as any).maxAge !== 'undefined' ? { maxAge: (c as any).maxAge } : {}),
+      ...(typeof (c as any).expires !== 'undefined' ? { expires: (c as any).expires } : {}),
+    });
   }
 }
 
 export async function updateSession(request: NextRequest) {
-  // Narrow WHEN the middleware does any auth work:
-  // - Only handle top-level navigations (HTML documents)
-  // - Skip prefetch/HEAD/background fetches
+  // Only handle top-level navigations (HTML documents). Skip prefetch/HEAD/background fetches.
   const dest = request.headers.get('sec-fetch-dest') || '';
   const isDoc = dest === 'document';
   const isHead = request.method === 'HEAD';
@@ -77,12 +86,30 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
+  // If we arrived with an OAuth/PKCE `code`, exchange it on the server.
+  const code = request.nextUrl.searchParams.get('code');
+  if (code) {
+    try {
+      await supabase.auth.exchangeCodeForSession(code); // <-- pass code to fix TS2554
+    } catch {
+      // continue; user will be treated as unauthenticated below if exchange failed
+    }
+
+    // Clean the URL (remove code/state) so refreshes don't re-exchange.
+    const cleanUrl = request.nextUrl.clone();
+    cleanUrl.searchParams.delete('code');
+    cleanUrl.searchParams.delete('state');
+
+    const res = NextResponse.redirect(cleanUrl);
+    forwardCookies(supabaseResponse, res, request);
+    return res;
+  }
+
   // IMPORTANT: no code between client creation and getClaims()
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
-  // Set a small readable cookie for pre-paint layout bootstrap ("1" if authed, "0" otherwise)
-  // Do this *before* any redirects so the first HTML gets the cookie.
+  // Set a small readable cookie for pre-paint layout bootstrap ("1" if authed, "0" otherwise).
   {
     const resCookies = supabaseResponse.cookies;
     resCookies.set({
@@ -99,7 +126,7 @@ export async function updateSession(request: NextRequest) {
   const isRoot = pathname === '/';
   if (user && isRoot) {
     const res = NextResponse.redirect(new URL('/home', request.url));
-    copyCookies(supabaseResponse, res, request);
+    forwardCookies(supabaseResponse, res, request);
     return res;
   }
 
@@ -114,9 +141,8 @@ export async function updateSession(request: NextRequest) {
     const next = pathname + (search || '');
     if (next && next !== '/') url.searchParams.set('next', next);
 
-    // Preserve any Set-Cookie from Supabase
     const res = NextResponse.redirect(url);
-    copyCookies(supabaseResponse, res, request);
+    forwardCookies(supabaseResponse, res, request);
     return res;
   }
 

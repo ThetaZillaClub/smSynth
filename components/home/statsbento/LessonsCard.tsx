@@ -7,6 +7,7 @@ import { ensureSessionReady } from '@/lib/client-cache';
 import { letterFromPercent } from '@/utils/scoring/grade';
 import { PR_COLORS } from '@/utils/stage';
 import { COURSES } from '@/lib/courses/registry';
+import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
 
 const PASSED = new Set(['A','A-','B+','B','B-']);
 const MASTERED = new Set(['A','A+']); // A- is NOT mastery
@@ -20,6 +21,8 @@ const titleByLessonSlug: Record<string,string> = (() => {
 
 export default function LessonsCard() {
   const supabase = React.useMemo(() => createClient(), []);
+  const { uid } = useHomeBootstrap();
+
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -34,9 +37,8 @@ export default function LessonsCard() {
     (async () => {
       try {
         setLoading(true); setErr(null);
+        // allow auth to hydrate tokens for RLS; do not call getUser (uid is from bootstrap)
         await ensureSessionReady(supabase, 2000);
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id; if (!uid) throw new Error('No user');
 
         const { data, error } = await supabase
           .from('lesson_results')
@@ -85,7 +87,7 @@ export default function LessonsCard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [supabase]);
+  }, [supabase, uid]);
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm flex flex-col">

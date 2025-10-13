@@ -5,6 +5,7 @@ import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { PR_COLORS } from '@/utils/stage';
+import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
@@ -300,6 +301,7 @@ function PolarAreaIntervals({
 /* ---------------- card + data ---------------- */
 export default function IntervalsCard() {
   const supabase = React.useMemo(() => createClient(), []);
+  const { uid } = useHomeBootstrap();
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [items, setItems] = React.useState<Item[]>([]);
@@ -309,9 +311,8 @@ export default function IntervalsCard() {
     (async () => {
       try {
         setLoading(true); setErr(null);
+        // allow auth token to hydrate, but don't fetch the user — we have uid from bootstrap
         await ensureSessionReady(supabase, 2000);
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id; if (!uid) throw new Error('No user');
 
         const { data: results, error: rErr } = await supabase
           .from('lesson_results')
@@ -354,7 +355,7 @@ export default function IntervalsCard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [supabase]);
+  }, [supabase, uid]);
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">

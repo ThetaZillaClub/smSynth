@@ -4,9 +4,12 @@
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
+import { useHomeBootstrap } from '../HomeBootstrap';
 
 export default function RatingCard({ compact = false }: { compact?: boolean }) {
   const supabase = React.useMemo(() => createClient(), []);
+  const { uid } = useHomeBootstrap();
+
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [rating, setRating] = React.useState<{ value: number; delta: number } | null>(null);
@@ -17,8 +20,6 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
       try {
         setLoading(true); setErr(null);
         await ensureSessionReady(supabase, 2000);
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id; if (!uid) throw new Error('No user');
 
         const [ratings, events] = await Promise.all([
           supabase.from('player_ratings').select('pool, rating').eq('uid', uid),
@@ -47,7 +48,7 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [supabase]);
+  }, [supabase, uid]);
 
   const deltaText =
     rating == null

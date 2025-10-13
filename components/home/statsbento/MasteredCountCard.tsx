@@ -5,11 +5,14 @@ import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { letterFromPercent } from '@/utils/scoring/grade';
+import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
 
 const MASTERED = new Set(['A','A+']); // mastery only A/A+
 
 export default function MasteredCountCard({ compact = false }: { compact?: boolean }) {
   const supabase = React.useMemo(() => createClient(), []);
+  const { uid } = useHomeBootstrap();
+
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [count, setCount] = React.useState<number>(0);
@@ -19,9 +22,8 @@ export default function MasteredCountCard({ compact = false }: { compact?: boole
     (async () => {
       try {
         setLoading(true); setErr(null);
+        // Ensure auth is ready for RLS, but do not call getUser (uid comes from bootstrap)
         await ensureSessionReady(supabase, 2000);
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id; if (!uid) throw new Error('No user');
 
         const { data, error } = await supabase
           .from('lesson_results')
@@ -47,7 +49,7 @@ export default function MasteredCountCard({ compact = false }: { compact?: boole
       }
     })();
     return () => { cancelled = true; };
-  }, [supabase]);
+  }, [supabase, uid]);
 
   const pad = compact ? 'p-4' : 'p-6';
   const titleCls = compact ? 'text-sm font-semibold' : 'text-xl font-semibold';

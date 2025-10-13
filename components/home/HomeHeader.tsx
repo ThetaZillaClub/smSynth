@@ -9,7 +9,7 @@ import { STUDENT_IMAGE_HINT_KEY, pickAuthAvatarUrl } from '@/components/sidebar/
 
 export default function HomeHeader({
   displayName,
-  avatarUrl, // optional initial value from server; we'll resolve a better one client-side
+  avatarUrl,
 }: {
   displayName: string;
   avatarUrl: string | null;
@@ -18,28 +18,33 @@ export default function HomeHeader({
 
   React.useEffect(() => {
     let cancelled = false;
+    const supabase = createClient();
 
-    (async () => {
-      const supabase = createClient();
+    async function resolveAndSet(userArg?: any) {
+      if (cancelled) return;
 
-      await ensureSessionReady(supabase, 2500);
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
+      // Try current session if user not passed in
+      let user = userArg;
       if (!user) {
-        if (!cancelled) setImgUrl(null);
+        const { data: { session } } = await supabase.auth.getSession();
+        user = session?.user ?? null;
+      }
+
+      if (!user) {
+        // Don’t make this terminal; auth listener below will call us again.
+        setImgUrl(null);
         return;
       }
 
       // Single shared cached fetch
       const row = await getCurrentStudentRowCached(supabase);
 
-      // 1) Try localStorage hint first
+      // 1) localStorage hint → row.image_path
       let hintedPath: string | null = null;
       try { hintedPath = localStorage.getItem(STUDENT_IMAGE_HINT_KEY); } catch {}
-
       const imagePath = hintedPath || (row?.image_path ?? null);
 
-      // 2) If we have a storage path, resolve a signed/public URL
+      // 2) Resolve signed/public URL
       let resolved: string | null = null;
       if (imagePath) {
         try {
@@ -47,20 +52,38 @@ export default function HomeHeader({
           if (!hintedPath && row?.image_path) {
             try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, row.image_path); } catch {}
           }
-        } catch {
-          resolved = null;
-        }
+        } catch { resolved = null; }
       }
 
-      // 3) Fallback: provider avatar (e.g., GitHub/Google)
-      if (!resolved) {
-        resolved = pickAuthAvatarUrl(user) ?? null;
-      }
+      // 3) Fallback to provider avatar
+      if (!resolved) resolved = pickAuthAvatarUrl(user) ?? null;
 
       if (!cancelled) setImgUrl(resolved);
+    }
+
+    // First attempt (don’t bail permanently if unauth’d)
+    (async () => {
+      // Give the session a short chance to appear, but not terminal if not ready
+      await ensureSessionReady(supabase, 2500).catch(() => {});
+      await resolveAndSet();
     })();
 
-    return () => { cancelled = true; };
+    // Re-run whenever auth changes (this fixes the “one-shot then bail” problem)
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      resolveAndSet(session?.user ?? null);
+    });
+
+    // If another tab/page updates the image hint path, refresh here too
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === STUDENT_IMAGE_HINT_KEY) resolveAndSet();
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      cancelled = true;
+      sub?.subscription?.unsubscribe?.();
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   const initial = (displayName?.trim()?.[0] ?? '?').toUpperCase();
@@ -68,10 +91,10 @@ export default function HomeHeader({
   return (
     <header className="flex items-center justify-between gap-4">
       <div className="flex items-center gap-4">
-        {/* Avatar shell */}
         <div className="h-12 w-12 md:h-14 md:w-14 rounded-full overflow-hidden bg-[#f9f9f9] border border-[#d2d2d2] grid place-items-center">
           {imgUrl ? (
             <div className="w-full h-full">
+              {/* (Optional) If you want zero inner fade like the sidebar, add `visible` */}
               <StudentImage imgUrl={imgUrl} alt={`${displayName} avatar`} />
             </div>
           ) : (

@@ -1,3 +1,4 @@
+// components/student-home/StudentImage.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -12,11 +13,13 @@ type Props = {
 /** Transparent reserved space; outer card controls any visual transition. */
 export default function StudentImage({ imgUrl, alt, visible = false }: Props) {
   const [loaded, setLoaded] = useState(false);
+  const [errored, setErrored] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
-  // Handle cache hits (instant decode)
+  // Reset on URL change & handle cache hits (instant decode)
   useEffect(() => {
     setLoaded(false);
+    setErrored(false);
     const el = imgRef.current;
     if (el && el.complete && el.naturalWidth > 0) setLoaded(true);
   }, [imgUrl]);
@@ -25,19 +28,20 @@ export default function StudentImage({ imgUrl, alt, visible = false }: Props) {
 
   return (
     <div className="relative w-full aspect-square bg-transparent">
-      {imgUrl ? (
+      {imgUrl && !errored ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
+          key={imgUrl}                // ensure React re-evaluates when URL changes
           ref={imgRef}
           src={imgUrl}
           alt={alt}
-          // No inner fade when `visible` is true → prevents double-fade
           className={[
             'absolute inset-0 w-full h-full object-cover',
             visible ? '' : 'transition-opacity duration-300',
             show ? 'opacity-100' : 'opacity-0',
           ].join(' ')}
           onLoad={() => setLoaded(true)}
+          onError={() => { setErrored(true); setLoaded(true); }}
           decoding="async"
           loading="eager"
           fetchPriority="high"

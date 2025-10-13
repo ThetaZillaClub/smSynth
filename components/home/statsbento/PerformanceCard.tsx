@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { PR_COLORS } from '@/utils/stage';
 import { COURSES } from '@/lib/courses/registry';
+import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
 
 /* ─────────── small utils ─────────── */
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
@@ -353,6 +354,8 @@ function VerticalTimeBars({
 /* ─────────── card ─────────── */
 export default function PerformanceCard() {
   const supabase = React.useMemo(() => createClient(), []);
+  const { uid } = useHomeBootstrap();
+
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [rows, setRows] = React.useState<Row[]>([]);
@@ -362,9 +365,8 @@ export default function PerformanceCard() {
     (async () => {
       try {
         setLoading(true); setErr(null);
+        // Ensure auth session is ready for RLS; uid is provided by bootstrap (no getUser)
         await ensureSessionReady(supabase, 2000);
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id; if (!uid) throw new Error('No user');
 
         // Pull individual results with component details (no daily averaging)
         const { data, error } = await supabase
@@ -389,7 +391,6 @@ export default function PerformanceCard() {
             day: fmtDay(ts),
             final: clamp(Number(r.final_percent ?? 0), 0, 100),
             lessonSlug: slug,
-            // avoid mixing ?? and || without parentheses
             lessonTitle: (titleByLessonSlug[slug] ?? (slug || 'Unknown Lesson')),
             comps,
           };
@@ -403,7 +404,7 @@ export default function PerformanceCard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [supabase]);
+  }, [supabase, uid]);
 
   return (
     <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-white to-[#f7f7f7] p-6 shadow-sm">

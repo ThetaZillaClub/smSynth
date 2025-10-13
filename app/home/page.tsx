@@ -1,19 +1,19 @@
 // app/home/page.tsx
-import { createClient } from '@/lib/supabase/server'
-import HomeHeader from '@/components/home/HomeHeader'
-import StatsBento from '@/components/home/StatsBento'
-import HomeCardGrid from '@/components/home/HomeCardGrid'
+'use client';
 
-function pickDisplayName(user: { user_metadata?: unknown; email?: string | null }): string {
-  const meta = user.user_metadata;
-  if (meta && typeof meta === 'object' && 'display_name' in meta) {
-    const v = (meta as { display_name?: unknown }).display_name;
-    if (typeof v === 'string') return v;
-  }
-  return user.email?.split('@')?.[0] ?? '';
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+import HomeHeader from '@/components/home/HomeHeader';
+import StatsBento from '@/components/home/StatsBento';
+import HomeCardGrid from '@/components/home/HomeCardGrid';
+import { STUDENT_IMAGE_HINT_KEY } from '@/components/sidebar/types';
+import { HomeBootstrapProvider } from '@/components/home/HomeBootstrap';
+
+function pickDisplayNameFromEmail(email?: string | null) {
+  return email?.split('@')?.[0] ?? 'You';
 }
-
-function pickAvatarUrl(user: { user_metadata?: unknown }): string | null {
+function pickAvatarUrlFromMeta(user: { user_metadata?: unknown }): string | null {
   const meta = user.user_metadata;
   if (meta && typeof meta === 'object' && 'avatar_url' in meta) {
     const v = (meta as { avatar_url?: unknown }).avatar_url;
@@ -22,27 +22,76 @@ function pickAvatarUrl(user: { user_metadata?: unknown }): string | null {
   return null;
 }
 
-export default async function HomePage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  // Middleware already guards this route; no need to redirect again.
+export default function HomePage() {
+  const supabase = React.useMemo(() => createClient(), []);
+  const router = useRouter();
 
-  const displayName = user ? pickDisplayName(user) : ''
-  const avatarUrl = user ? pickAvatarUrl(user) : null
+  const [bootstrap, setBootstrap] = React.useState<null | {
+    uid: string;
+    displayName: string;
+    avatarUrl: string | null;
+    studentImagePath: string | null;
+  }>(null);
+
+  React.useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        router.replace('/auth/login?next=/home');
+        return;
+      }
+
+      const { data: model } = await supabase
+        .from('models')
+        .select('creator_display_name, image_path')
+        .eq('uid', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (cancel) return;
+
+      const displayName =
+        (model?.creator_display_name?.trim?.()
+          ? model!.creator_display_name!.trim()
+          : null) ?? pickDisplayNameFromEmail(user.email);
+
+      const studentImagePath = model?.image_path ?? null;
+      if (studentImagePath) {
+        try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, studentImagePath); } catch {}
+      }
+
+      setBootstrap({
+        uid: user.id,
+        displayName,
+        avatarUrl: pickAvatarUrlFromMeta(user),
+        studentImagePath,
+      });
+    })();
+    return () => { cancel = true; };
+  }, [supabase, router]);
+
+  if (!bootstrap) {
+    return <div className="min-h-screen bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2]" />;
+  }
 
   return (
-    <div className="min-h-dvh bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
-      <div className="px-6 pt-8 pb-12 max-w-7xl mx-auto">
-        <HomeHeader displayName={displayName} avatarUrl={avatarUrl} />
+    <HomeBootstrapProvider value={{ uid: bootstrap.uid }}>
+      <div className="min-h-dvh bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
+        <div className="px-6 pt-8 pb-12 max-w-7xl mx-auto">
+          <HomeHeader displayName={bootstrap.displayName} avatarUrl={bootstrap.avatarUrl} />
 
-        <div className="mt-6">
-          <StatsBento />
-        </div>
+          <div className="mt-6">
+            <StatsBento />
+          </div>
 
-        <div className="mt-6">
-          <HomeCardGrid />
+          <div className="mt-6">
+            <HomeCardGrid />
+          </div>
         </div>
       </div>
-    </div>
-  )
+    </HomeBootstrapProvider>
+  );
 }

@@ -5,11 +5,13 @@ import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { letterFromPercent } from '@/utils/scoring/grade';
+import { useHomeBootstrap } from '@/components/home/HomeBootstrap';
 
-const PASSED = new Set(['A','A-','B+','B','B-']);
+const PASSED = new Set(['A', 'A-', 'B+', 'B', 'B-']);
 
 export default function CompletedCountCard({ compact = false }: { compact?: boolean }) {
   const supabase = React.useMemo(() => createClient(), []);
+  const { uid } = useHomeBootstrap();
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [count, setCount] = React.useState<number>(0);
@@ -18,10 +20,11 @@ export default function CompletedCountCard({ compact = false }: { compact?: bool
     let cancelled = false;
     (async () => {
       try {
-        setLoading(true); setErr(null);
+        setLoading(true);
+        setErr(null);
+
+        // Give the client a moment to hydrate the auth token
         await ensureSessionReady(supabase, 2000);
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id; if (!uid) throw new Error('No user');
 
         const { data, error } = await supabase
           .from('lesson_results')
@@ -29,6 +32,7 @@ export default function CompletedCountCard({ compact = false }: { compact?: bool
           .eq('uid', uid)
           .order('created_at', { ascending: false })
           .limit(400);
+
         if (error) throw error;
 
         const bestBy: Record<string, number> = {};
@@ -38,7 +42,7 @@ export default function CompletedCountCard({ compact = false }: { compact?: bool
           if (!slug) continue;
           bestBy[slug] = Math.max(bestBy[slug] ?? 0, pct);
         }
-        const completed = Object.values(bestBy).filter(v => PASSED.has(letterFromPercent(v))).length;
+        const completed = Object.values(bestBy).filter((v) => PASSED.has(letterFromPercent(v))).length;
         if (!cancelled) setCount(completed);
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || String(e));
@@ -46,8 +50,10 @@ export default function CompletedCountCard({ compact = false }: { compact?: bool
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [supabase]);
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, uid]);
 
   const pad = compact ? 'p-4' : 'p-6';
   const titleCls = compact ? 'text-sm font-semibold' : 'text-xl font-semibold';
