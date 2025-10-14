@@ -72,13 +72,7 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
     const vals = items.map(it => clamp01(it.pct / 100));
     const norm = normFromDataset(vals);
 
-    // background disk
-    ctx.save();
-    ctx.fillStyle = '#f4f4f4';
-    ctx.beginPath();
-    ctx.arc(cx, cy, Rmax, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+
 
     // rings
     ctx.save();

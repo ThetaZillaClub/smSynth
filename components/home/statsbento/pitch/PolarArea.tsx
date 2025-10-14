@@ -10,8 +10,11 @@ import type { Item } from './types';
 const GAMMA = 0.9;
 
 // Blue palette
-const BLUE_FILL = '#3b82f6';   // existing blue
-const BLUE_STROKE = '#2563eb'; // softer rim (blue-600-ish)
+const BLUE_FILL = '#3b82f6';
+const BLUE_STROKE = '#2563eb';
+
+// When radii are nearly equal, keep ordering stable
+const ORDER_EPS = 0.75; // px
 
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
   const vMin = Math.min(...vals);
@@ -78,14 +81,6 @@ export default function PolarArea({
     const normOn  = normFromDataset(onVals);
     const normMae = normFromDataset(maeGood);
 
-    // background disk
-    ctx.save();
-    ctx.fillStyle = '#f4f4f4';
-    ctx.beginPath();
-    ctx.arc(cx, cy, Rmax, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
     // rings
     ctx.save();
     ctx.translate(cx, cy);
@@ -121,89 +116,83 @@ export default function PolarArea({
       const uMae = normMae(maeGood[i]);
       const rMae = r0 + (Rmax - r0) * uMae * t;
       const rOn  = r0 + (Rmax - r0) * uOn  * t;
-      const rTop = Math.max(rOn, rMae);
 
-      // MAE layer (blue)
-      ctx.save();
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = BLUE_FILL;
-      ctx.beginPath();
-      ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
-      ctx.arc(0, 0, r0, a1, a0, true);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
+      // Decide z-order so the SMALLER layer is always on top
+      const approxEqual = Math.abs(rMae - rOn) <= ORDER_EPS;
+      // Stable tiebreaker: prefer green on top when nearly equal
+      const topIsGreen = approxEqual ? true : (rOn < rMae);
+      const layers = topIsGreen
+        ? [
+            { key: 'blue',  r: rMae, fill: BLUE_FILL,      alpha: 0.35, stroke: BLUE_STROKE, strokeAlpha: 0.9, strokeWidth: 2.5, hiComp: 'screen' as const, hiAlpha: 0.45 },
+            { key: 'green', r: rOn,  fill: PR_COLORS.noteFill, alpha: 0.60, stroke: PR_COLORS.noteStroke, strokeAlpha: 1.0, strokeWidth: 3.0, hiComp: 'hard-light' as const, hiAlpha: 0.75 },
+          ] // draw larger first (blue), smaller last (green)
+        : [
+            { key: 'green', r: rOn,  fill: PR_COLORS.noteFill, alpha: 0.60, stroke: PR_COLORS.noteStroke, strokeAlpha: 1.0, strokeWidth: 3.0, hiComp: 'hard-light' as const, hiAlpha: 0.75 },
+            { key: 'blue',  r: rMae, fill: BLUE_FILL,      alpha: 0.35, stroke: BLUE_STROKE, strokeAlpha: 0.9, strokeWidth: 2.5, hiComp: 'screen' as const, hiAlpha: 0.45 },
+          ]; // draw larger first (green), smaller last (blue)
 
-      // On-pitch layer (green)
-      ctx.save();
-      ctx.globalAlpha = 0.60;
-      ctx.fillStyle = PR_COLORS.noteFill;
-      ctx.beginPath();
-      ctx.arc(0, 0, Math.max(r0, rOn), a0, a1, false);
-      ctx.arc(0, 0, r0, a1, a0, true);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
+      // --- FILLS: draw larger (bottom) then smaller (top) ---
+      for (const L of layers) {
+        ctx.save();
+        ctx.globalAlpha = L.alpha;
+        ctx.fillStyle = L.fill;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
+        ctx.arc(0, 0, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
 
-      // Subtle dark blue rim at the MAE outer edge (mirrors green subtlety)
-      ctx.save();
-      ctx.strokeStyle = BLUE_STROKE;
-      ctx.lineWidth = 2.5;   // softer than green
-      ctx.globalAlpha = 0.9; // gentle presence
-      ctx.beginPath();
-      ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
-      ctx.stroke();
-      ctx.restore();
+      // --- RIMS: same order; top (smaller) rim lands last ---
+      for (const L of layers) {
+        ctx.save();
+        ctx.strokeStyle = L.stroke;
+        ctx.globalAlpha = L.strokeAlpha;
+        ctx.lineWidth = L.strokeWidth;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
+        ctx.stroke();
+        ctx.restore();
+      }
 
-      // existing dark green rim at on-pitch outer edge
-      ctx.save();
-      ctx.strokeStyle = PR_COLORS.noteStroke;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, Math.max(r0, rOn), a0, a1, false);
-      ctx.stroke();
-      ctx.restore();
-
-      // HOVER — brighter & applied to BOTH layers; includes a sheen band
+      // --- HOVER: overlays stack with the same z-order ---
       if (hover === i) {
-        // brighten green
-        ctx.save();
-        ctx.globalCompositeOperation = 'hard-light';
-        ctx.globalAlpha = 0.75;
-        ctx.fillStyle = PR_COLORS.noteFill;
-        ctx.beginPath();
-        ctx.arc(0, 0, Math.max(r0, rOn), a0, a1, false);
-        ctx.arc(0, 0, r0, a1, a0, true);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+        for (const L of layers) {
+          ctx.save();
+          ctx.globalCompositeOperation = L.hiComp;
+          ctx.globalAlpha = L.hiAlpha;
+          ctx.fillStyle = L.fill;
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
+          ctx.arc(0, 0, r0, a1, a0, true);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
 
-        // brighten blue
-        ctx.save();
-        ctx.globalCompositeOperation = 'screen';
-        ctx.globalAlpha = 0.45;
-        ctx.fillStyle = BLUE_FILL;
-        ctx.beginPath();
-        ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
-        ctx.arc(0, 0, r0, a1, a0, true);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-
-        // sheen band across the active sector
+        // Sheen band only on the TOP (smaller) layer so it reads as the top surface
+        const top = layers[1]; // smaller = drawn last
         const sheenInner = r0 + (Rmax - r0) * 0.48;
-        const sheenOuter = r0 + (Rmax - r0) * 0.90;
+        const sheenOuter = Math.max(sheenInner + 1, top.r); // cap at top layer radius
         const grad = ctx.createRadialGradient(0, 0, sheenInner, 0, 0, sheenOuter);
         grad.addColorStop(0.00, 'rgba(255,255,255,0.00)');
         grad.addColorStop(0.50, 'rgba(255,255,255,0.40)');
         grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
 
+        // clip sheen to the top layer's annulus so it never spills under it
         ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(r0, top.r), a0, a1, false);
+        ctx.arc(0, 0, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.clip();
+
         ctx.globalCompositeOperation = 'screen';
         ctx.globalAlpha = 0.6;
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(0, 0, rTop, a0, a1, false);
+        ctx.arc(0, 0, Math.max(r0, top.r), a0, a1, false);
         ctx.arc(0, 0, r0, a1, a0, true);
         ctx.closePath();
         ctx.fill();
@@ -211,14 +200,15 @@ export default function PolarArea({
       }
 
       // outside note labels
+      const rTop = Math.max(rOn, rMae); // for label offset geometry only
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
       const cosMid = Math.cos(mid), sinMid = Math.sin(mid);
       ctx.textAlign = cosMid > 0 ? 'left' : (cosMid < 0 ? 'right' : 'center');
       ctx.textBaseline = 'middle';
-      const x = cosMid * lblR;
-      const y = sinMid * lblR;
+      const x = cosMid * (lblR);
+      const y = sinMid * (lblR);
       ctx.fillText(items[i].label, x, y);
       ctx.restore();
     }
@@ -268,7 +258,7 @@ export default function PolarArea({
 
   const onMouseLeave = React.useCallback(() => { setHover(null); }, []);
 
-  // centered note + metrics (bigger label kept)
+  // centered note + metrics
   const center = React.useMemo(() => {
     if (hover == null || !items[hover]) return null;
     const it = items[hover];
