@@ -53,7 +53,6 @@ export default function PitchFocusCard({
 
         if (pQ.error) throw pQ.error;
 
-        type PitchNoteRow = { result_id: number; midi: number; n: number | null; ratio: number | null; cents_mae: number | null };
         const rows: PitchNoteRow[] = (pQ.data ?? []) as PitchNoteRow[];
 
         const byMidi = new Map<number, { w: number; on: number; mae: number }>();

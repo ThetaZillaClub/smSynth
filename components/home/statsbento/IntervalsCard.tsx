@@ -72,7 +72,6 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
-  const [tip, setTip] = React.useState<{ x: number; y: number; label: string; pct: number; attempts: number } | null>(null);
 
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
@@ -143,18 +142,9 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
       const u = norm(vals[i]);
       const rFill = r0 + (Rmax - r0) * u * t;
 
-      if (hover === i) {
-        ctx.save();
-        ctx.fillStyle = 'rgba(16,24,40,0.06)';
-        ctx.beginPath();
-        ctx.arc(0, 0, Rmax + 4, a0, a1, false);
-        ctx.arc(0, 0, Math.max(0, r0 - 4), a1, a0, true);
-        ctx.closePath(); ctx.fill();
-        ctx.restore();
-      }
-
+      // sector fill (green)
       ctx.save();
-      ctx.globalAlpha = 0.62;
+      ctx.globalAlpha = 0.60;
       ctx.fillStyle = PR_COLORS.noteFill;
       ctx.beginPath();
       ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
@@ -163,6 +153,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
       ctx.fill();
       ctx.restore();
 
+      // green rim at outer edge
       ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
       ctx.lineWidth = 3;
@@ -171,6 +162,41 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
       ctx.stroke();
       ctx.restore();
 
+      // HOVER — brighten the sector and add a subtle sheen (no gray overlay)
+      if (hover === i) {
+        // brighten existing green using hard-light for punch
+        ctx.save();
+        ctx.globalCompositeOperation = 'hard-light';
+        ctx.globalAlpha = 0.75;
+        ctx.fillStyle = PR_COLORS.noteFill;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
+        ctx.arc(0, 0, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // radial sheen band across the active sector (screen blend)
+        const sheenInner = r0 + (Rmax - r0) * 0.48;
+        const sheenOuter = r0 + (Rmax - r0) * 0.90;
+        const grad = ctx.createRadialGradient(0, 0, sheenInner, 0, 0, sheenOuter);
+        grad.addColorStop(0.00, 'rgba(255,255,255,0.00)');
+        grad.addColorStop(0.50, 'rgba(255,255,255,0.40)');
+        grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = 0.6;
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
+        ctx.arc(0, 0, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // labels OUTSIDE the last ring
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
@@ -180,21 +206,6 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
       const x = cosMid * lblR;
       const y = sinMid * lblR;
       ctx.fillText(items[i].label, x, y);
-      ctx.restore();
-    }
-
-    if (hover != null) {
-      const i = hover;
-      const a0 = startBase + i * (sector + gapRad);
-      const a1 = a0 + sector;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(16,24,40,0.25)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, Rmax + 5, a0, a1, false);
-      ctx.arc(0, 0, Math.max(0, r0 - 5), a1, a0, true);
-      ctx.closePath();
-      ctx.stroke();
       ctx.restore();
     }
 
@@ -208,7 +219,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
     const W = Math.max(1, rect.width);
     const H = Math.max(1, rect.height);
     const minSide = Math.min(W, H);
-    if (minSide < 64) { setHover(null); setTip(null); return; }
+    if (minSide < 64) { setHover(null); return; }
 
     const ringPad = 8;
     const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
@@ -221,7 +232,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
     const dx = x - cx, dy = y - cy;
     const r = Math.hypot(dx, dy);
 
-    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
+    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); return; }
 
     const startBase = -Math.PI / 2;
     const ang = Math.atan2(dy, dx);
@@ -236,25 +247,21 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
 
     const idx = Math.floor(rel / cluster);
     const posInCluster = rel - idx * cluster;
-    if (idx < 0 || idx >= n || posInCluster > sector) { setHover(null); setTip(null); return; }
+    if (idx < 0 || idx >= n || posInCluster > sector) { setHover(null); return; }
 
     setHover(idx);
-
-    const vals = items.map(it => clamp01(it.pct / 100));
-    const norm = normFromDataset(vals);
-    const u = norm(vals[idx]);
-
-    const Rdraw = r0 + (Rmax - r0) * u;
-    const mid = (startBase + idx * cluster) + sector / 2;
-
-    const tipX = clamp(cx + Math.cos(mid) * (Rdraw + 12), 8, W - 8);
-    const tipY = clamp(cy + Math.sin(mid) * (Rdraw + 12), 8, H - 8);
-
-    const it = items[idx];
-    setTip({ x: tipX, y: tipY, label: it.label, pct: Math.round(it.pct), attempts: it.attempts });
   }, [items, canvasRef]);
 
-  const onMouseLeave = React.useCallback(() => { setHover(null); setTip(null); }, []);
+  const onMouseLeave = React.useCallback(() => { setHover(null); }, []);
+
+  // Centered label + metrics (no popup) — stack rows & constrain width to avoid spill
+  const center = React.useMemo(() => {
+    if (hover == null || !items[hover]) return null;
+    const it = items[hover];
+    const pct = clamp(Math.round(it.pct), 0, 100);
+    const attempts = Math.max(0, Math.round(it.attempts));
+    return { label: it.label, pct, attempts };
+  }, [hover, items]);
 
   return (
     <div
@@ -267,25 +274,19 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
         ref={canvasRef}
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
-      {tip ? (
-        <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
-          style={{
-            left: tip.x,
-            top: tip.y,
-            borderColor: '#e5e7eb',
-            color: '#0f0f0f',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">{tip.label}</span>
-            <span className="inline-flex items-center gap-1">
+
+      {/* Centered info (no bg). Smaller type + stacked rows to keep within the inner circle. */}
+      {center ? (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center w-32 sm:w-36 md:w-40 px-1">
+          <div className="font-semibold text-[#0f0f0f] text-sm sm:text-base leading-tight break-words">
+            {center.label}
+          </div>
+          <div className="mt-1 text-[11px] sm:text-xs font-medium text-[#0f0f0f] space-y-1">
+            <div className="flex items-center justify-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
-              {tip.pct}% correct
-            </span>
-            <span className="text-[#373737]">·</span>
-            <span className="text-[#0f0f0f]">{tip.attempts} attempts</span>
+              <span>{center.pct}% correct</span>
+            </div>
+            <div className="text-[#0f0f0f]">{center.attempts} attempts</div>
           </div>
         </div>
       ) : null}

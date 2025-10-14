@@ -9,6 +9,10 @@ import type { Item } from './types';
 
 const GAMMA = 0.9;
 
+// Blue palette
+const BLUE_FILL = '#3b82f6';   // existing blue
+const BLUE_STROKE = '#2563eb'; // softer rim (blue-600-ish)
+
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
   const vMin = Math.min(...vals);
   const vMax = Math.max(...vals);
@@ -31,17 +35,22 @@ export default function PolarArea({
   height?: number;
 }) {
   const { ref, width } = useMeasure();
-  const sqH = (width > 0 ? width : height);
+  const sqH = width > 0 ? width : height;
   const { ref: canvasRef } = useCanvas2d(width, sqH);
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
-  const [tip, setTip] = React.useState<{ x: number; y: number; label: string; v1: number; v2: number } | null>(null);
 
   React.useEffect(() => {
-    let raf = 0; const start = performance.now();
-    const tick = (now: number) => { const u = ease((now - start) / 800); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
-    raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const u = ease((now - start) / 800);
+      setT(u);
+      if (u < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [items.length]);
 
   React.useEffect(() => {
@@ -55,9 +64,9 @@ export default function PolarArea({
     const minSide = Math.min(W, Hpx);
     if (minSide < 64) return;
 
-    // ── smaller chart radius + reserved margin for outside labels
+    // geometry
     const ringPad = 8;
-    const labelOutset = Math.max(20, Math.min(30, minSide * 0.05)); // similar visual gap as before, now outside
+    const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
     const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
@@ -69,7 +78,7 @@ export default function PolarArea({
     const normOn  = normFromDataset(onVals);
     const normMae = normFromDataset(maeGood);
 
-    // circular background fill
+    // background disk
     ctx.save();
     ctx.fillStyle = '#f4f4f4';
     ctx.beginPath();
@@ -77,7 +86,7 @@ export default function PolarArea({
     ctx.fill();
     ctx.restore();
 
-    // background rings (alternating styles)
+    // rings
     ctx.save();
     ctx.translate(cx, cy);
     const rings = 4;
@@ -96,7 +105,7 @@ export default function PolarArea({
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
-    // label sizing; keep similar to before but moved outside the last ring
+    // outside label sizing
     const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
     const lblR = Rmax + labelOutset * 0.9;
 
@@ -110,25 +119,14 @@ export default function PolarArea({
 
       const uOn  = normOn(onVals[i]);
       const uMae = normMae(maeGood[i]);
-
       const rMae = r0 + (Rmax - r0) * uMae * t;
       const rOn  = r0 + (Rmax - r0) * uOn  * t;
-
-      // hover underlay
-      if (hover === i) {
-        ctx.save();
-        ctx.fillStyle = 'rgba(16,24,40,0.06)';
-        ctx.beginPath();
-        ctx.arc(0, 0, Rmax + 4, a0, a1, false);
-        ctx.arc(0, 0, Math.max(0, r0 - 4), a1, a0, true);
-        ctx.closePath(); ctx.fill();
-        ctx.restore();
-      }
+      const rTop = Math.max(rOn, rMae);
 
       // MAE layer (blue)
       ctx.save();
       ctx.globalAlpha = 0.35;
-      ctx.fillStyle = '#3b82f6';
+      ctx.fillStyle = BLUE_FILL;
       ctx.beginPath();
       ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
       ctx.arc(0, 0, r0, a1, a0, true);
@@ -136,7 +134,7 @@ export default function PolarArea({
       ctx.fill();
       ctx.restore();
 
-      // On-pitch layer
+      // On-pitch layer (green)
       ctx.save();
       ctx.globalAlpha = 0.60;
       ctx.fillStyle = PR_COLORS.noteFill;
@@ -147,7 +145,17 @@ export default function PolarArea({
       ctx.fill();
       ctx.restore();
 
-      // rim
+      // Subtle dark blue rim at the MAE outer edge (mirrors green subtlety)
+      ctx.save();
+      ctx.strokeStyle = BLUE_STROKE;
+      ctx.lineWidth = 2.5;   // softer than green
+      ctx.globalAlpha = 0.9; // gentle presence
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
+      ctx.stroke();
+      ctx.restore();
+
+      // existing dark green rim at on-pitch outer edge
       ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
       ctx.lineWidth = 3;
@@ -156,7 +164,53 @@ export default function PolarArea({
       ctx.stroke();
       ctx.restore();
 
-      // labels OUTSIDE the last ring
+      // HOVER — brighter & applied to BOTH layers; includes a sheen band
+      if (hover === i) {
+        // brighten green
+        ctx.save();
+        ctx.globalCompositeOperation = 'hard-light';
+        ctx.globalAlpha = 0.75;
+        ctx.fillStyle = PR_COLORS.noteFill;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(r0, rOn), a0, a1, false);
+        ctx.arc(0, 0, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // brighten blue
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = BLUE_FILL;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(r0, rMae), a0, a1, false);
+        ctx.arc(0, 0, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // sheen band across the active sector
+        const sheenInner = r0 + (Rmax - r0) * 0.48;
+        const sheenOuter = r0 + (Rmax - r0) * 0.90;
+        const grad = ctx.createRadialGradient(0, 0, sheenInner, 0, 0, sheenOuter);
+        grad.addColorStop(0.00, 'rgba(255,255,255,0.00)');
+        grad.addColorStop(0.50, 'rgba(255,255,255,0.40)');
+        grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = 0.6;
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, rTop, a0, a1, false);
+        ctx.arc(0, 0, r0, a1, a0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // outside note labels
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
@@ -166,22 +220,6 @@ export default function PolarArea({
       const x = cosMid * lblR;
       const y = sinMid * lblR;
       ctx.fillText(items[i].label, x, y);
-      ctx.restore();
-    }
-
-    // focus ring
-    if (hover != null) {
-      const i = hover;
-      const a0 = startBase + i * (sector + gapRad);
-      const a1 = a0 + sector;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(16,24,40,0.25)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, Rmax + 5, a0, a1, false);
-      ctx.arc(0, 0, Math.max(0, r0 - 5), a1, a0, true);
-      ctx.closePath();
-      ctx.stroke();
       ctx.restore();
     }
 
@@ -195,7 +233,7 @@ export default function PolarArea({
     const W = Math.max(1, rect.width);
     const H = Math.max(1, rect.height);
     const minSide = Math.min(W, H);
-    if (minSide < 64) { setHover(null); setTip(null); return; }
+    if (minSide < 64) { setHover(null); return; }
 
     const ringPad = 8;
     const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
@@ -208,7 +246,7 @@ export default function PolarArea({
     const dx = x - cx, dy = y - cy;
     const r = Math.hypot(dx, dy);
 
-    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); setTip(null); return; }
+    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); return; }
 
     const startBase = -Math.PI / 2;
     const ang = Math.atan2(dy, dx);
@@ -223,30 +261,21 @@ export default function PolarArea({
 
     const idx = Math.floor(rel / cluster);
     const posInCluster = rel - idx * cluster;
-    if (idx < 0 || idx >= n || posInCluster > sector) { setHover(null); setTip(null); return; }
+    if (idx < 0 || idx >= n || posInCluster > sector) { setHover(null); return; }
 
     setHover(idx);
+  }, [items, canvasRef]);
 
-    const onVals  = items.map(it => clamp01(it.v1 / max1));
-    const normOn  = normFromDataset(onVals);
-    const it = items[idx];
-    const uOn = normOn(onVals[idx]);
-    const Rdraw = r0 + (Rmax - r0) * uOn;
+  const onMouseLeave = React.useCallback(() => { setHover(null); }, []);
 
-    const mid = (startBase + idx * cluster) + sector / 2;
-    const tipX = clamp(cx + Math.cos(mid) * (Rdraw + 12), 8, W - 8);
-    const tipY = clamp(cy + Math.sin(mid) * (Rdraw + 12), 8, H - 8);
-
-    setTip({
-      x: tipX,
-      y: tipY,
-      label: it.label,
-      v1: clamp(Math.round(it.v1), 0, max1),
-      v2: clamp(Math.round(it.v2), 0, max2),
-    });
-  }, [items, max1, max2, canvasRef]);
-
-  const onMouseLeave = React.useCallback(() => { setHover(null); setTip(null); }, []);
+  // centered note + metrics (bigger label kept)
+  const center = React.useMemo(() => {
+    if (hover == null || !items[hover]) return null;
+    const it = items[hover];
+    const v1 = clamp(Math.round(it.v1), 0, max1);
+    const v2 = clamp(Math.round(it.v2), 0, max2);
+    return { label: it.label, v1, v2 };
+  }, [hover, items, max1, max2]);
 
   return (
     <div
@@ -258,29 +287,23 @@ export default function PolarArea({
     >
       <canvas
         ref={canvasRef}
-        // remove circular clipping so outside labels aren’t cut off
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
-      {tip ? (
-        <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
-          style={{
-            left: tip.x,
-            top: tip.y,
-            borderColor: '#e5e7eb',
-            color: '#0f0f0f',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">{tip.label}</span>
+
+      {/* Centered info (no bg). Larger note label on row 1. */}
+      {center ? (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+          <div className="font-semibold text-[#0f0f0f] text-base sm:text-lg md:text-xl leading-none">
+            {center.label}
+          </div>
+          <div className="mt-1 text-xs font-medium text-[#0f0f0f] flex items-center justify-center gap-3">
             <span className="inline-flex items-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
-              {tip.v1}%
+              {center.v1}%
             </span>
             <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: '#3b82f6' }} />
-              {tip.v2}¢
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: BLUE_FILL }} />
+              {center.v2}¢
             </span>
           </div>
         </div>

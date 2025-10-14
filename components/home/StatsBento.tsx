@@ -4,12 +4,12 @@ import * as React from 'react';
 import { HomeResultsProvider } from './data/HomeResultsProvider';
 import PerformanceCard from './statsbento/PerformanceCard';
 import RatingCard from './statsbento/RatingCard';
-import LessonsCard from './statsbento/LessonsCard';
 import RangeCard from './statsbento/RangeCard';
 import CompletedCountCard from './statsbento/CompletedCountCard';
 import MasteredCountCard from './statsbento/MasteredCountCard';
 import HomeCardGrid from './HomeCardGrid';
-import RadialsTabsCard from './statsbento/RadialsTabsCard'; // ⬅️ NEW
+import RadialsTabsCard from './statsbento/RadialsTabsCard'; // ⬅️ tabs
+import CoursesCard from './statsbento/CoursesCard';          // ⬅️ NEW (replaces LessonsCard)
 
 export default function StatsBento() {
   return (
@@ -31,18 +31,13 @@ export default function StatsBento() {
             <HomeCardGrid variant="column" />
           </div>
 
-          {/* Row 2 — first column: Lessons, second column: combined radial charts (same span as Performance) */}
+          {/* Row 2 — left: Course Progress (was Lessons), right: radials */}
           <div className="sm:col-span-3">
-            <LessonsCard />
+            <CoursesCard />
           </div>
           <div className="sm:col-span-5">
             <RadialsTabsCard />
           </div>
-
-          {/* Removed the separate Pitch/Intervals cards and the full-width Lessons row */}
-          {/* <div className="sm:col-span-4"><PitchFocusCard /></div>
-              <div className="sm:col-span-4"><IntervalsCard /></div>
-              <div className="sm:col-span-8"><LessonsCard /></div> */}
         </div>
       </section>
     </HomeResultsProvider>
