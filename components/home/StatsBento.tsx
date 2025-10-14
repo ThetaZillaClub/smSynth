@@ -8,8 +8,8 @@ import RangeCard from './statsbento/RangeCard';
 import CompletedCountCard from './statsbento/CompletedCountCard';
 import MasteredCountCard from './statsbento/MasteredCountCard';
 import HomeCardGrid from './HomeCardGrid';
-import RadialsTabsCard from './statsbento/RadialsTabsCard'; // ⬅️ tabs
-import CoursesCard from './statsbento/CoursesCard';          // ⬅️ NEW (replaces LessonsCard)
+import RadialsTabsCard from './statsbento/RadialsTabsCard';
+import CoursesCard from './statsbento/CoursesCard';
 
 export default function StatsBento() {
   return (
@@ -23,19 +23,21 @@ export default function StatsBento() {
           <div className="h-[90px]"><MasteredCountCard compact/></div>
         </div>
 
-        {/* Main bento */}
-        <div className="grid gap-6 sm:grid-cols-8 [grid-auto-rows:minmax(360px,auto)]">
-          {/* Row 1 */}
-          <div className="sm:col-span-5"><PerformanceCard /></div>
-          <div className="sm:col-span-3 h-full">
+        {/* Main bento — small base row, then explicit row spans */}
+        <div className="grid gap-6 sm:grid-cols-8 [grid-auto-rows:90px]">
+          {/* Row group A */}
+          <div className="sm:col-span-5 row-span-4 h-full">
+            <PerformanceCard />
+          </div>
+          <div className="sm:col-span-3 row-span-4 h-full">
             <HomeCardGrid variant="column" />
           </div>
 
-          {/* Row 2 — left: Course Progress (was Lessons), right: radials */}
-          <div className="sm:col-span-3">
+          {/* Row group B */}
+          <div className="sm:col-span-3 row-span-6">
             <CoursesCard />
           </div>
-          <div className="sm:col-span-5">
+          <div className="sm:col-span-5 row-span-6">
             <RadialsTabsCard />
           </div>
         </div>

@@ -23,14 +23,17 @@ const titleByLessonSlug: Record<string, string> = (() => {
 /* ─────────── hooks for canvas ─────────── */
 function useMeasure() {
   const ref = React.useRef<HTMLDivElement | null>(null);
-  const [w, setW] = React.useState(0);
+  const [box, setBox] = React.useState({ w: 0, h: 0 });
   React.useLayoutEffect(() => {
     const el = ref.current; if (!el) return;
-    const ro = new ResizeObserver(() => setW(el.clientWidth || 0));
-    ro.observe(el); setW(el.clientWidth || 0);
+    const ro = new ResizeObserver(() => {
+      setBox({ w: el.clientWidth || 0, h: el.clientHeight || 0 });
+    });
+    ro.observe(el);
+    setBox({ w: el.clientWidth || 0, h: el.clientHeight || 0 });
     return () => ro.disconnect();
   }, []);
-  return { ref, width: w };
+  return { ref, width: box.w, height: box.h };
 }
 function useDpr() {
   const [dpr, setDpr] = React.useState(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
@@ -120,15 +123,16 @@ function computeMonotoneSlopes(xs: number[], ys: number[]) {
 
 function PerformanceLine({
   rows,
-  height = 240,       // ↓ requested chart height
+  height,          // if omitted, fills parent via ResizeObserver
   gap = 10,
 }: {
   rows: Row[];
   height?: number;
   gap?: number;
 }) {
-  const { ref, width } = useMeasure();
-  const { ref: canvasRef } = useCanvas2d(width, height);
+  const { ref, width, height: measuredH } = useMeasure();
+  const H = Math.max(1, height ?? (measuredH || 240));
+  const { ref: canvasRef } = useCanvas2d(width, H);
 
   const [t, setT] = React.useState(0);                 // intro animation
   const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
@@ -172,14 +176,14 @@ function PerformanceLine({
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
-    const W = width, H = height;
-    ctx.clearRect(0, 0, W, H);
+    const W = width, Hh = H;
+    ctx.clearRect(0, 0, W, Hh);
 
     // Layout
     const pad = { l: 66, r: 48, t: 10, b: 22 };
     const innerGutter = 16, labelGap = 16;
     const iw = Math.max(10, W - pad.l - pad.r);
-    const ih = Math.max(10, H - pad.t - pad.b);
+    const ih = Math.max(10, Hh - pad.t - pad.b);
     const baseline = pad.t + ih;
 
     // Plot rect
@@ -296,13 +300,13 @@ function PerformanceLine({
 
       // Vertical gradient that softly fades to transparent at the baseline
       const grad = ctx.createLinearGradient(0, pad.t, 0, baseline);
-      grad.addColorStop(0.00, 'rgba(34,197,94,0.22)'); // lush near the line
+      grad.addColorStop(0.00, 'rgba(34,197,94,0.22)');
       grad.addColorStop(0.60, 'rgba(34,197,94,0.10)');
-      grad.addColorStop(1.00, 'rgba(34,197,94,0.02)'); // whisper at the bottom
+      grad.addColorStop(1.00, 'rgba(34,197,94,0.02)');
       ctx.fillStyle = grad;
       ctx.fill();
 
-      // Optional gentle glow just under the curve for extra elegance
+      // Gentle glow just under the curve
       ctx.beginPath();
       traceCurve();
       ctx.lineWidth = LINE_WIDTH + 3;
@@ -329,8 +333,8 @@ function PerformanceLine({
     for (let i = 0; i < n; i++) {
       const p = pts[i];
       const isLatest = i === n - 1;
-      const base = isLatest ?  R_LATEST : R_SMALL;
-      const target = isLatest ? R_LATEST_HOVER : R_HOVER;
+      const base = isLatest ?  6 : 3;
+      const target = isLatest ? 9 : 7;
 
       // animated amplitude for this point
       let amp = 0;
@@ -353,27 +357,27 @@ function PerformanceLine({
     ctx.restore(); // end clip
 
     // Latest value label outside clip (auto-flip to stay on-canvas)
-    const last = pts[n - 1];
+    const lastX = xs[n - 1], lastY = ys[n - 1];
     const latestVal = Math.round(toDraw[n - 1].final);
     const label = `${latestVal}%`;
     ctx.font = '12px ui-sans-serif, system-ui';
     const tw = ctx.measureText(label).width;
-    const rightSpace = W - (last.x + 10);
+    const rightSpace = W - (lastX + 10);
     const placeLeft = rightSpace < tw + 6;
 
     ctx.fillStyle = '#0f0f0f';
     ctx.textBaseline = 'middle';
-    if (placeLeft) { ctx.textAlign = 'right'; ctx.fillText(label, last.x - 10, last.y); }
-    else { ctx.textAlign = 'left'; ctx.fillText(label, last.x + 10, last.y); }
+    if (placeLeft) { ctx.textAlign = 'right'; ctx.fillText(label, lastX - 10, lastY); }
+    else { ctx.textAlign = 'left'; ctx.fillText(label, lastX + 10, lastY); }
 
     // Build hover hit zones (midpoint splits)
-    const half = Math.max(6, dx / 2);
-    hitsRef.current = pts.map((p, i) => {
-      const left  = i === 0     ? p.x - half : (p.x + pts[i - 1].x) / 2;
-      const right = i === n - 1 ? p.x + half : (p.x + pts[i + 1].x) / 2;
-      return { cx: p.x, x1: left, x2: right, y: p.y, row: p.r };
+    const half = Math.max(6, (n > 1 ? (xs[1] - xs[0]) : 12) / 2);
+    hitsRef.current = xs.map((x, i) => {
+      const left  = i === 0     ? x - half : (x + xs[i - 1]) / 2;
+      const right = i === n - 1 ? x + half : (x + xs[i + 1]) / 2;
+      return { cx: x, x1: left, x2: right, y: ys[i], row: toDraw[i] };
     });
-  }, [canvasRef, width, height, rows, gap, t, hoverIdx, animPrevIdx, animU]);
+  }, [canvasRef, width, H, rows, gap, t, hoverIdx, animPrevIdx, animU]);
 
   // hover + tooltip
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -405,7 +409,7 @@ function PerformanceLine({
     <div
       ref={ref}
       className="relative w-full"
-      style={{ height }}
+      style={{ height: height ?? '100%' }}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >
@@ -491,25 +495,28 @@ export default function PerformanceCard() {
     });
   }, [baseRows]);
 
-  // ↓ Requested: chart height 240, add the 80px difference to the header–chart gap.
-  const CHART_H = 280;
-  const HEADER_GAP = 56;
-
   return (
-    <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm">
-      <div className="flex items-baseline justify-between gap-3" style={{ marginBottom: HEADER_GAP }}>
+    <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
+      {/* Header */}
+      <div className="flex items-baseline justify-between gap-3 mb-2">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Session Performance</h3>
       </div>
 
-      {baseLoading ? (
-        <div className="rounded-xl bg-[#e8e8e8] animate-pulse" style={{ height: CHART_H }} />
-      ) : rows.length === 0 ? (
-        <div className="flex items-center justify-center text-base text-[#0f0f0f]" style={{ height: CHART_H }}>
-          No sessions yet — run an exercise to unlock your dashboard.
-        </div>
-      ) : (
-        <PerformanceLine rows={rows} height={CHART_H} gap={10} />
-      )}
+      {/* Body fills remaining space so the whole card matches its grid cell exactly */}
+      <div className="flex-1 min-h-0">
+        {baseLoading ? (
+          <div className="h-full min-h-[240px] rounded-xl bg-[#e8e8e8] animate-pulse" />
+        ) : rows.length === 0 ? (
+          <div className="h-full min-h-[240px] grid place-items-center text-base text-[#0f0f0f] rounded-xl bg-[#f5f5f5]">
+            No sessions yet — run an exercise to unlock your dashboard.
+          </div>
+        ) : (
+          // Height is measured from this container (fills remaining space)
+          <div className="h-full">
+            <PerformanceLine rows={rows} />
+          </div>
+        )}
+      </div>
 
       {baseErr ? <div className="mt-3 text-sm text-[#dc2626]">{baseErr}</div> : null}
     </div>

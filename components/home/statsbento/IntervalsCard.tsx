@@ -7,89 +7,60 @@ import { ensureSessionReady } from '@/lib/client-cache';
 import { PR_COLORS } from '@/utils/stage';
 import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
-const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
-const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
+// Reuse hooks & utils as PitchFocusCard
+import { useMeasure, useCanvas2d } from './pitch/hooks';
+import { clamp01, clamp, ease } from './pitch';
+
+type Item = { label: string; pct: number; attempts: number };
 
 const intervalName = (s: number) =>
   ({ 0:'Unison',1:'m2',2:'M2',3:'m3',4:'M3',5:'P4',6:'TT',7:'P5',8:'m6',9:'M6',10:'m7',11:'M7',12:'Octave' } as Record<number,string>)[s] ?? `${s}`;
 
-/* ---------------- measure & canvas hooks ---------------- */
-function useMeasure() {
-  const ref = React.useRef<HTMLDivElement | null>(null);
-  const [w, setW] = React.useState(0);
-  React.useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
-    const ro = new ResizeObserver(() => setW(el.clientWidth || 0));
-    ro.observe(el);
-    setW(el.clientWidth || 0); // read once on mount before paint
-    return () => ro.disconnect();
-  }, []);
-  return { ref, width: w };
-}
-function useDpr() {
-  const [dpr, setDpr] = React.useState(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
-  React.useEffect(() => {
-    const h = () => setDpr(window.devicePixelRatio || 1);
-    window.addEventListener('resize', h);
-    return () => { window.removeEventListener('resize', h); };
-  }, []);
-  return dpr;
-}
-function useCanvas2d(width: number, height: number) {
-  const ref = React.useRef<HTMLCanvasElement | null>(null);
-  const dpr = useDpr();
-  React.useLayoutEffect(() => {
-    const c = ref.current; if (!c) return;
-    const W = Math.max(1, Math.floor(width)); const H = Math.max(1, Math.floor(height));
-    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) {
-      c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
-    }
-    const ctx = c.getContext('2d'); if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }, [width, height, dpr]);
-  return { ref, dpr };
-}
-
-/* ---------------- polar area chart (single metric) ---------------- */
-type Item = { label: string; pct: number; attempts: number };
-
-// dataset-bounds normalization; gentle gamma keeps weaker values visible
+// dataset-bounds normalization
 const GAMMA = 0.9;
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
   const vMin = Math.min(...vals);
   const vMax = Math.max(...vals);
   const spread = vMax - vMin;
   if (!isFinite(vMin) || !isFinite(vMax) || spread <= 1e-6) {
-    return () => Math.pow(0.75, GAMMA); // uniform data → consistent visible radius
+    return () => Math.pow(0.75, GAMMA);
   }
   return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
 };
 
-function PolarAreaIntervals({ items }: { items: Item[] }) {
+/* ---------------- Polar Area (single green metric) ---------------- */
+function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: number }) {
   const { ref, width } = useMeasure();
-  const side = Math.max(0, width);
-  const { ref: canvasRef } = useCanvas2d(side, side);
+  const sqH = width > 0 ? width : height;
+  const { ref: canvasRef } = useCanvas2d(width, sqH);
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
 
   React.useEffect(() => {
-    let raf = 0; const start = performance.now();
-    const tick = (now: number) => { const u = ease((now - start) / 800); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
-    raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const u = ease((now - start) / 800);
+      setT(u);
+      if (u < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [items.length]);
 
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
 
-    const W = Math.max(1, side);
-    const Hpx = Math.max(1, side);
+    const W = Math.max(1, width);
+    const Hpx = Math.max(1, sqH);
     ctx.clearRect(0, 0, W, Hpx);
 
     const minSide = Math.min(W, Hpx);
     if (minSide < 64) return;
 
+    // geometry (identical to pitch)
     const ringPad = 8;
     const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
     const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
@@ -101,7 +72,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
     const vals = items.map(it => clamp01(it.pct / 100));
     const norm = normFromDataset(vals);
 
-    // background circle
+    // background disk
     ctx.save();
     ctx.fillStyle = '#f4f4f4';
     ctx.beginPath();
@@ -109,7 +80,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
     ctx.fill();
     ctx.restore();
 
-    // background rings
+    // rings
     ctx.save();
     ctx.translate(cx, cy);
     const rings = 4;
@@ -128,6 +99,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
+    // outside label sizing (same as pitch)
     const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
     const lblR = Rmax + labelOutset * 0.9;
 
@@ -153,7 +125,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
       ctx.fill();
       ctx.restore();
 
-      // green rim at outer edge
+      // green rim
       ctx.save();
       ctx.strokeStyle = PR_COLORS.noteStroke;
       ctx.lineWidth = 3;
@@ -162,9 +134,8 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
       ctx.stroke();
       ctx.restore();
 
-      // HOVER — brighten the sector and add a subtle sheen (no gray overlay)
+      // hover — brighten + sheen
       if (hover === i) {
-        // brighten existing green using hard-light for punch
         ctx.save();
         ctx.globalCompositeOperation = 'hard-light';
         ctx.globalAlpha = 0.75;
@@ -176,7 +147,6 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
         ctx.fill();
         ctx.restore();
 
-        // radial sheen band across the active sector (screen blend)
         const sheenInner = r0 + (Rmax - r0) * 0.48;
         const sheenOuter = r0 + (Rmax - r0) * 0.90;
         const grad = ctx.createRadialGradient(0, 0, sheenInner, 0, 0, sheenOuter);
@@ -196,7 +166,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
         ctx.restore();
       }
 
-      // labels OUTSIDE the last ring
+      // labels OUTSIDE
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
       ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
@@ -210,7 +180,7 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
     }
 
     ctx.restore();
-  }, [canvasRef, side, items, t, hover]);
+  }, [canvasRef, width, sqH, items, t, hover]);
 
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const c = canvasRef.current; if (!c) return;
@@ -254,19 +224,19 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
 
   const onMouseLeave = React.useCallback(() => { setHover(null); }, []);
 
-  // Centered label + metrics (no popup) — stack rows & constrain width to avoid spill
+  // Center content (match PitchFocus: big label row, compact metric row)
   const center = React.useMemo(() => {
     if (hover == null || !items[hover]) return null;
     const it = items[hover];
     const pct = clamp(Math.round(it.pct), 0, 100);
-    const attempts = Math.max(0, Math.round(it.attempts));
-    return { label: it.label, pct, attempts };
+    return { label: it.label, pct };
   }, [hover, items]);
 
   return (
     <div
       ref={ref}
-      className="relative w-full bg-transparent aspect-square"
+      className="relative w-full bg-transparent"
+      style={{ height: sqH }}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >
@@ -275,18 +245,17 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
 
-      {/* Centered info (no bg). Smaller type + stacked rows to keep within the inner circle. */}
+      {/* Centered info */}
       {center ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center w-32 sm:w-36 md:w-40 px-1">
-          <div className="font-semibold text-[#0f0f0f] text-sm sm:text-base leading-tight break-words">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+          <div className="font-semibold text-[#0f0f0f] text-base sm:text-lg md:text-xl leading-none">
             {center.label}
           </div>
-          <div className="mt-1 text-[11px] sm:text-xs font-medium text-[#0f0f0f] space-y-1">
-            <div className="flex items-center justify-center gap-1">
+          <div className="mt-1 text-xs font-medium text-[#0f0f0f] flex items-center justify-center gap-3">
+            <span className="inline-flex items-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
-              <span>{center.pct}% correct</span>
-            </div>
-            <div className="text-[#0f0f0f]">{center.attempts} attempts</div>
+              {center.pct}%
+            </span>
           </div>
         </div>
       ) : null}
@@ -294,12 +263,14 @@ function PolarAreaIntervals({ items }: { items: Item[] }) {
   );
 }
 
-/* ---------------- card + data ---------------- */
+/* ---------------- Card + data ---------------- */
 export default function IntervalsCard({
   frameless = false,
+  fill = false,
   className = '',
 }: {
   frameless?: boolean;
+  fill?: boolean;
   className?: string;
 }) {
   const supabase = React.useMemo(() => createClient(), []);
@@ -364,44 +335,31 @@ export default function IntervalsCard({
   const isLoading = baseLoading || loading;
   const errorMsg = baseErr || err;
 
-  const GREEN = PR_COLORS.noteFill;
-
-  const LegendPill = ({ dot, label, border }: { dot: string; label: string; border: string }) => (
-    <span
-      className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-white text-[#0f0f0f] shadow-sm ring-1 ring-[#3b82f6] border"
-      style={{ borderColor: border }}
-    >
-      <span className="mr-1.5 inline-block w-2.5 h-2.5 rounded-full" style={{ background: dot }} />
-      {label}
-    </span>
-  );
-
   const Inner = () => (
-    <>
-      {/* No big heading — tabs already describe the panel. Keep a tidy legend right-aligned. */}
-      <div className="flex items-center justify-end gap-2 sm:gap-3">
-        <LegendPill dot={GREEN} label="Correct %" border={GREEN} />
-      </div>
-
+    <div className={fill ? 'h-full flex flex-col' : undefined}>
       {isLoading ? (
-        <div className="mt-2 w-full aspect-square animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
+        <div className="mt-2 w-full h-full min-h-[240px] animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
       ) : items.length === 0 ? (
-        <div className="mt-2 w-full aspect-square flex items-center justify-center text-base text-[#0f0f0f] rounded-xl bg-[#f5f5f5]">
+        <div className="mt-2 w-full h-full min-h-[240px] flex items-center justify-center text-base text-[#0f0f0f] rounded-xl bg-[#f5f5f5]">
           No interval attempts yet.
         </div>
       ) : (
-        <div className="mt-2">
-          <PolarAreaIntervals items={items} />
+        <div className={`mt-2 ${fill ? 'flex-1 min-h-0' : ''}`}>
+          <div className={`${fill ? 'h-full' : ''} w-full`}>
+            <div className={`${fill ? 'h-full aspect-square mx-auto relative' : 'aspect-square relative'}`}>
+              <PolarAreaIntervals items={items} />
+            </div>
+          </div>
         </div>
       )}
 
       {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
-    </>
+    </div>
   );
 
   if (frameless) {
     return (
-      <div className={`w-full ${className}`}>
+      <div className={`w-full ${fill ? 'h-full' : ''} ${className}`}>
         <Inner />
       </div>
     );

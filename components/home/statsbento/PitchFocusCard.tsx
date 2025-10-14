@@ -7,7 +7,7 @@ import { ensureSessionReady } from '@/lib/client-cache';
 import { PR_COLORS } from '@/utils/stage';
 import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
-import { PolarArea, NOTE, clamp } from './pitch'; // ← compose from the subfolder
+import { PolarArea, NOTE, clamp } from './pitch';
 
 type PitchNoteRow = {
   result_id: number;
@@ -19,9 +19,11 @@ type PitchNoteRow = {
 
 export default function PitchFocusCard({
   frameless = false,
+  fill = false,
   className = '',
 }: {
   frameless?: boolean;
+  fill?: boolean;
   className?: string;
 }) {
   const supabase = React.useMemo(() => createClient(), []);
@@ -93,47 +95,33 @@ export default function PitchFocusCard({
   const isLoading = baseLoading || loading;
   const errorMsg = baseErr || err;
 
-  // Colors to match the rest of the UI
   const BLUE = '#3b82f6';
-  const GREEN = PR_COLORS.noteFill;
-
-  const LegendPill = ({ dot, label, border }: { dot: string; label: string; border: string }) => (
-    <span
-      className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-white text-[#0f0f0f] shadow-sm ring-1 ring-[#3b82f6] border"
-      style={{ borderColor: border }}
-    >
-      <span className="mr-1.5 inline-block w-2.5 h-2.5 rounded-full" style={{ background: dot }} />
-      {label}
-    </span>
-  );
 
   const Inner = () => (
-    <>
-      {/* No big heading — tabs already provide the context. Keep only the legend, right-aligned. */}
-      <div className="flex items-center justify-end gap-2 sm:gap-3">
-        <LegendPill dot={GREEN} label="On-pitch %" border={GREEN} />
-        <LegendPill dot={BLUE}  label="MAE ¢"     border={BLUE} />
-      </div>
-
+    <div className={fill ? 'h-full flex flex-col' : undefined}>
       {isLoading ? (
-        <div className="mt-2 w-full aspect-square animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
+        <div className="mt-2 w-full h-full min-h-[240px] animate-pulse rounded-xl bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]" />
       ) : items.length === 0 ? (
-        <div className="mt-2 w-full aspect-square flex items-center justify-center text-base text-[#0f0f0f] rounded-xl bg-[#f5f5f5]">
+        <div className="mt-2 w-full h-full min-h-[240px] flex items-center justify-center text-base text-[#0f0f0f] rounded-xl bg-[#f5f5f5]">
           No per-note data yet.
         </div>
       ) : (
-        <div className="mt-2 relative w-full aspect-square">
-          <PolarArea items={items} max1={100} max2={120} />
+        <div className={`mt-2 ${fill ? 'flex-1 min-h-0' : ''}`}>
+          <div className={`${fill ? 'h-full' : ''} w-full`}>
+            <div className={`${fill ? 'h-full aspect-square mx-auto relative' : 'aspect-square relative'}`}>
+              <PolarArea items={items} max1={100} max2={120} />
+            </div>
+          </div>
         </div>
       )}
 
       {errorMsg ? <div className="mt-3 text-sm text-[#dc2626]">{errorMsg}</div> : null}
-    </>
+    </div>
   );
 
   if (frameless) {
     return (
-      <div className={`w-full ${className}`}>
+      <div className={`w-full ${fill ? 'h-full' : ''} ${className}`}>
         <Inner />
       </div>
     );

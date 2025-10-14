@@ -52,7 +52,7 @@ export default function HomeCardGrid({ variant = 'row' }: { variant?: 'row' | 'c
             )}
           </div>
           <div
-            className="shrink-0 rounded-full border border-[#e6e6e6] w-7 h-7 grid place-items-center
+            className="shrink-0 rounded-full bg-[#f4f4f4] border border-[#e6e6e6] w-7 h-7 grid place-items-center
                        text-[#0f0f0f]/70 group-hover:text-[#0f0f0f] transition"
             aria-hidden
           >
