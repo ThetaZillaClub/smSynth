@@ -3,10 +3,9 @@
 
 import * as React from 'react';
 import type { TakeScore } from '@/utils/scoring/score';
-import { PR_COLORS } from '@/utils/stage';
+import { ANA_COLORS } from './colors'; // match MultiSeriesLines grid styling
 
-/* ─────────── small utils (copied/lightly adapted from PerformanceCard) ─────────── */
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+/* ─────────── small utils ─────────── */
 const clamp = (x: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, x));
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
@@ -47,7 +46,7 @@ function useCanvas2d(width: number, height: number) {
   return { ref, dpr };
 }
 
-// D3-like monotoneX with Hyman filter (prevents Bezier overshoot)
+// Monotone cubic with Hyman filter (no overshoot)
 function computeMonotoneSlopes(xs: number[], ys: number[]) {
   const n = xs.length;
   const ms = new Array<number>(n).fill(0);
@@ -80,36 +79,26 @@ function computeMonotoneSlopes(xs: number[], ys: number[]) {
   return ms;
 }
 
-/* ─────────── types ─────────── */
-type Components = {
-  pitch?: number;    // %
-  melody?: number;   // %
-  line?: number;     // %
-  intervals?: number;// %
-};
-type Row = {
-  take: number;
-  final: number;     // %
-  comps: Components;
-};
+/* ─────────── types/consts ─────────── */
+type Row = { take: number; final: number };
 
-const LINE_WIDTH = 3;
+const LINE_WIDTH = 2.5;               // match MultiSeriesLines
 const LINE_COLOR = '#22c55e';
-const DOT_FILL = '#86efac';
+const DOT_R = 3.5;                    // match MultiSeriesLines
 const DOT_STROKE = '#22c55e';
+const DOT_FILL = 'rgba(34,197,94,0.18)';
 
-/* ─────────── inner chart ─────────── */
 function LineChart({
   rows,
   height,
   gap = 10,
 }: {
   rows: Row[];
-  height: number;
+  height: number | string;
   gap?: number;
 }) {
-  const { ref, width } = useMeasure();
-  const { ref: canvasRef } = useCanvas2d(width, height);
+  const { ref, width, height: hostH } = useMeasure();
+  const { ref: canvasRef } = useCanvas2d(width, typeof hostH === 'number' ? hostH : 0);
 
   const [t, setT] = React.useState(0);
   React.useEffect(() => {
@@ -121,38 +110,42 @@ function LineChart({
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
-    const W = width, H = height;
+    const W = width, H = hostH;
     ctx.clearRect(0, 0, W, H);
 
-    // Layout
-    const pad = { l: 66, r: 48, t: 10, b: 22 };
-    const innerGutter = 16, labelGap = 16;
+    // ─── Layout: identical paddings to MultiSeriesLines ───
+    const pad = { l: 56, r: 18, t: 10, b: 20 };
     const iw = Math.max(10, W - pad.l - pad.r);
     const ih = Math.max(10, H - pad.t - pad.b);
+    const x0 = pad.l;
     const baseline = pad.t + ih;
-    const plotL = pad.l + innerGutter;
-    const plotR = pad.l + iw - innerGutter;
-    const plotW = Math.max(10, plotR - plotL);
 
-    // GRID + left Y axis (0..100%)
-    const ticks = 4;
+    // Y grid + labels (font/weights/colors match MultiSeriesLines)
+    const yTicks = 4;
     ctx.save();
-    ctx.font = '14px ui-sans-serif, system-ui';
-    for (let i = 0; i <= ticks; i++) {
-      const y = Math.round(pad.t + (ih * i) / ticks) + 0.5;
+    ctx.font = '12px ui-sans-serif, system-ui';
+    for (let i = 0; i <= yTicks; i++) {
+      const y = Math.round(pad.t + (ih * i) / yTicks) + 0.5;
       const major = i % 2 === 0;
-      ctx.strokeStyle = major ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
+      ctx.strokeStyle = major ? ANA_COLORS.gridMajor : ANA_COLORS.gridMinor;
       ctx.lineWidth = major ? 1.25 : 0.75;
-      ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + iw, y); ctx.stroke();
 
       ctx.fillStyle = '#0f0f0f';
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      const val = Math.round((100 * (ticks - i)) / ticks);
-      ctx.fillText(`${val}%`, plotL - labelGap, y);
+      const val = Math.round((100 * (yTicks - i)) / yTicks);
+      ctx.fillText(`${val}%`, x0 - 10, y);
     }
     ctx.restore();
 
-    // Downsample by available width (always keep last)
+    // X range (same ±8px as Multi for the curve itself)
+    const X_MARGIN = 8;
+    const xStart = x0 + X_MARGIN;
+    const xEnd   = x0 + iw - X_MARGIN;
+    const dx = rows.length > 1 ? (xEnd - xStart) / (rows.length - 1) : 0;
+
+    // Downsample capacity uses the actual plot width between xStart..xEnd
+    const plotW = Math.max(10, xEnd - xStart);
     const MIN_GAP = Math.max(6, gap);
     const capacity = Math.max(2, Math.floor(plotW / MIN_GAP));
     let toDraw = rows;
@@ -166,24 +159,17 @@ function LineChart({
       toDraw = sampled;
     }
 
-    const n = toDraw.length;
-    if (!n) return;
+    const n = toDraw.length; if (!n) return;
 
     // Points
-    const R_SMALL = 3, R_LATEST = 6;
-    const X_MARGIN = 12, Y_MARGIN = 10;
-
-    const xStart = plotL + X_MARGIN;
-    const xEnd   = plotR - X_MARGIN;
-    const dx = n > 1 ? (xEnd - xStart) / (n - 1) : 0;
-
+    const Y_MARGIN = 10;
     const xs: number[] = new Array(n);
     const ys: number[] = new Array(n);
     for (let i = 0; i < n; i++) {
       const r = toDraw[i];
       const x = xStart + i * dx;
-      const yRaw = baseline - ih * clamp01((r.final / 100) * t);
-      const y = clamp(yRaw, pad.t + Y_MARGIN, baseline - Y_MARGIN);
+      const yRaw = baseline - ih * clamp((r.final / 100) * t, 0, 1);
+      const y = Math.max(pad.t + Y_MARGIN, Math.min(baseline - Y_MARGIN, yRaw));
       xs[i] = x; ys[i] = y;
     }
 
@@ -196,17 +182,19 @@ function LineChart({
         const h = x2 - x1 || 1;
         const cx1x = x1 + h/3; let cx1y = y1 + (m[i]   * h)/3;
         const cx2x = x2 - h/3; let cx2y = y2 - (m[i+1] * h)/3;
-        cx1y = clamp(cx1y, pad.t, baseline);
-        cx2y = clamp(cx2y, pad.t, baseline);
-        ctx.bezierCurveTo(cx1x, cx1y, cx2x, cx2y, x2, y2);
+        ctx.bezierCurveTo(
+          cx1x, Math.max(pad.t, Math.min(baseline, cx1y)),
+          cx2x, Math.max(pad.t, Math.min(baseline, cx2y)),
+          x2, y2
+        );
       }
     };
 
-    // Clip content
+    // Clip to the exact plot area (no extra gutter)
     ctx.save();
-    ctx.beginPath(); ctx.rect(plotL, pad.t, plotW, ih); ctx.clip();
+    ctx.beginPath(); ctx.rect(x0, pad.t, iw, ih); ctx.clip();
 
-    // Area fill
+    // Area fill (consistent green gradient)
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(xs[0], baseline);
@@ -216,9 +204,11 @@ function LineChart({
       const h = x2 - x1 || 1;
       const cx1x = x1 + h/3; let cx1y = y1 + (m[i]   * h)/3;
       const cx2x = x2 - h/3; let cx2y = y2 - (m[i+1] * h)/3;
-      cx1y = clamp(cx1y, pad.t, baseline);
-      cx2y = clamp(cx2y, pad.t, baseline);
-      ctx.bezierCurveTo(cx1x, cx1y, cx2x, cx2y, x2, y2);
+      ctx.bezierCurveTo(
+        cx1x, Math.max(pad.t, Math.min(baseline, cx1y)),
+        cx2x, Math.max(pad.t, Math.min(baseline, cx2y)),
+        x2, y2
+      );
     }
     ctx.lineTo(xs[n - 1], baseline);
     ctx.closePath();
@@ -228,73 +218,72 @@ function LineChart({
     grad.addColorStop(0.60, 'rgba(34,197,94,0.10)');
     grad.addColorStop(1.00, 'rgba(34,197,94,0.02)');
     ctx.fillStyle = grad; ctx.fill();
-
-    // Glow
-    ctx.beginPath(); traceCurve();
-    ctx.lineWidth = LINE_WIDTH + 3;
-    ctx.strokeStyle = 'rgba(34,197,94,0.18)';
-    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.stroke();
     ctx.restore();
 
-    // Line
+    // Line (no glow; match MultiSeriesLines)
     ctx.lineWidth = LINE_WIDTH; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.strokeStyle = LINE_COLOR; ctx.beginPath(); traceCurve(); ctx.stroke();
 
-    // Dots
+    // Dots (match MultiSeriesLines)
     ctx.fillStyle = DOT_FILL; ctx.strokeStyle = DOT_STROKE;
     for (let i = 0; i < n; i++) {
       ctx.beginPath();
-      ctx.arc(xs[i], ys[i], i === n - 1 ? R_LATEST : R_SMALL, 0, Math.PI * 2);
-      ctx.fill(); ctx.lineWidth = i === n - 1 ? 2 : 1.5; ctx.stroke();
+      ctx.arc(xs[i], ys[i], DOT_R, 0, Math.PI * 2);
+      ctx.fill(); ctx.lineWidth = 1.75; ctx.stroke();
     }
 
     ctx.restore();
+  }, [canvasRef, width, hostH, rows, gap, t]);
 
-    // Latest label (no bottom x labels by design)
-    const lastX = xs[n - 1], lastY = ys[n - 1];
-    const latestVal = Math.round(toDraw[n - 1].final);
-    const label = `${latestVal}%`;
-    ctx.font = '12px ui-sans-serif, system-ui';
-    const tw = ctx.measureText(label).width;
-    const rightSpace = W - (lastX + 10);
-    const placeLeft = rightSpace < tw + 6;
-    ctx.fillStyle = '#0f0f0f'; ctx.textBaseline = 'middle';
-    if (placeLeft) { ctx.textAlign = 'right'; ctx.fillText(label, lastX - 10, lastY); }
-    else { ctx.textAlign = 'left'; ctx.fillText(label, lastX + 10, lastY); }
-  }, [canvasRef, width, height, rows, gap, t]);
+  // TS-safe style object
+  const chartStyle: React.CSSProperties = {};
+  if (typeof height === 'number' || typeof height === 'string') chartStyle.height = height;
 
   return (
-    <div ref={ref} className="relative w-full" style={{ height }} >
+    <div ref={ref} className="relative w-full" style={chartStyle} >
       <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block', borderRadius: 12 }} />
     </div>
   );
 }
 
-/* ─────────── exported card ─────────── */
-export default function PerformanceOverTakes({ scores }: { scores: TakeScore[] }) {
-  const rows: Row[] = React.useMemo(() => {
-    return scores.map((s, i) => ({
-      take: i + 1,
-      final: clamp(s.final.percent, 0, 100),
-      comps: {
-        pitch: s.pitch.percent,
-        melody: s.rhythm.melodyPercent,
-        line: s.rhythm.lineEvaluated ? s.rhythm.linePercent : undefined,
-        intervals: typeof s.intervals.correctRatio === 'number'
-          ? Math.round(s.intervals.correctRatio * 10000) / 100
-          : undefined,
-      },
-    }));
-  }, [scores]);
+/* ─────────── exported: symmetric top/bottom rhythm ─────────── */
+export default function PerformanceOverTakes({
+  scores,
+  height = 200,
+  reserveLegendRow = true,
+  legendRowHeight = 26,     // ~chip height
+  legendGapPx = 8,          // Tailwind mt-2
+  reserveTopGutter = true,  // add same space above chart
+}: {
+  scores: TakeScore[];
+  height?: number | string;
+  reserveLegendRow?: boolean;
+  legendRowHeight?: number;
+  legendGapPx?: number;
+  reserveTopGutter?: boolean;
+}) {
+  const rows: Row[] = React.useMemo(
+    () => scores.map((s, i) => ({ take: i + 1, final: clamp(s.final.percent, 0, 100) })),
+    [scores]
+  );
 
   return (
-    <div className="rounded-xl border border-[#dcdcdc] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] shadow-sm p-3">
-      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-2">
-        Performance over takes
+    <div className="h-full min-h-0 overflow-hidden flex flex-col p-0">
+      {/* Top spacer to mirror the legend row below */}
+      {reserveTopGutter ? (
+        <div className="shrink-0" style={{ height: legendRowHeight + legendGapPx }} aria-hidden />
+      ) : null}
+
+      <div className="relative w-full flex-1 min-h-0">
+        <LineChart rows={rows} height={height} />
       </div>
-      {/* ~2 bento rows tall */}
-      <LineChart rows={rows} height={200} />
+
+      {/* Fake legend row to keep vertical rhythm identical */}
+      {reserveLegendRow ? (
+        <div className="mt-2 flex flex-wrap gap-2" aria-hidden>
+          <div style={{ height: legendRowHeight }} />
+        </div>
+      ) : null}
     </div>
   );
 }
