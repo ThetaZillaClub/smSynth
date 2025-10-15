@@ -11,7 +11,8 @@ import type { SystemLayout } from "./sheet/vexscore/types";
 import { pickClef, preferSharpsForKeySig } from "./sheet/vexscore/builders";
 import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
 import SidePanelLayout from "./side-panel/SidePanelLayout";
-import type { ScaleName } from "@/utils/phrase/scales"; // NEW
+import type { ScaleName } from "@/utils/phrase/scales";
+import SessionAnalytics from "./analytics/SessionAnalytics";
 
 type Props = {
   phrase?: Phrase | null;
@@ -31,7 +32,7 @@ type Props = {
   tsNum?: number;
   leadBars?: number;
   keySig?: string | null;
-  view?: "piano" | "sheet";
+  view?: "piano" | "sheet" | "analytics";
   lowHz?: number | null;
   highHz?: number | null;
   clef?: "treble" | "bass" | null;
@@ -51,6 +52,16 @@ type Props = {
   /** 🔑 NEW: mode-aware solfege for piano roll */
   tonicPc?: number;
   scaleName?: ScaleName;
+
+  /** NEW: analytics payload (used when view==="analytics") */
+  analytics?: {
+    scores: any[];
+    snapshots: Array<{ phrase: any; rhythm: any; melodyRhythm: any }>;
+    bpm: number;
+    den: number;
+    tonicPc?: number;
+    scaleName?: ScaleName | (string & {});
+  };
 };
 
 export default function GameStage({
@@ -85,7 +96,40 @@ export default function GameStage({
   // NEW
   tonicPc,
   scaleName,
+
+  analytics,
 }: Props) {
+  // If analytics view, render it directly (left) + always keep the side panel on the right.
+  if (view === "analytics") {
+    return (
+      <div className="w-full h-full min-h-[260px]">
+<div className="w-full h-full flex gap-3">
+  {/* LEFT: Analytics */}
+  <div className="flex-1 min-w-0 rounded-xl shadow-md">
+    <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
+      <SessionAnalytics
+        scores={analytics?.scores ?? []}
+        snapshots={analytics?.snapshots ?? []}
+        bpm={analytics?.bpm ?? bpm}
+        den={analytics?.den ?? den}
+        tonicPc={analytics?.tonicPc ?? tonicPc ?? 0}
+        scaleName={(analytics?.scaleName ?? scaleName ?? "major") as any}
+      />
+    </div>
+  </div>
+  {/* RIGHT: Side panel */}
+  <aside className="shrink-0 w-[320px] lg:w-[360px] xl:w-[380px] rounded-xl shadow-md">
+    <SidePanelLayout>{stageAside}</SidePanelLayout>
+  </aside>
+</div>
+      </div>
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────
+  // Regular sheet / piano-stage rendering
+  // ───────────────────────────────────────────────────────────────
+
   // Keep timeline math identical across canvases
   const WINDOW_SEC = 4;
   const ANCHOR_RATIO = 0.1;
@@ -121,7 +165,6 @@ export default function GameStage({
   const [sheetW, setSheetW] = useState<number>(0);
   const [systems, setSystems] = useState<SystemLayout[] | null>(null);
 
-  // ✅ Fix: do not depend on `sheetHostRef.current`
   useLayoutEffect(() => {
     if (view !== "sheet") return;
 
@@ -178,7 +221,7 @@ export default function GameStage({
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
       <div className="w-full h-full flex gap-3">
         {/* LEFT: Main stage area */}
-        <div className="flex-1 min-w-0 flex flex-col drop-shadow-sm shadow-md">
+        <div className="flex-1 min-w-0 flex flex-col drop-shadow-sm rounded-xl shadow-md">
           <div className="w-full">
             {!hasPhrase ? (
               <div style={{ height: mainH }} />
@@ -203,7 +246,6 @@ export default function GameStage({
                     keySig={keySig || null}
                     useSharps={useSharpsPref}
                   />
-                  {/* Overlay mounts as soon as we have container dims */}
                   {sheetW > 4 ? (
                     <SheetOverlay
                       width={sheetW}
@@ -241,8 +283,8 @@ export default function GameStage({
                 lyrics={lyrics}
                 keySig={keySig}
                 /** keep in lockstep with rhythm roll */
-                windowSec={WINDOW_SEC}
-                anchorRatio={ANCHOR_RATIO}
+                windowSec={4}
+                anchorRatio={0.1}
                 /** Visual toggles for rectangles */
                 showNoteBlocks={showNoteBlocks}
                 showNoteBorders={showNoteBorders}
@@ -254,7 +296,6 @@ export default function GameStage({
             )}
           </div>
 
-          {/* Match previous behavior: hide rhythm roll when no phrase */}
           {hasPhrase && showRhythm && view !== "sheet" ? (
             <div className="w-full mt-2">
               <RhythmRollCanvas
@@ -265,9 +306,8 @@ export default function GameStage({
                 leadInSec={leadInSecEff}
                 bpm={bpm}
                 den={den}
-                /** keep in lockstep with piano roll */
-                windowSec={WINDOW_SEC}
-                anchorRatio={ANCHOR_RATIO}
+                windowSec={4}
+                anchorRatio={0.1}
               />
             </div>
           ) : null}

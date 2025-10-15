@@ -7,9 +7,19 @@ import { type Phrase } from "./stage/piano-roll/PianoRollCanvas";
 import type { LoopPhase } from "../../../hooks/gameplay/usePracticeLoop";
 import TrainingSidePanel, { type TrainingSidePanelProps } from "./stage/side-panel/TrainingSidePanel";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
-import type { ScaleName } from "@/utils/phrase/scales"; // NEW
+import type { ScaleName } from "@/utils/phrase/scales";
+import type { TakeScore } from "@/utils/scoring/score";
 
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
+
+type AnalyticsPayload = {
+  scores: TakeScore[];
+  snapshots: Array<{ phrase: any; rhythm: any; melodyRhythm: any }>;
+  bpm: number;
+  den: number;
+  tonicPc?: number;
+  scaleName?: ScaleName | (string & {});
+};
 
 type LayoutProps = {
   title: string;
@@ -36,7 +46,7 @@ type LayoutProps = {
 
   keySig?: string | null;
 
-  view?: "piano" | "sheet";
+  view?: "piano" | "sheet" | "analytics";
 
   clef?: "treble" | "bass" | null;
   lowHz?: number | null;
@@ -49,7 +59,7 @@ type LayoutProps = {
   stageAside?: React.ReactNode;
 
   /**
-   * New: structured props for the built-in TrainingSidePanel.
+   * Structured props for the built-in TrainingSidePanel.
    * If provided, this takes precedence over `stageAside`.
    */
   sidePanel?: TrainingSidePanelProps;
@@ -71,6 +81,9 @@ type LayoutProps = {
   /** NEW: footer actions */
   tonicAction?: React.ComponentProps<typeof GameFooter>["tonicAction"];
   arpAction?: React.ComponentProps<typeof GameFooter>["arpAction"];
+
+  /** NEW: analytics payload for post-exercise stage */
+  analytics?: AnalyticsPayload;
 };
 
 export default function GameLayout({
@@ -109,6 +122,8 @@ export default function GameLayout({
   scaleName = null,
   tonicAction,
   arpAction,
+
+  analytics,
 }: LayoutProps) {
   const showPlay = !!phrase;
   const asideNode = sidePanel ? <TrainingSidePanel {...sidePanel} /> : stageAside;
@@ -147,6 +162,9 @@ export default function GameLayout({
             // 🔑 NEW: mode-aware solfege for piano roll
             tonicPc={typeof tonicPc === "number" ? tonicPc : undefined}
             scaleName={scaleName ?? undefined}
+
+            // NEW: analytics payload
+            analytics={analytics}
           />
         </div>
 
