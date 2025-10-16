@@ -68,6 +68,15 @@ export default function SessionAnalytics({
     intervals: { title: "Intervals", subtitle: "Class accuracy per take" },
   };
 
+  // Typed custom property style object (no `any`)
+  const railStyle = React.useMemo(
+    () =>
+      ({
+        ["--ana-rail-h"]: "calc(5*clamp(52px,3vw,84px) + 4*0.5rem)",
+      } as React.CSSProperties & { ["--ana-rail-h"]: string }),
+    []
+  );
+
   return (
     <div className="w-full h-full px-3 sm:px-4 md:px-6 flex flex-col gap-3 min-h-0">
       {/* Header */}
@@ -89,7 +98,7 @@ export default function SessionAnalytics({
       {/* Two-column layout from md up: fixed picker rail + capped chart height */}
       <div
         className="grid gap-3 grid-cols-1 md:grid-cols-[280px_1fr] lg:grid-cols-[300px_1fr] xl:grid-cols-[320px_1fr] items-start flex-1 min-h-0"
-        style={{ ["--ana-rail-h" as any]: "calc(5*clamp(52px,3vw,84px) + 4*0.5rem)" } as React.CSSProperties}
+        style={railStyle}
       >
         {/* Left rail: vertical picker */}
         <div className="min-h-0">

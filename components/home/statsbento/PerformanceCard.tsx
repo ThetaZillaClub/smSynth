@@ -333,8 +333,10 @@ function PerformanceLine({
     for (let i = 0; i < n; i++) {
       const p = pts[i];
       const isLatest = i === n - 1;
-      const base = isLatest ?  6 : 3;
-      const target = isLatest ? 9 : 7;
+
+      // Use the defined radius constants to avoid unused-var warnings
+      const base = isLatest ? R_LATEST : R_SMALL;
+      const target = isLatest ? R_LATEST_HOVER : R_HOVER;
 
       // animated amplitude for this point
       let amp = 0;

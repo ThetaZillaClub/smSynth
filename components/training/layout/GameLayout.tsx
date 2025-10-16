@@ -12,13 +12,19 @@ import type { TakeScore } from "@/utils/scoring/score";
 
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
 
+type AnalyticsSnapshot = {
+  phrase: Phrase;
+  rhythm: RhythmEvent[] | null;
+  melodyRhythm?: RhythmEvent[] | null;
+};
+
 type AnalyticsPayload = {
   scores: TakeScore[];
-  snapshots: Array<{ phrase: any; rhythm: any; melodyRhythm: any }>;
+  snapshots: AnalyticsSnapshot[];
   bpm: number;
   den: number;
   tonicPc?: number;
-  scaleName?: ScaleName | (string & {});
+  scaleName?: ScaleName | string;
 };
 
 type LayoutProps = {
@@ -169,11 +175,9 @@ export default function GameLayout({
             /* forward for back-compat so they aren't "unused" */
             step={step}
             loopPhase={loopPhase}
-
             // 🔑 NEW: mode-aware solfege for piano roll
             tonicPc={typeof tonicPc === "number" ? tonicPc : undefined}
             scaleName={scaleName ?? undefined}
-
             // NEW: analytics payload
             analytics={analytics}
           />

@@ -14,6 +14,12 @@ const SEG_COLOR = {
   intervals: "#22c55e",
 } as const;
 
+// Narrow type guard so we don't need `any`
+function hasLinePercent(x: unknown): x is { linePercent: number } {
+  return typeof x === "object" && x !== null && "linePercent" in x &&
+    typeof (x as { linePercent: unknown }).linePercent === "number";
+}
+
 export default function PerformanceOverTakesChart({
   scores,
   height = "100%",
@@ -46,15 +52,14 @@ export default function PerformanceOverTakesChart({
         typeof s.rhythm?.melodyPercent === "number"
           ? { color: SEG_COLOR.melody, label: "Melody", value: `${Math.round(s.rhythm.melodyPercent)}%` }
           : null,
-        typeof (s as any)?.rhythm?.linePercent === "number"
-          ? { color: SEG_COLOR.line, label: "Rhythm", value: `${Math.round((s as any).rhythm.linePercent)}%` }
+        hasLinePercent(s.rhythm)
+          ? { color: SEG_COLOR.line, label: "Rhythm", value: `${Math.round(s.rhythm.linePercent)}%` }
           : null,
         typeof s.intervals?.correctRatio === "number"
           ? { color: SEG_COLOR.intervals, label: "Intervals", value: `${Math.round((s.intervals.correctRatio || 0) * 100)}%` }
           : null,
       ];
 
-      // Type guard to satisfy TS (no nullable entries beyond this point)
       const rows: BreakdownRow[] = maybeRows.filter(
         (x): x is BreakdownRow => x !== null
       );

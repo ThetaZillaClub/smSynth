@@ -326,7 +326,7 @@ export default function PolarArea({
 
     // height clamp: label + gap + v1 + gap + v2
     let gap = Math.max(2, Math.round(metricsPx * 0.25));
-    let block = labelPx + gap + metricsPx + gap + metricsPx;
+    const block = labelPx + gap + metricsPx + gap + metricsPx; // <- const; never reassigned
     if (block > maxHeight) {
       const k = maxHeight / block;
       labelPx = Math.max(labelMin, Math.floor(labelPx * k));

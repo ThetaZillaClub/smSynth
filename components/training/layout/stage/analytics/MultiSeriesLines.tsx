@@ -138,7 +138,7 @@ export default function MultiSeriesLines({
   legendGapPx = 8,
   introEpoch = 0,
   introDurationMs = 800,
-  tipExtra, // ← NEW: optional extra tooltip content by take index
+  tipExtra, // optional extra tooltip content by take index
 }: {
   title?: string;
   series: Series[];
@@ -153,7 +153,7 @@ export default function MultiSeriesLines({
   legendGapPx?: number;
   introEpoch?: number;         // restart intro anim when this changes
   introDurationMs?: number;    // optional custom duration
-  tipExtra?: (takeIdx: number) => React.ReactNode; // ← NEW
+  tipExtra?: (takeIdx: number) => React.ReactNode;
 }) {
   const N = series.reduce((m, s) => Math.max(m, s.values.length), 0);
   const { ref, width, height: hostH } = useMeasure();
@@ -163,7 +163,6 @@ export default function MultiSeriesLines({
   const [introT, setIntroT] = React.useState(0);
   React.useLayoutEffect(() => {
     setIntroT(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [introEpoch, series.length, yMin, yMax]);
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
@@ -263,8 +262,8 @@ export default function MultiSeriesLines({
         const x1 = xs[i],   y1 = ys[i];
         const x2 = xs[i+1], y2 = ys[i+1];
         const h = x2 - x1 || 1;
-        const cx1x = x1 + h/3; let cx1y = y1 + (m[i]   * h)/3;
-        const cx2x = x2 - h/3; let cx2y = y2 - (m[i+1] * h)/3;
+        const cx1x = x1 + h/3; const cx1y = y1 + (m[i]   * h)/3;
+        const cx2x = x2 - h/3; const cx2y = y2 - (m[i+1] * h)/3;
         ctx.bezierCurveTo(
           cx1x, Math.max(y0, Math.min(baseline, cx1y)),
           cx2x, Math.max(y0, Math.min(baseline, cx2y)),
@@ -283,8 +282,8 @@ export default function MultiSeriesLines({
         const x1 = xs[i],   y1 = ys[i];
         const x2 = xs[i+1], y2 = ys[i+1];
         const h = x2 - x1 || 1;
-        const cx1x = x1 + h/3; let cx1y = y1 + (m[i]   * h)/3;
-        const cx2x = x2 - h/3; let cx2y = y2 - (m[i+1] * h)/3;
+        const cx1x = x1 + h/3; const cx1y = y1 + (m[i]   * h)/3;
+        const cx2x = x2 - h/3; const cx2y = y2 - (m[i+1] * h)/3;
         ctx.bezierCurveTo(
           cx1x, Math.max(y0, Math.min(baseline, cx1y)),
           cx2x, Math.max(y0, Math.min(baseline, cx2y)),
@@ -421,7 +420,10 @@ export default function MultiSeriesLines({
   const hostRect = (ref.current as HTMLDivElement | null)?.getBoundingClientRect();
 
   return (
-    <div className="h-full min-h-0 overflow-hidden flex flex-col p-0">
+    <div className="h-full min-h-0 overflow-hidden flex flex-col p-0" aria-label={title ?? "line chart"} data-title={title}>
+      {/* Use an sr-only title to avoid unused var and improve a11y */}
+      {title ? <span className="sr-only">{title}</span> : null}
+
       {/* Top spacer to mirror the legend row below */}
       {reserveTopGutter ? (
         <div className="shrink-0" style={{ height: legendRowHeight + legendGapPx }} aria-hidden />

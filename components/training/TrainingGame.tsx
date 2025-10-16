@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useRef, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -77,7 +77,7 @@ export default function TrainingGame({
 
   const step = "play" as const;
   const {
-    bpm, ts, leadBars, restBars, noteValue, noteDurSec, view,
+    bpm, ts, leadBars, restBars, noteValue, noteDurSec,
     callResponseSequence, exerciseLoops, regenerateBetweenTakes,
     metronome, loopingMode, gestureLatencyMs = 90,
   } = sessionEff;

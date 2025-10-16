@@ -1,10 +1,16 @@
 // components/training/layout/stage/GameStage.tsx
 "use client";
 
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import PianoRollCanvas, { type Phrase } from "./piano-roll/PianoRollCanvas";
 import RhythmRollCanvas from "./piano-roll/RhythmRollCanvas";
-import type { RhythmEvent } from "@/utils/phrase/generator";
+import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import VexScore from "./sheet/vexscore/VexScore";
 import SheetOverlay from "./sheet/SheetOverlay";
 import type { SystemLayout } from "./sheet/vexscore/types";
@@ -13,6 +19,27 @@ import { barsToBeats, beatsToSeconds } from "@/utils/time/tempo";
 import SidePanelLayout from "./side-panel/SidePanelLayout";
 import type { ScaleName } from "@/utils/phrase/scales";
 import SessionAnalytics from "./analytics/SessionAnalytics";
+import type { TakeScore } from "@/utils/scoring/score";
+import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
+
+/* ────────────────────────────────────────────────────────────── */
+/* Types                                                          */
+/* ────────────────────────────────────────────────────────────── */
+
+type AnalyticsSnapshot = {
+  phrase: Phrase;
+  rhythm: RhythmEvent[] | null;
+  melodyRhythm?: RhythmEvent[] | null;
+};
+
+type AnalyticsPayload = {
+  scores: TakeScore[];
+  snapshots: AnalyticsSnapshot[];
+  bpm: number;
+  den: number;
+  tonicPc?: number;
+  scaleName?: string | ScaleName;
+};
 
 type Props = {
   phrase?: Phrase | null;
@@ -51,20 +78,99 @@ type Props = {
 
   /** 🔑 NEW: mode-aware solfege for piano roll */
   tonicPc?: number;
-  scaleName?: ScaleName;
+  scaleName?: ScaleName | string;
 
   /** NEW: analytics payload (used when view==="analytics") */
-  analytics?: {
-    scores: any[];
-    snapshots: Array<{ phrase: any; rhythm: any; melodyRhythm: any }>;
-    bpm: number;
-    den: number;
-    tonicPc?: number;
-    scaleName?: ScaleName | (string & {});
-  };
+  analytics?: AnalyticsPayload;
 };
 
-export default function GameStage({
+/* Helper: narrow unknown/string → SolfegeScaleName | undefined */
+function toSolfegeName(x: unknown): SolfegeScaleName | undefined {
+  return typeof x === "string" ? (x as SolfegeScaleName) : undefined;
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/* Wrapper: no hooks here → delegates to view-specific component  */
+/* ────────────────────────────────────────────────────────────── */
+
+export default function GameStage(props: Props) {
+  const {
+    view = "piano",
+    stageAside,
+    analytics,
+    bpm = 80,
+    den = 4,
+    tonicPc,
+    scaleName,
+  } = props;
+
+  if (view === "analytics") {
+    return (
+      <AnalyticsStageView
+        analytics={analytics}
+        stageAside={stageAside}
+        bpmFallback={bpm}
+        denFallback={den}
+        tonicPcFallback={typeof tonicPc === "number" ? tonicPc : 0}
+        scaleNameFallback={(scaleName as string | undefined) ?? "major"}
+      />
+    );
+  }
+
+  return <MainStageView {...props} />;
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/* Analytics-only view (no hooks needed)                          */
+/* ────────────────────────────────────────────────────────────── */
+
+function AnalyticsStageView({
+  analytics,
+  stageAside,
+  bpmFallback,
+  denFallback,
+  tonicPcFallback,
+  scaleNameFallback,
+}: {
+  analytics?: AnalyticsPayload;
+  stageAside?: React.ReactNode;
+  bpmFallback: number;
+  denFallback: number;
+  tonicPcFallback: number;
+  scaleNameFallback: string | ScaleName;
+}) {
+  return (
+    <div className="w-full h-full min-h-[260px]">
+      <div className="w-full h-full flex gap-3">
+        {/* LEFT: Analytics */}
+        <div className="flex-1 min-w-0 min-h-0 rounded-xl shadow-md">
+          <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
+            <SessionAnalytics
+              scores={analytics?.scores ?? []}
+              snapshots={analytics?.snapshots ?? []}
+              bpm={analytics?.bpm ?? bpmFallback}
+              den={analytics?.den ?? denFallback}
+              tonicPc={analytics?.tonicPc ?? tonicPcFallback}
+              // SessionAnalytics accepts string | SolfegeScaleName; string is safe here.
+              scaleName={(analytics?.scaleName ?? scaleNameFallback) as string}
+            />
+          </div>
+        </div>
+
+        {/* RIGHT: Side panel */}
+        <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
+          <SidePanelLayout>{stageAside}</SidePanelLayout>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/* Main stage (piano/sheet). Hooks live here only.                */
+/* ────────────────────────────────────────────────────────────── */
+
+function MainStageView({
   phrase,
   running,
   onActiveNoteChange,
@@ -93,43 +199,9 @@ export default function GameStage({
 
   stageAside,
 
-  // NEW
   tonicPc,
   scaleName,
-
-  analytics,
-}: Props) {
-  // If analytics view, render it directly (left) + always keep the side panel on the right).
-  if (view === "analytics") {
-    return (
-      <div className="w-full h-full min-h-[260px]">
-        <div className="w-full h-full flex gap-3">
-          {/* LEFT: Analytics */}
-          <div className="flex-1 min-w-0 min-h-0 rounded-xl shadow-md">
-            <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
-              <SessionAnalytics
-                scores={analytics?.scores ?? []}
-                snapshots={analytics?.snapshots ?? []}
-                bpm={analytics?.bpm ?? bpm}
-                den={analytics?.den ?? den}
-                tonicPc={analytics?.tonicPc ?? tonicPc ?? 0}
-                scaleName={(analytics?.scaleName ?? scaleName ?? "major") as any}
-              />
-            </div>
-          </div>
-          {/* RIGHT: Side panel */}
-          <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
-            <SidePanelLayout>{stageAside}</SidePanelLayout>
-          </aside>
-        </div>
-      </div>
-    );
-  }
-
-  // ───────────────────────────────────────────────────────────────
-  // Regular sheet / piano-stage rendering
-  // ───────────────────────────────────────────────────────────────
-
+}: Omit<Props, "analytics">) {
   // Keep timeline math identical across canvases
   const WINDOW_SEC = 4;
   const ANCHOR_RATIO = 0.1;
@@ -199,7 +271,8 @@ export default function GameStage({
     }
   }, []);
 
-  const hasPhrase = !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
+  const hasPhrase =
+    !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
   const showRhythm = !!(rhythm && rhythm.length);
   const wantRhythm = hasPhrase && showRhythm && view !== "sheet";
 
@@ -217,16 +290,23 @@ export default function GameStage({
     const avail = fillH - GAP;
     const mainTarget = Math.round((avail * ROWS) / (ROWS + 1));
     mainH = Math.max(200, mainTarget);
-    rhythmH = Math.max(0, avail - mainH); // ensures exact sum + exact single row height
+    rhythmH = Math.max(
+      0,
+      avail - mainH
+    ); /* ensures exact sum + exact single row height */
   } else {
     mainH = Math.max(200, fillH);
     rhythmH = 0;
   }
 
-  const useSharpsPref = useMemo(() => preferSharpsForKeySig(keySig || null), [keySig]);
+  const useSharpsPref = useMemo(
+    () => preferSharpsForKeySig(keySig || null),
+    [keySig]
+  );
 
   const leadInSecEff = useMemo(() => {
-    if (typeof leadInSec === "number" && isFinite(leadInSec)) return Math.max(0, leadInSec);
+    if (typeof leadInSec === "number" && isFinite(leadInSec))
+      return Math.max(0, leadInSec);
     const bars = typeof leadBars === "number" ? leadBars : 1;
     return beatsToSeconds(barsToBeats(bars, tsNum), bpm, den);
   }, [leadInSec, leadBars, tsNum, bpm, den]);
@@ -310,7 +390,7 @@ export default function GameStage({
                 blocksWhenLyrics={blocksWhenLyrics}
                 /** 🔑 NEW: rotate solfege labels with the mode */
                 solfegeTonicPc={tonicPc}
-                solfegeScaleName={scaleName}
+                solfegeScaleName={toSolfegeName(scaleName)}
               />
             )}
           </div>

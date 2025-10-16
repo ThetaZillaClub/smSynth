@@ -6,22 +6,24 @@ import * as React from "react";
 export type LessonRef = { slug: string; title?: string; summary?: string };
 export type LessonSuggestion = LessonRef & { reason?: string };
 
-export default function CourseNavPanel({
-  currentLesson,
-  prevLesson,
-  nextLesson,
-  // suggestions removed from UI; keep prop but ignore to avoid breaking callers
-  suggestions: _suggestions = [],
-  onRepeat,
-  onGoTo,
-}: {
+export default function CourseNavPanel(props: {
   currentLesson?: LessonRef | null;
   prevLesson?: LessonRef | null;
   nextLesson?: LessonRef | null;
+  /** Kept for API compatibility but not used in UI */
   suggestions?: LessonSuggestion[];
   onRepeat?: () => void;
   onGoTo?: (slug: string) => void;
 }) {
+  const {
+    currentLesson,
+    prevLesson,
+    nextLesson,
+    // suggestions intentionally not destructured/used
+    onRepeat,
+    onGoTo,
+  } = props;
+
   const disabled = !onGoTo;
 
   return (
@@ -100,7 +102,6 @@ function ActionCard({
       disabled={disabled}
       className={[
         "group relative text-left rounded-2xl border p-3 md:p-4 transition",
-        // ⬅️ Revert colors to the original scheme
         "bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] border-[#d2d2d2]",
         disabled
           ? "opacity-70 cursor-not-allowed"

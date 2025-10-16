@@ -8,14 +8,6 @@ import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 import { PolarArea, NOTE, clamp } from './pitch';
 
-type PitchNoteRow = {
-  result_id: string;                    // uuid
-  midi: number;                         // int
-  n: number | string | null;            // numeric may arrive as string
-  ratio: number | string | null;        // numeric may arrive as string
-  cents_mae: number | string | null;    // numeric may arrive as string
-};
-
 export default function PitchFocusCard({
   frameless = false,
   fill = false,
