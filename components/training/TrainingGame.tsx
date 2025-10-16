@@ -1,6 +1,7 @@
 // components/training/TrainingGame.tsx
 "use client";
 import React, { useRef, useState, useEffect } from "react";
+import { useRouter, useParams } from "next/navigation";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
@@ -28,6 +29,13 @@ import { useFooterActions } from "@/hooks/gameplay/useFooterActions";
 import { useScoringLifecycle } from "@/hooks/gameplay/useScoringLifecycle";
 import { useSidePanel } from "@/hooks/gameplay/useSidePanel";
 
+// NEW: course registry (actual lessons)
+import { COURSES, findCourse } from "@/lib/courses/registry";
+import type { CourseDef, LessonDef } from "@/lib/courses/types";
+
+// NEW: course navigation panel
+import CourseNavPanel from "./layout/stage/side-panel/CourseNavPanel";
+
 type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean; };
 
 type Props = {
@@ -36,7 +44,7 @@ type Props = {
   studentRowId?: string | null;
   rangeLowLabel?: string | null;
   rangeHighLabel?: string | null;
-  lessonSlug?: string | null;
+  lessonSlug?: string | null; // lesson slug within its course
   sessionId?: string | null;
 };
 
@@ -51,6 +59,10 @@ export default function TrainingGame({
   lessonSlug = null,
   sessionId = null,
 }: Props) {
+  const router = useRouter();
+  const params = useParams<{ course?: string; lesson?: string }>();
+  const courseSlugParam = (params?.course as string | undefined) ?? undefined;
+
   const { lowHz, highHz, loading: rangeLoading, error: rangeError } = useStudentRange(
     studentRowId,
     { rangeLowLabel, rangeHighLabel }
@@ -306,6 +318,112 @@ export default function TrainingGame({
   const stageView: "piano" | "sheet" | "analytics" =
     sessionComplete ? "analytics" : (sessionEff.view === "sheet" ? "sheet" : "piano");
 
+  // ───────────────────────────────────────────────────────────────
+  // Analytics → Course / Lesson navigation (REAL registry only)
+  // ───────────────────────────────────────────────────────────────
+
+  // Resolve current course from param; if missing, try to find by lesson slug.
+  let currentCourse: CourseDef | undefined = courseSlugParam ? findCourse(courseSlugParam) : undefined;
+  if (!currentCourse && lessonSlug) {
+    currentCourse = COURSES.find((c) => c.lessons.some((l) => l.slug === lessonSlug));
+  }
+
+  const currentLesson: LessonDef | undefined =
+    currentCourse?.lessons.find((l) => l.slug === lessonSlug) ?? undefined;
+
+  // Prev/Next within the *current course* (only real lessons)
+  const { prevLessonRef, nextLessonRef } = (() => {
+    if (!currentCourse || !currentLesson) return { prevLessonRef: null, nextLessonRef: null };
+    const idx = currentCourse.lessons.findIndex((l) => l.slug === currentLesson.slug);
+    const prev = idx > 0 ? currentCourse.lessons[idx - 1] : null;
+    const next = idx >= 0 && idx < currentCourse.lessons.length - 1 ? currentCourse.lessons[idx + 1] : null;
+
+    const toRef = (c: CourseDef, l: LessonDef) => ({
+      slug: `${c.slug}/${l.slug}`, // path part used by onGoTo
+      title: l.title,
+    });
+    return {
+      prevLessonRef: prev ? toRef(currentCourse, prev) : null,
+      nextLessonRef: next ? toRef(currentCourse, next) : null,
+    };
+  })();
+
+  // Heuristics → recommended lessons (choose FIRST lesson of relevant course)
+  function firstLessonOf(courseSlug: string): { slug: string; title: string } | null {
+    const c = findCourse(courseSlug);
+    if (!c || !c.lessons.length) return null;
+    const L = c.lessons[0]!;
+    return { slug: `${c.slug}/${L.slug}`, title: L.title };
+  }
+
+  function buildSuggestions() {
+    if (!sessionScores.length) return [] as Array<{ slug: string; title: string; reason?: string }>;
+
+    const avg = (sel: (s: any) => number) =>
+      sessionScores.reduce((a, s) => a + Number(sel(s) || 0), 0) / sessionScores.length;
+
+    const pitchPct = avg((s) => s.pitch?.percent ?? 0);
+    const melodyPct = avg((s) => s.rhythm?.melodyPercent ?? 0);
+    const linePct   = avg((s) => (s.rhythm?.lineEvaluated ? s.rhythm?.linePercent : null) ?? 0);
+    const intervalsPct = Math.round(avg((s) => (s.intervals?.correctRatio ?? 0) * 100));
+
+    const out: Array<{ slug: string; title: string; reason?: string }> = [];
+
+    if (pitchPct < 75) {
+      const pick = firstLessonOf("pitch-tune");
+      if (pick) out.push({ ...pick, reason: "Pitch under target" });
+    }
+    if (melodyPct < 75) {
+      const pick = firstLessonOf("pitch-time");
+      if (pick) out.push({ ...pick, reason: "Melody timing needs work" });
+    }
+    if (Number.isFinite(linePct) && (linePct as number) < 75) {
+      const pick = firstLessonOf("scales-rhythms");
+      if (pick) out.push({ ...pick, reason: "Tap timing off" });
+    }
+    if (intervalsPct < 60) {
+      const pick = firstLessonOf("intervals");
+      if (pick) out.push({ ...pick, reason: "Intervals accuracy low" });
+    }
+
+    // De-dupe + drop suggestion that equals the current lesson
+    const currentPath = currentCourse && currentLesson ? `${currentCourse.slug}/${currentLesson.slug}` : null;
+    const seen = new Set<string>();
+    return out.filter((s) => {
+      if (currentPath && s.slug === currentPath) return false;
+      if (seen.has(s.slug)) return false;
+      seen.add(s.slug);
+      return true;
+    }).slice(0, 4);
+  }
+
+  const suggestions = buildSuggestions();
+
+  const onGoToPath = (slugPath: string) => {
+    // slugPath is "courseSlug/lessonSlug"
+    router.push(`/courses/${slugPath}`);
+  };
+
+  const onRepeat = () => {
+    // Refresh current lesson page → new session id upstream
+    router.refresh();
+  };
+
+  const analyticsSidePanel = sessionComplete ? (
+    <CourseNavPanel
+      currentLesson={
+        currentCourse && currentLesson
+          ? { slug: `${currentCourse.slug}/${currentLesson.slug}`, title: currentLesson.title }
+          : undefined
+      }
+      prevLesson={prevLessonRef ?? undefined}
+      nextLesson={nextLessonRef ?? undefined}
+      suggestions={suggestions}
+      onGoTo={onGoToPath}
+      onRepeat={onRepeat}
+    />
+  ) : null;
+
   return (
     <GameLayout
       title={title}
@@ -336,7 +454,7 @@ export default function TrainingGame({
       sessionPanel={footerSessionPanel}
       sidePanel={sidePanel}
       tonicPc={exerciseUnlocked ? (sessionEff.scale?.tonicPc ?? null) : null}
-      scaleName={sessionEff.scale?.name ?? null}
+      scaleName={exerciseUnlocked ? (sessionEff.scale?.name ?? null) : null}
       tonicAction={footerTonicAction}
       arpAction={footerArpAction}
       // NEW: provide analytics data for the stage when session completes
@@ -348,6 +466,8 @@ export default function TrainingGame({
         tonicPc: sessionEff.scale?.tonicPc ?? 0,
         scaleName: sessionEff.scale?.name ?? "major",
       }}
+      // NEW: swap right panel to Course Navigation when in analytics view
+      analyticsSidePanel={analyticsSidePanel}
     />
   );
 }

@@ -84,6 +84,9 @@ type LayoutProps = {
 
   /** NEW: analytics payload for post-exercise stage */
   analytics?: AnalyticsPayload;
+
+  /** NEW: replace right-side panel *only* when view === "analytics" */
+  analyticsSidePanel?: React.ReactNode;
 };
 
 export default function GameLayout({
@@ -124,9 +127,17 @@ export default function GameLayout({
   arpAction,
 
   analytics,
+  analyticsSidePanel,
 }: LayoutProps) {
   const showPlay = !!phrase;
-  const asideNode = sidePanel ? <TrainingSidePanel {...sidePanel} /> : stageAside;
+
+  // Choose panel: when analytics view, prefer the special side panel if provided.
+  const asideNode =
+    view === "analytics" && analyticsSidePanel
+      ? analyticsSidePanel
+      : sidePanel
+      ? <TrainingSidePanel {...sidePanel} />
+      : stageAside;
 
   return (
     <main className="min-h-dvh h-dvh flex flex-col bg-[#f0f0f0] text-[#0f0f0f]">
