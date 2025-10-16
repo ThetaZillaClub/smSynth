@@ -38,31 +38,40 @@ export function HomeResultsProvider({ children }: { children: React.ReactNode })
     let cancelled = false;
     (async () => {
       try {
-        setState(s => ({ ...s, loading: true, error: null }));
+        setState((s) => ({ ...s, loading: true, error: null }));
         await ensureSessionReady(supabase, 2000);
 
         const { data, error } = await supabase
           .from('lesson_results')
-          .select('id, created_at, lesson_slug, final_percent, pitch_percent, rhythm_melody_percent, rhythm_line_percent, intervals_correct_ratio')
+          .select(
+            'id, created_at, lesson_slug, final_percent, pitch_percent, rhythm_melody_percent, rhythm_line_percent, intervals_correct_ratio'
+          )
           .eq('uid', uid)
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: false }) // fetch NEWEST first
           .limit(400);
 
         if (error) throw error;
 
         type Row = HomeResultsCtx['rows'][number];
-        const rows: Row[] = (data ?? []) as Row[];
-        const recentIds = rows.slice(-30).map(r => r.id);
+        const newestFirst: Row[] = (data ?? []) as unknown as Row[];
+
+        // Keep chronology for any UI pieces that expect ascending time
+        const rows: Row[] = [...newestFirst].reverse();
+
+        // Latest 30 IDs for downstream consumers (e.g., PitchFocusCard)
+        const recentIds: string[] = newestFirst.slice(0, 30).map((r) => r.id);
 
         if (!cancelled) {
           setState({ rows, recentIds, loading: false, error: null });
         }
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
-        if (!cancelled) setState(s => ({ ...s, loading: false, error: message }));
+        if (!cancelled) setState((s) => ({ ...s, loading: false, error: message }));
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [supabase, uid]);
 
   return <Ctx.Provider value={state}>{children}</Ctx.Provider>;

@@ -4,27 +4,29 @@
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
-import { PR_COLORS } from '@/utils/stage';
 import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
 import { PolarArea, NOTE, clamp } from './pitch';
 
 type PitchNoteRow = {
-  result_id: number;
-  midi: number;
-  n: number | null;
-  ratio: number | null;
-  cents_mae: number | null;
+  result_id: string;                    // uuid
+  midi: number;                         // int
+  n: number | string | null;            // numeric may arrive as string
+  ratio: number | string | null;        // numeric may arrive as string
+  cents_mae: number | string | null;    // numeric may arrive as string
 };
 
 export default function PitchFocusCard({
   frameless = false,
   fill = false,
   className = '',
+  maxNotes = 16,
 }: {
   frameless?: boolean;
   fill?: boolean;
   className?: string;
+  /** Max notes to render; set high to effectively show all. */
+  maxNotes?: number;
 }) {
   const supabase = React.useMemo(() => createClient(), []);
   const { recentIds, loading: baseLoading, error: baseErr } = useHomeResults();
@@ -35,10 +37,10 @@ export default function PitchFocusCard({
 
   React.useEffect(() => {
     let cancelled = false;
+
     (async () => {
       try {
         if (baseLoading) { setLoading(true); setErr(baseErr ?? null); return; }
-
         setLoading(true); setErr(null);
 
         if (!recentIds.length) {
@@ -55,32 +57,50 @@ export default function PitchFocusCard({
 
         if (pQ.error) throw pQ.error;
 
-        const rows: PitchNoteRow[] = (pQ.data ?? []) as PitchNoteRow[];
+        type Row = {
+          result_id: string; midi: number;
+          n: number | string | null; ratio: number | string | null; cents_mae: number | string | null;
+        };
+        const rows: Row[] = (pQ.data ?? []) as Row[];
 
         const byMidi = new Map<number, { w: number; on: number; mae: number }>();
         for (const p of rows) {
-          const w = Math.max(1, Number(p.n ?? 1));
-          const g = byMidi.get(p.midi) ?? { w: 0, on: 0, mae: 0 };
+          const midi = Number(p.midi);
+          if (!Number.isFinite(midi)) continue;
+
+          const nRaw = p.n == null ? 1 : Number(p.n);
+          const ratioRaw = p.ratio == null ? 0 : Number(p.ratio);
+          const maeRaw = p.cents_mae == null ? 0 : Number(p.cents_mae);
+
+          const w = Math.max(1, Math.round(Number.isFinite(nRaw) ? nRaw : 1));
+          const on = clamp(Number.isFinite(ratioRaw) ? ratioRaw : 0, 0, 1);
+          const mae = Math.max(0, Number.isFinite(maeRaw) ? maeRaw : 0);
+
+          const g = byMidi.get(midi) ?? { w: 0, on: 0, mae: 0 };
           const wt = g.w + w;
-          g.on  = (g.on  * g.w + (p.ratio ?? 0)     * w) / wt;
-          g.mae = (g.mae * g.w + (p.cents_mae ?? 0) * w) / wt;
-          g.w   = wt;
-          byMidi.set(p.midi, g);
+          const onAvg = (g.on * g.w + on * w) / wt;
+          const maeAvg = (g.mae * g.w + mae * w) / wt;
+          byMidi.set(midi, { w: wt, on: onAvg, mae: maeAvg });
         }
 
         const full = Array.from(byMidi.entries()).map(([m, v]) => ({
           midi: m,
           label: NOTE(m),
-          v1: Math.round(v.on * 100),
-          v2: Math.round(v.mae),
+          v1: Math.round(clamp(v.on, 0, 1) * 100), // On-pitch %
+          v2: Math.round(v.mae),                   // MAE ¢
           score: (1 - clamp(v.on, 0, 1)) * 0.6 + Math.min(1, v.mae / 120) * 0.4,
         }));
 
-        const topFragile = [...full].sort((a, b) => b.score - a.score).slice(0, 8);
-        const midiOrdered = topFragile.sort((a, b) => a.midi - b.midi);
+        const itemsForChart = (() => {
+          if (full.length <= Math.max(1, maxNotes)) {
+            return [...full].sort((a, b) => a.midi - b.midi);
+          }
+          const topFragile = [...full].sort((a, b) => b.score - a.score).slice(0, Math.max(1, maxNotes));
+          return topFragile.sort((a, b) => a.midi - b.midi);
+        })();
 
         if (!cancelled) {
-          setItems(midiOrdered.map(({ label, v1, v2 }) => ({ label, v1, v2 })));
+          setItems(itemsForChart.map(({ label, v1, v2 }) => ({ label, v1, v2 })));
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -89,13 +109,12 @@ export default function PitchFocusCard({
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => { cancelled = true; };
-  }, [supabase, recentIds, baseLoading, baseErr]);
+  }, [supabase, recentIds, baseLoading, baseErr, maxNotes]);
 
   const isLoading = baseLoading || loading;
   const errorMsg = baseErr || err;
-
-  const BLUE = '#3b82f6';
 
   const Inner = () => (
     <div className={fill ? 'h-full flex flex-col' : undefined}>

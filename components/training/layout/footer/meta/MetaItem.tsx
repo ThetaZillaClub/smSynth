@@ -13,9 +13,10 @@ export default function MetaItem({
   className?: string;
 }) {
   return (
-    <div className={`flex flex-col items-start ${className ?? ""}`}>
-      <div className="text-xs text-[#2d2d2d] leading-none">{label}</div>
-      <div className="text-lg leading-tight text-[#0f0f0f] whitespace-nowrap tabular-nums">
+    <div className={`flex flex-col items-start leading-none ${className ?? ""}`}>
+      {/* labels only on lg+ to lower height earlier */}
+      <div className="hidden lg:block text-[11px] lg:text-xs text-[#2d2d2d] leading-none">{label}</div>
+      <div className="text-base md:text-lg leading-tight text-[#0f0f0f] whitespace-nowrap tabular-nums">
         {value}
       </div>
     </div>

@@ -3,17 +3,17 @@
 
 import * as React from "react";
 
-export type LessonRef = { slug: string; title?: string };
+export type LessonRef = { slug: string; title?: string; summary?: string };
 export type LessonSuggestion = LessonRef & { reason?: string };
 
 export default function CourseNavPanel({
   currentLesson,
   prevLesson,
   nextLesson,
-  suggestions = [],
+  // suggestions removed from UI; keep prop but ignore to avoid breaking callers
+  suggestions: _suggestions = [],
   onRepeat,
   onGoTo,
-  // onBrowseAll, // removed from UI per request
 }: {
   currentLesson?: LessonRef | null;
   prevLesson?: LessonRef | null;
@@ -21,7 +21,6 @@ export default function CourseNavPanel({
   suggestions?: LessonSuggestion[];
   onRepeat?: () => void;
   onGoTo?: (slug: string) => void;
-  // onBrowseAll?: () => void; // removed from UI per request
 }) {
   const disabled = !onGoTo;
 
@@ -32,89 +31,44 @@ export default function CourseNavPanel({
         <div className="text-base md:text-lg font-semibold text-[#0f0f0f]">
           Course navigation
         </div>
-        {currentLesson?.slug ? (
-          <Chip
-            title="Current lesson"
-            text={currentLesson.title || currentLesson.slug}
-            className="max-w-[60%] truncate"
-          />
-        ) : null}
+        {/* Removed "Current lesson" chip per request */}
       </header>
 
-      {/* Primary actions (analytics-style cards) */}
-      <div className="grid grid-cols-1 gap-2">
+      {/* Cards */}
+      <div className="grid grid-cols-1 gap-3">
         <ActionCard
-          label="Repeat this lesson"
-          detail="Start a fresh session"
+          eyebrow="Repeat this lesson"
+          label={currentLesson?.title || "Current lesson"}
+          detail={currentLesson?.summary}
           icon="repeat"
           onClick={onRepeat}
           disabled={!onRepeat}
           data-testid="repeat-lesson"
+          aria-label="Repeat this lesson"
         />
+
         <ActionCard
-          label={nextLesson?.title ? `Next: ${nextLesson.title}` : "Next lesson"}
-          detail={nextLesson?.slug || "Pick your next step"}
+          eyebrow="Next"
+          label={nextLesson?.title || "Next lesson"}
+          detail={nextLesson?.summary}
           icon="next"
           onClick={() => nextLesson?.slug && onGoTo?.(nextLesson.slug)}
           disabled={disabled || !nextLesson?.slug}
           data-testid="next-lesson"
+          aria-label="Go to next lesson"
         />
+
         <ActionCard
-          label={prevLesson?.title ? `Previous: ${prevLesson.title}` : "Previous lesson"}
-          detail={prevLesson?.slug || "Go back one step"}
+          eyebrow="Previous"
+          label={prevLesson?.title || "Previous lesson"}
+          detail={prevLesson?.summary}
           icon="prev"
           onClick={() => prevLesson?.slug && onGoTo?.(prevLesson.slug)}
           disabled={disabled || !prevLesson?.slug}
           data-testid="prev-lesson"
+          aria-label="Go to previous lesson"
         />
       </div>
-
-      {/* Recommended next steps (analytics-style cards) */}
-      <section className="mt-1">
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">
-          Recommended next steps
-        </div>
-
-        {suggestions.length === 0 ? (
-          <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-3 shadow-sm text-sm text-[#373737]">
-            We’ll show targeted lessons here based on your report.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-2">
-            {suggestions.map((s) => (
-              <button
-                key={s.slug}
-                type="button"
-                onClick={() => onGoTo?.(s.slug)}
-                disabled={disabled}
-                className={[
-                  "w-full text-left rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee]",
-                  "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
-                  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
-                  disabled ? "opacity-70 cursor-not-allowed" : "",
-                ].join(" ")}
-                title={s.title || s.slug}
-                aria-label={`Open ${s.title || s.slug}`}
-                data-testid="lesson-suggestion"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-[#0f0f0f] truncate">
-                      {s.title || s.slug}
-                    </div>
-                    <div className="text-xs text-[#6b6b6b] truncate">{s.slug}</div>
-                  </div>
-                  {s.reason ? (
-                    <Chip text={s.reason} title="Why suggested" />
-                  ) : (
-                    <Chip text="Suggested" />
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }
@@ -124,6 +78,7 @@ export default function CourseNavPanel({
 /* ────────────────────────────────────────────────────────────── */
 
 function ActionCard({
+  eyebrow,
   label,
   detail,
   icon,
@@ -131,8 +86,9 @@ function ActionCard({
   disabled,
   ...rest
 }: {
-  label: string;
-  detail?: string;
+  eyebrow?: string; // small headline inside the card
+  label: string;    // main title (lesson title)
+  detail?: string;  // summary
   icon?: "repeat" | "next" | "prev";
   onClick?: () => void;
   disabled?: boolean;
@@ -143,57 +99,41 @@ function ActionCard({
       onClick={onClick}
       disabled={disabled}
       className={[
-        "text-left rounded-2xl border p-3 md:p-4 transition",
+        "group relative text-left rounded-2xl border p-3 md:p-4 transition",
+        // ⬅️ Revert colors to the original scheme
         "bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] border-[#d2d2d2]",
         disabled
           ? "opacity-70 cursor-not-allowed"
-          : "shadow-sm hover:shadow-md active:scale-[0.99]",
+          : "shadow-sm hover:shadow-md hover:-translate-y-[1px] active:translate-y-0 hover:ring-1 hover:ring-[#d3d3d3]",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
       ].join(" ")}
       aria-disabled={disabled || undefined}
       {...rest}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-start gap-2">
         <Icon kind={icon} />
         <div className="min-w-0">
+          {eyebrow ? (
+            <div className="text-xs md:text-sm uppercase tracking-wide text-[#6b6b6b]">
+              {eyebrow}
+            </div>
+          ) : null}
           <div className="text-sm md:text-base font-semibold text-[#0f0f0f] truncate">
             {label}
           </div>
-          {detail ? <div className="text-xs text-[#373737] truncate">{detail}</div> : null}
+          {detail ? (
+            <div className="text-xs text-[#373737] truncate">{detail}</div>
+          ) : null}
         </div>
       </div>
     </button>
   );
 }
 
-function Chip({
-  text,
-  title,
-  className = "",
-}: {
-  text: string;
-  title?: string;
-  className?: string;
-}) {
-  return (
-    <span
-      className={[
-        "inline-flex items-center rounded-full border border-[#dcdcdc] bg-white",
-        "px-2.5 py-1 text-xs font-medium text-[#373737] shadow-sm",
-        className,
-      ].join(" ")}
-      title={title || text}
-    >
-      <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#0f0f0f] mr-1.5" aria-hidden />
-      <span className="truncate">{text}</span>
-    </span>
-  );
-}
-
 function Icon({ kind }: { kind?: "repeat" | "next" | "prev" }) {
   return (
     <span
-      className="shrink-0 inline-grid place-items-center w-8 h-8 rounded-full bg-[#f4f4f4] border border-[#e6e6e6] text-[#0f0f0f]"
+      className="shrink-0 inline-grid place-items-center w-8 h-8 rounded-full bg-[#f4f4f4] border border-[#e6e6e6] text-[#0f0f0f] group-hover:bg-white"
       aria-hidden
     >
       {kind === "repeat" ? (

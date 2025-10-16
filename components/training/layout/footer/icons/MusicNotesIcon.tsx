@@ -1,3 +1,4 @@
+// components/training/layout/footer/icons/MusicNotesIcon.tsx
 "use client";
 
 import React from "react";

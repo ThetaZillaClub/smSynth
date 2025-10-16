@@ -9,7 +9,7 @@ export default function FooterActionButton({ label, icon, onClick, disabled, tit
 
   const base = [
     "relative inline-flex items-center justify-center",
-    "w-11 h-11 md:w-12 md:h-12 rounded-full",
+    "w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 rounded-full",
     "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
     "ring-1 ring-inset ring-black/5",
     "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
@@ -22,7 +22,7 @@ export default function FooterActionButton({ label, icon, onClick, disabled, tit
     disabled ? "opacity-40 cursor-not-allowed" : "",
   ].join(" ");
 
-  const textSize = len > 10 ? "text-[10px]" : "text-xs md:text-sm";
+  const textSize = len > 10 ? "text-[10px]" : "text-[11px] md:text-xs lg:text-sm";
   const aria = title ?? label ?? "Action";
 
   return (

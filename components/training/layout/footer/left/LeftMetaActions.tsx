@@ -1,3 +1,4 @@
+// components/training/layout/footer/left/LeftMetaActions.tsx
 "use client";
 
 import React from "react";
@@ -24,7 +25,7 @@ export default function LeftMetaActions({
     <div
       className={[
         "w-full flex items-center justify-start flex-nowrap overflow-visible",
-        // tighter gap for denser grouping
+        // keep gaps stable so they don't shrink early
         "gap-x-3 md:gap-x-4",
         className ?? "",
       ].join(" ")}

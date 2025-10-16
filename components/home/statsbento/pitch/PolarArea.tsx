@@ -2,19 +2,23 @@
 'use client';
 
 import * as React from 'react';
-import { PR_COLORS } from '@/utils/stage';
 import { useMeasure, useCanvas2d } from './hooks';
 import { clamp01, clamp, ease } from './utils';
 import type { Item } from './types';
 
 const GAMMA = 0.9;
 
-// Blue palette
-const BLUE_FILL = '#3b82f6';
-const BLUE_STROKE = '#2563eb';
+// Solid palette
+const GREEN_BASE = '#5ac698';
+const BLUE_BASE  = '#b1c9f2';
+
+// Solid highlight colors (no blending)
+const GREEN_HI = '#23d794';
+const BLUE_HI  = '#84b3f6';
 
 // When radii are nearly equal, keep ordering stable
 const ORDER_EPS = 0.75; // px
+const TAU = Math.PI * 2;
 
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
   const vMin = Math.min(...vals);
@@ -25,6 +29,73 @@ const normFromDataset = (vals: number[]): ((v: number) => number) => {
   }
   return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
 };
+
+function fitFontPx(text: string, family: string, weight: string, maxWidth: number, minPx: number, maxPx: number) {
+  if (typeof window === 'undefined') return Math.max(minPx, Math.min(maxPx, minPx));
+  const cnv = document.createElement('canvas');
+  const ctx = cnv.getContext('2d');
+  if (!ctx) return Math.max(minPx, Math.min(maxPx, minPx));
+  let lo = minPx, hi = maxPx, best = minPx;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    ctx.font = `${weight} ${mid}px ${family}`;
+    const w = ctx.measureText(text).width;
+    if (w <= maxWidth) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+  }
+  return best;
+}
+
+function fillAnnulus(ctx: CanvasRenderingContext2D, r0: number, r1: number, paint: string | CanvasGradient | CanvasPattern) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(0, 0, r1, 0, TAU);
+  ctx.arc(0, 0, r0, 0, TAU, true);
+  ctx.closePath();
+  ctx.fillStyle = paint;
+  ctx.fill();
+  ctx.restore();
+}
+
+function strokeAnnulusEdges(ctx: CanvasRenderingContext2D, r0: number, r1: number, color: string, width = 1) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.arc(0, 0, r0, 0, TAU);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, 0, r1, 0, TAU);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// draw text along a circular arc centered at angle theta
+function drawCurvedText(ctx: CanvasRenderingContext2D, text: string, radius: number, theta: number) {
+  if (!text) return;
+  let totalW = 0;
+  for (let i = 0; i < text.length; i++) totalW += ctx.measureText(text[i]).width;
+  if (totalW <= 0) return;
+
+  const span = totalW / radius;  // radians covered by the string
+  let a = theta - span / 2;      // start angle
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const w = Math.max(0.001, ctx.measureText(ch).width);
+    const half = (w / 2) / radius;
+    a += half;
+    const x = Math.cos(a) * radius;
+    const y = Math.sin(a) * radius;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(a + Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ch, 0, 0);
+    ctx.restore();
+    a += half;
+  }
+}
 
 export default function PolarArea({
   items,
@@ -81,18 +152,6 @@ export default function PolarArea({
     const normOn  = normFromDataset(onVals);
     const normMae = normFromDataset(maeGood);
 
-    // rings
-    ctx.save();
-    ctx.translate(cx, cy);
-    const rings = 4;
-    for (let i = 1; i <= rings; i++) {
-      const r = Math.max(1, r0 + (Rmax - r0) * (i / rings));
-      ctx.strokeStyle = i % 2 === 0 ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
-      ctx.lineWidth = i % 2 === 0 ? 3 : 2;
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
-    }
-    ctx.restore();
-
     // sectors
     const n = Math.max(1, items.length);
     const gapRad = (Math.PI / 180) * 6;
@@ -100,12 +159,28 @@ export default function PolarArea({
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
-    // outside label sizing
-    const labelFont = Math.round(Math.max(14, Math.min(16, minSide * 0.045)));
-    const lblR = Rmax + labelOutset * 0.9;
+    // label band + text sizing
+    const labelFontPx = Math.round(Math.max(11, Math.min(15, minSide * 0.04)));
+    const rText = Rmax + labelOutset * 0.9;
+    const bandThickness = Math.max(16, labelOutset * 1.2);
+    const bandInner = rText - bandThickness / 2;
+    const bandOuter = rText + bandThickness / 2;
 
     ctx.save();
     ctx.translate(cx, cy);
+
+    // gradient banner: edges #f2f2f2 → center #f1f1f1 → edges #f2f2f2
+    const bannerGrad = ctx.createRadialGradient(0, 0, bandInner, 0, 0, bandOuter);
+    bannerGrad.addColorStop(0.00, '#f2f2f2');
+    bannerGrad.addColorStop(0.50, '#f1f1f1');
+    bannerGrad.addColorStop(1.00, '#f2f2f2');
+    fillAnnulus(ctx, bandInner, bandOuter, bannerGrad);
+
+    // crisp border (no shadow)
+    strokeAnnulusEdges(ctx, bandInner, bandOuter, '#d2d2d2', 1);
+
+    // slight inward optical offset so text is centered between edges
+    const textRadialOffset = -Math.max(1, Math.min(2, bandThickness * 0.08));
 
     for (let i = 0; i < n; i++) {
       const a0 = startBase + i * (sector + gapRad);
@@ -117,24 +192,25 @@ export default function PolarArea({
       const rMae = r0 + (Rmax - r0) * uMae * t;
       const rOn  = r0 + (Rmax - r0) * uOn  * t;
 
-      // Decide z-order so the SMALLER layer is always on top
       const approxEqual = Math.abs(rMae - rOn) <= ORDER_EPS;
-      // Stable tiebreaker: prefer green on top when nearly equal
       const topIsGreen = approxEqual ? true : (rOn < rMae);
+
+      const baseGreen = hover === i ? GREEN_HI : GREEN_BASE;
+      const baseBlue  = hover === i ? BLUE_HI  : BLUE_BASE;
+
       const layers = topIsGreen
         ? [
-            { key: 'blue',  r: rMae, fill: BLUE_FILL,      alpha: 0.35, stroke: BLUE_STROKE, strokeAlpha: 0.9, strokeWidth: 2.5, hiComp: 'screen' as const, hiAlpha: 0.45 },
-            { key: 'green', r: rOn,  fill: PR_COLORS.noteFill, alpha: 0.60, stroke: PR_COLORS.noteStroke, strokeAlpha: 1.0, strokeWidth: 3.0, hiComp: 'hard-light' as const, hiAlpha: 0.75 },
-          ] // draw larger first (blue), smaller last (green)
+            { r: rMae,  fill: baseBlue,  stroke: baseBlue,  strokeWidth: 2.5 },
+            { r: rOn,   fill: baseGreen, stroke: baseGreen, strokeWidth: 3.0 },
+          ]
         : [
-            { key: 'green', r: rOn,  fill: PR_COLORS.noteFill, alpha: 0.60, stroke: PR_COLORS.noteStroke, strokeAlpha: 1.0, strokeWidth: 3.0, hiComp: 'hard-light' as const, hiAlpha: 0.75 },
-            { key: 'blue',  r: rMae, fill: BLUE_FILL,      alpha: 0.35, stroke: BLUE_STROKE, strokeAlpha: 0.9, strokeWidth: 2.5, hiComp: 'screen' as const, hiAlpha: 0.45 },
-          ]; // draw larger first (green), smaller last (blue)
+            { r: rOn,   fill: baseGreen, stroke: baseGreen, strokeWidth: 3.0 },
+            { r: rMae,  fill: baseBlue,  stroke: baseBlue,  strokeWidth: 2.5 },
+          ];
 
-      // --- FILLS: draw larger (bottom) then smaller (top) ---
+      // fills
       for (const L of layers) {
         ctx.save();
-        ctx.globalAlpha = L.alpha;
         ctx.fillStyle = L.fill;
         ctx.beginPath();
         ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
@@ -144,11 +220,10 @@ export default function PolarArea({
         ctx.restore();
       }
 
-      // --- RIMS: same order; top (smaller) rim lands last ---
+      // rims
       for (const L of layers) {
         ctx.save();
         ctx.strokeStyle = L.stroke;
-        ctx.globalAlpha = L.strokeAlpha;
         ctx.lineWidth = L.strokeWidth;
         ctx.beginPath();
         ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
@@ -156,60 +231,11 @@ export default function PolarArea({
         ctx.restore();
       }
 
-      // --- HOVER: overlays stack with the same z-order ---
-      if (hover === i) {
-        for (const L of layers) {
-          ctx.save();
-          ctx.globalCompositeOperation = L.hiComp;
-          ctx.globalAlpha = L.hiAlpha;
-          ctx.fillStyle = L.fill;
-          ctx.beginPath();
-          ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
-          ctx.arc(0, 0, r0, a1, a0, true);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-        }
-
-        // Sheen band only on the TOP (smaller) layer so it reads as the top surface
-        const top = layers[1]; // smaller = drawn last
-        const sheenInner = r0 + (Rmax - r0) * 0.48;
-        const sheenOuter = Math.max(sheenInner + 1, top.r); // cap at top layer radius
-        const grad = ctx.createRadialGradient(0, 0, sheenInner, 0, 0, sheenOuter);
-        grad.addColorStop(0.00, 'rgba(255,255,255,0.00)');
-        grad.addColorStop(0.50, 'rgba(255,255,255,0.40)');
-        grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
-
-        // clip sheen to the top layer's annulus so it never spills under it
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(0, 0, Math.max(r0, top.r), a0, a1, false);
-        ctx.arc(0, 0, r0, a1, a0, true);
-        ctx.closePath();
-        ctx.clip();
-
-        ctx.globalCompositeOperation = 'screen';
-        ctx.globalAlpha = 0.6;
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(0, 0, Math.max(r0, top.r), a0, a1, false);
-        ctx.arc(0, 0, r0, a1, a0, true);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // outside note labels
-      const rTop = Math.max(rOn, rMae); // for label offset geometry only
+      // curved labels (with optical offset)
       ctx.save();
       ctx.fillStyle = '#0f0f0f';
-      ctx.font = `bold ${labelFont}px ui-sans-serif, system-ui`;
-      const cosMid = Math.cos(mid), sinMid = Math.sin(mid);
-      ctx.textAlign = cosMid > 0 ? 'left' : (cosMid < 0 ? 'right' : 'center');
-      ctx.textBaseline = 'middle';
-      const x = cosMid * (lblR);
-      const y = sinMid * (lblR);
-      ctx.fillText(items[i].label, x, y);
+      ctx.font = `bold ${labelFontPx}px ui-sans-serif, system-ui`;
+      drawCurvedText(ctx, items[i].label, rText + textRadialOffset, mid);
       ctx.restore();
     }
 
@@ -258,7 +284,7 @@ export default function PolarArea({
 
   const onMouseLeave = React.useCallback(() => { setHover(null); }, []);
 
-  // centered note + metrics
+  // centered note + metrics (stacked; clamped)
   const center = React.useMemo(() => {
     if (hover == null || !items[hover]) return null;
     const it = items[hover];
@@ -266,6 +292,50 @@ export default function PolarArea({
     const v2 = clamp(Math.round(it.v2), 0, max2);
     return { label: it.label, v1, v2 };
   }, [hover, items, max1, max2]);
+
+  const centerSizing = React.useMemo(() => {
+    const W = Math.max(1, width);
+    const H = Math.max(1, sqH);
+    const minSide = Math.min(W, H);
+    const ringPad = 8;
+    const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
+    const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
+    const r0 = Math.max(0, R * 0.20);
+
+    const maxWidth = Math.max(24, 2 * r0 - 16);
+    const maxHeight = Math.max(18, 2 * r0 - 18);
+    const family = 'ui-sans-serif, system-ui';
+
+    if (!center) return { maxWidth, labelPx: 12, metricsPx: 10 };
+
+    // smaller caps for neatness
+    const labelMax = Math.round(Math.max(12, Math.min(18, minSide * 0.05)));
+    const labelMin = 9;
+    const metricsMax = Math.round(Math.max(10, Math.min(14, minSide * 0.035)));
+    const metricsMin = 8;
+
+    const v1Str = `${center.v1}%`;
+    const v2Str = `${center.v2}¢`;
+
+    let labelPx = fitFontPx(center.label, family, 'bold', maxWidth, labelMin, labelMax);
+    // choose a single metrics size that fits both lines
+    let metricsPx = Math.min(
+      fitFontPx(v1Str, family, '500', maxWidth, metricsMin, metricsMax),
+      fitFontPx(v2Str, family, '500', maxWidth, metricsMin, metricsMax),
+    );
+
+    // height clamp: label + gap + v1 + gap + v2
+    let gap = Math.max(2, Math.round(metricsPx * 0.25));
+    let block = labelPx + gap + metricsPx + gap + metricsPx;
+    if (block > maxHeight) {
+      const k = maxHeight / block;
+      labelPx = Math.max(labelMin, Math.floor(labelPx * k));
+      metricsPx = Math.max(metricsMin, Math.floor(metricsPx * k));
+      gap = Math.max(2, Math.round(metricsPx * 0.25));
+    }
+
+    return { maxWidth, labelPx, metricsPx, gap };
+  }, [width, sqH, center]);
 
   return (
     <div
@@ -275,26 +345,34 @@ export default function PolarArea({
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >
-      <canvas
-        ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block' }}
-      />
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
 
-      {/* Centered info (no bg). Larger note label on row 1. */}
       {center ? (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-          <div className="font-semibold text-[#0f0f0f] text-base sm:text-lg md:text-xl leading-none">
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center"
+          style={{ maxWidth: centerSizing.maxWidth }}
+        >
+          <div
+            className="font-semibold text-[#0f0f0f] leading-none truncate"
+            style={{ fontSize: centerSizing.labelPx }}
+            title={center.label}
+          >
             {center.label}
           </div>
-          <div className="mt-1 text-xs font-medium text-[#0f0f0f] flex items-center justify-center gap-3">
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: PR_COLORS.noteFill }} />
+
+          {/* stacked metrics: one per row */}
+          <div
+            className="mt-1 text-[#0f0f0f] flex flex-col items-center justify-center"
+            style={{ rowGap: centerSizing.gap, fontWeight: 500 }}
+          >
+            <div className="inline-flex items-center gap-1" style={{ fontSize: centerSizing.metricsPx }}>
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: GREEN_BASE }} />
               {center.v1}%
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: BLUE_FILL }} />
+            </div>
+            <div className="inline-flex items-center gap-1" style={{ fontSize: centerSizing.metricsPx }}>
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: BLUE_BASE }} />
               {center.v2}¢
-            </span>
+            </div>
           </div>
         </div>
       ) : null}

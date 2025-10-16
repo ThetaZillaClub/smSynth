@@ -12,7 +12,7 @@ export default function PlayPauseButton({
 }) {
   const base = [
     "relative inline-flex items-center justify-center",
-    "w-14 h-14 md:w-16 md:h-16 rounded-full",
+    "w-11 h-11 sm:w-12 sm:h-12 md:w-14 md:h-14 lg:w-16 lg:h-16 rounded-full",
     "bg-gradient-to-b from-[#fefefe] to-zinc-50 text-zinc-900",
     "ring-1 ring-inset ring-black/5",
     "shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_8px_24px_rgba(0,0,0,0.08)]",
@@ -43,7 +43,8 @@ export default function PlayPauseButton({
           running ? "opacity-100" : "opacity-0"
         }`}
       />
-      <span className="relative block w-8 h-8 md:w-9 md:h-9">
+      <span className="relative block w-7 h-7 sm:w-8 sm:h-8 md:w-9 md:h-9">
+        {/* Play */}
         <svg
           viewBox="0 0 24 24"
           aria-hidden
@@ -53,6 +54,7 @@ export default function PlayPauseButton({
         >
           <path d="M8 5v14l11-7z" fill="currentColor" />
         </svg>
+        {/* Pause */}
         <svg
           viewBox="0 0 24 24"
           aria-hidden

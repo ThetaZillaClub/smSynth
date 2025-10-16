@@ -27,9 +27,10 @@ function Item({
   className?: string;
 }) {
   return (
-    <div className={`flex flex-col items-start ${className ?? ""}`}>
-      <div className="text-xs text-[#2d2d2d]">{label}</div>
-      <div className="text-lg leading-tight text-[#0f0f0f] whitespace-nowrap tabular-nums">
+    <div className={`flex flex-col items-start leading-none min-w-0 ${className ?? ""}`}>
+      {/* Show labels only on lg+ so height shrinks earlier */}
+      <div className="hidden lg:block text-[11px] lg:text-xs text-[#2d2d2d]">{label}</div>
+      <div className="text-base md:text-lg leading-tight text-[#0f0f0f] whitespace-nowrap tabular-nums">
         {value}
       </div>
     </div>
@@ -44,13 +45,13 @@ export default function SessionPanel({
   className,
 }: Props) {
   return (
-    // Do NOT take full width when placed in a row
-    <div className={`min-w-0 flex-none ${className ?? ""}`}>
-      {/* single row, equal-ish widths, no wrap */}
-      <div className="flex items-center justify-end gap-x-4 flex-nowrap">
-        <Item className="w-[6.5rem] flex-none" label="BPM"  value={`${bpm}BPM`} />
-        <Item className="w-[6.5rem] flex-none" label="Time" value={`${ts.num}/${ts.den}`} />
-        <Item className="w-[6.5rem] flex-none" label="Take" value={`${roundCurrent}/${roundTotal}`} />
+    // flex-auto so this panel expands/consumes available space before GameStats (Note)
+    <div className={`min-w-0 flex-auto ${className ?? ""}`}>
+      {/* Use a 3-col grid with gap-0 so internal space goes to ZERO before anything else */}
+      <div className="grid grid-cols-3 gap-0 w-full">
+        <Item label="BPM"  value={`${bpm}BPM`} />
+        <Item label="Time" value={`${ts.num}/${ts.den}`} />
+        <Item label="Take" value={`${roundCurrent}/${roundTotal}`} />
       </div>
     </div>
   );

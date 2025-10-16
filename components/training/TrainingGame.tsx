@@ -341,63 +341,13 @@ export default function TrainingGame({
     const toRef = (c: CourseDef, l: LessonDef) => ({
       slug: `${c.slug}/${l.slug}`, // path part used by onGoTo
       title: l.title,
+      summary: l.summary,          // << provide summary for card subtext
     });
     return {
       prevLessonRef: prev ? toRef(currentCourse, prev) : null,
       nextLessonRef: next ? toRef(currentCourse, next) : null,
     };
   })();
-
-  // Heuristics → recommended lessons (choose FIRST lesson of relevant course)
-  function firstLessonOf(courseSlug: string): { slug: string; title: string } | null {
-    const c = findCourse(courseSlug);
-    if (!c || !c.lessons.length) return null;
-    const L = c.lessons[0]!;
-    return { slug: `${c.slug}/${L.slug}`, title: L.title };
-  }
-
-  function buildSuggestions() {
-    if (!sessionScores.length) return [] as Array<{ slug: string; title: string; reason?: string }>;
-
-    const avg = (sel: (s: any) => number) =>
-      sessionScores.reduce((a, s) => a + Number(sel(s) || 0), 0) / sessionScores.length;
-
-    const pitchPct = avg((s) => s.pitch?.percent ?? 0);
-    const melodyPct = avg((s) => s.rhythm?.melodyPercent ?? 0);
-    const linePct   = avg((s) => (s.rhythm?.lineEvaluated ? s.rhythm?.linePercent : null) ?? 0);
-    const intervalsPct = Math.round(avg((s) => (s.intervals?.correctRatio ?? 0) * 100));
-
-    const out: Array<{ slug: string; title: string; reason?: string }> = [];
-
-    if (pitchPct < 75) {
-      const pick = firstLessonOf("pitch-tune");
-      if (pick) out.push({ ...pick, reason: "Pitch under target" });
-    }
-    if (melodyPct < 75) {
-      const pick = firstLessonOf("pitch-time");
-      if (pick) out.push({ ...pick, reason: "Melody timing needs work" });
-    }
-    if (Number.isFinite(linePct) && (linePct as number) < 75) {
-      const pick = firstLessonOf("scales-rhythms");
-      if (pick) out.push({ ...pick, reason: "Tap timing off" });
-    }
-    if (intervalsPct < 60) {
-      const pick = firstLessonOf("intervals");
-      if (pick) out.push({ ...pick, reason: "Intervals accuracy low" });
-    }
-
-    // De-dupe + drop suggestion that equals the current lesson
-    const currentPath = currentCourse && currentLesson ? `${currentCourse.slug}/${currentLesson.slug}` : null;
-    const seen = new Set<string>();
-    return out.filter((s) => {
-      if (currentPath && s.slug === currentPath) return false;
-      if (seen.has(s.slug)) return false;
-      seen.add(s.slug);
-      return true;
-    }).slice(0, 4);
-  }
-
-  const suggestions = buildSuggestions();
 
   const onGoToPath = (slugPath: string) => {
     // slugPath is "courseSlug/lessonSlug"
@@ -413,12 +363,15 @@ export default function TrainingGame({
     <CourseNavPanel
       currentLesson={
         currentCourse && currentLesson
-          ? { slug: `${currentCourse.slug}/${currentLesson.slug}`, title: currentLesson.title }
+          ? {
+              slug: `${currentCourse.slug}/${currentLesson.slug}`,
+              title: currentLesson.title,
+              summary: currentLesson.summary, // << show summary on Repeat card
+            }
           : undefined
       }
       prevLesson={prevLessonRef ?? undefined}
       nextLesson={nextLessonRef ?? undefined}
-      suggestions={suggestions}
       onGoTo={onGoToPath}
       onRepeat={onRepeat}
     />

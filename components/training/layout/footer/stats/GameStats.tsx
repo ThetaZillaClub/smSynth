@@ -14,10 +14,11 @@ function StatItem({ label, value, mono, intent = "default", className }: ItemPro
   const labelClasses = intent === "error" ? "text-red-600" : "text-[#2d2d2d]";
   const valueClasses = intent === "error" ? "text-red-700" : "text-[#0f0f0f]";
   return (
-    <div className={`flex flex-col items-start ${className ?? ""}`}>
-      <div className={`text-xs ${labelClasses}`}>{label}</div>
+    <div className={`flex flex-col items-start leading-none ${className ?? ""}`}>
+      {/* labels only on lg+ to reduce height earlier */}
+      <div className={`hidden lg:block text-[11px] lg:text-xs ${labelClasses}`}>{label}</div>
       <div
-        className={`text-lg leading-tight ${mono ? "font-mono" : ""} ${valueClasses} whitespace-nowrap tabular-nums`}
+        className={`text-base md:text-lg leading-tight ${mono ? "font-mono" : ""} ${valueClasses} whitespace-nowrap tabular-nums`}
       >
         {value}
       </div>
@@ -65,8 +66,8 @@ export default function GameStats({
 
   return (
     <div className={`min-w-0 flex-none ${className ?? ""}`}>
-      <div className="flex items-center justify-end gap-x-4 flex-nowrap">
-        {/* Only show a single Note readout; no (A440) suffix, no Live Pitch/Confidence */}
+      {/* keep this compact and stable so SessionPanel can consume space */}
+      <div className="flex items-center justify-end flex-nowrap gap-x-4 md:gap-x-5">
         <StatItem className="w-[7rem] flex-none" label="Note" value={noteText} mono />
       </div>
     </div>
