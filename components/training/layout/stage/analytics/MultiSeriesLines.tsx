@@ -125,7 +125,7 @@ function TooltipPortal({
 }
 
 export default function MultiSeriesLines({
-  title, // unused
+  title,
   series,
   height = "100%",
   yMin = 0,
@@ -133,10 +133,11 @@ export default function MultiSeriesLines({
   ySuffix = "%",
   maxSeriesLegend = 8,
   invertY = false,
-  // mirror the legend height above the chart
   reserveTopGutter = true,
   legendRowHeight = 26,
-  legendGapPx = 8, // Tailwind mt-2
+  legendGapPx = 8,
+  introEpoch = 0,
+  introDurationMs = 800,
 }: {
   title?: string;
   series: Series[];
@@ -149,16 +150,37 @@ export default function MultiSeriesLines({
   reserveTopGutter?: boolean;
   legendRowHeight?: number;
   legendGapPx?: number;
+  introEpoch?: number;         // restart intro anim when this changes
+  introDurationMs?: number;    // optional custom duration
 }) {
   const N = series.reduce((m, s) => Math.max(m, s.values.length), 0);
   const { ref, width, height: hostH } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, hostH);
 
+  // ── Intro animation state (avoid FOUC by resetting before paint) ──
+  const [introT, setIntroT] = React.useState(0);
+  // Reset synchronously before paint to ensure first draw uses t=0.
+  React.useLayoutEffect(() => {
+    setIntroT(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [introEpoch, series.length, yMin, yMax]);
+  // Animate with RAF after commit.
+  React.useEffect(() => {
+    let raf = 0; const start = performance.now();
+    const tick = (now: number) => {
+      const u = ease((now - start) / introDurationMs);
+      setIntroT(u);
+      if (u < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [introEpoch, series.length, yMin, yMax, introDurationMs]);
+
   // nearest-dot hover selection (single dot)
   const [hoverKey, setHoverKey] = React.useState<string | null>(null);
   const prevKeyRef = React.useRef<string | null>(null);
   const [prevHoverKey, setPrevHoverKey] = React.useState<string | null>(null);
-  const [animU, setAnimU] = React.useState(1); // 0..1
+  const [animU, setAnimU] = React.useState(1);
   React.useEffect(() => {
     const prev = prevKeyRef.current;
     if (prev === hoverKey) return;
@@ -185,7 +207,8 @@ export default function MultiSeriesLines({
   // hits for all defined points
   const hitsRef = React.useRef<Hit[]>([]);
 
-  React.useEffect(() => {
+  // Draw before paint to avoid any flash of the final positions.
+  React.useLayoutEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext("2d"); if (!ctx) return;
     const W = width, H = hostH;
@@ -228,6 +251,7 @@ export default function MultiSeriesLines({
       const u = invertY ? t : 1 - t;
       return y0 + u * ih;
     };
+    const animY = (targetY: number) => baseline - (baseline - targetY) * introT;
 
     // helper to trace curves
     const traceCurve = (xs: number[], ys: number[]) => {
@@ -292,13 +316,16 @@ export default function MultiSeriesLines({
       const dotFill = withAlpha(stroke, 0.18);
 
       const xsAll = new Array<number>(N);
+      const ysTarget = new Array<number>(N);
       const ysAll = new Array<number>(N);
       const def = new Array<boolean>(N).fill(false);
       for (let i = 0; i < N; i++) {
         const v = s.values[i];
         if (v == null || !Number.isFinite(v)) continue;
         xsAll[i] = xsCenters[i];
-        ysAll[i] = yFor(v);
+        const yT = yFor(v);
+        ysTarget[i] = yT;
+        ysAll[i] = animY(yT);
         def[i] = true;
       }
 
@@ -350,7 +377,7 @@ export default function MultiSeriesLines({
     }
 
     hitsRef.current = hits;
-  }, [canvasRef, width, hostH, series, yMin, yMax, ySuffix, N, invertY, hoverKey, prevHoverKey, animU]);
+  }, [canvasRef, width, hostH, series, yMin, yMax, ySuffix, N, invertY, hoverKey, prevHoverKey, animU, introT]);
 
   // TS-safe style object for height
   const chartStyle: React.CSSProperties = {};
@@ -373,7 +400,6 @@ export default function MultiSeriesLines({
       if (d2 < bestD2) { bestD2 = d2; best = h; }
     }
 
-    // a small max radius so we don't snap across the chart (20px radius)
     if (!best || bestD2 > 20 * 20) {
       setHoverKey(null);
       setTip(null);

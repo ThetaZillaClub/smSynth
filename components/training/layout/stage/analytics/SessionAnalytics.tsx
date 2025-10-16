@@ -189,6 +189,12 @@ export default function SessionAnalytics({
   /* ─────────── single-chart dashboard state ─────────── */
   const [view, setView] = React.useState<ViewKey>("performance");
 
+  // Epoch signal to restart intro animations without remounting
+  const [introEpoch, setIntroEpoch] = React.useState(0);
+  React.useEffect(() => {
+    setIntroEpoch((e) => e + 1);
+  }, [view]);
+
   const viewMeta: Record<
     ViewKey,
     { title: string; subtitle: string; render: () => React.ReactNode; hasData: boolean }
@@ -196,7 +202,16 @@ export default function SessionAnalytics({
     performance: {
       title: "Performance over takes",
       subtitle: "Final score trend",
-      render: () => <PerformanceOverTakes scores={scores} height="100%" />,
+      render: () => (
+        <PerformanceOverTakes
+          scores={scores}
+          height="100%"
+          reserveTopGutter={false}
+          reserveLegendRow={false}
+          legendRowHeight={22}
+          introEpoch={introEpoch}
+        />
+      ),
       hasData: scores.length > 0,
     },
     "pitch-acc": {
@@ -210,6 +225,9 @@ export default function SessionAnalytics({
           yMin={0}
           yMax={100}
           ySuffix="%"
+          reserveTopGutter={false}
+          legendRowHeight={22}
+          introEpoch={introEpoch}
         />
       ),
       hasData: pitchAccuracySeries.some((s) => s.values.some((v) => v != null)),
@@ -226,6 +244,9 @@ export default function SessionAnalytics({
           yMax={PITCH_MAX_CENTS}
           ySuffix="¢"
           invertY
+          reserveTopGutter={false}
+          legendRowHeight={22}
+          introEpoch={introEpoch}
         />
       ),
       hasData: pitchPrecisionSeries.some((s) => s.values.some((v) => v != null)),
@@ -241,6 +262,9 @@ export default function SessionAnalytics({
           yMin={0}
           yMax={100}
           ySuffix="%"
+          reserveTopGutter={false}
+          legendRowHeight={22}
+          introEpoch={introEpoch}
         />
       ),
       hasData: melodySeries.some((s) => s.values.some((v) => v != null)),
@@ -256,6 +280,9 @@ export default function SessionAnalytics({
           yMin={0}
           yMax={100}
           ySuffix="%"
+          reserveTopGutter={false}
+          legendRowHeight={22}
+          introEpoch={introEpoch}
         />
       ),
       hasData: intervalSeries.some((s) => s.values.some((v) => v != null)),
@@ -263,7 +290,7 @@ export default function SessionAnalytics({
   };
 
   return (
-    <div className="w-full h-full px-3 sm:px-4 md:px-6 flex flex-col gap-3">
+    <div className="w-full h-full px-3 sm:px-4 md:px-6 flex flex-col gap-3 min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="text-base md:text-lg font-semibold">Lesson report</div>
@@ -282,11 +309,18 @@ export default function SessionAnalytics({
         <StatCard title="Intervals" main={`${avg((s) => s.intervals.correctRatio * 100).toFixed(1)}%`} sub="Per-take breakdown below" />
       </div>
 
-      {/* 4-col base grid; shrink at lg / md / sm */}
-      <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 min-h-0">
-        {/* Column 1: vertical picker (keeps a 5-row stack shape) */}
-        <div className="col-span-1 h-full">
-          <div className="grid grid-rows-5 gap-2 h-full">
+      {/* Two-column layout from md up: fixed picker rail + capped chart height */}
+      <div
+        className="grid gap-3 grid-cols-1 md:grid-cols-[280px_1fr] lg:grid-cols-[300px_1fr] xl:grid-cols-[320px_1fr] items-start flex-1 min-h-0"
+        style={
+          {
+            ["--ana-rail-h" as any]: "calc(5*clamp(52px,3vw,84px) + 4*0.5rem)",
+          } as React.CSSProperties
+        }
+      >
+        {/* Left rail: vertical picker */}
+        <div className="min-h-0">
+          <div className="flex flex-col gap-2 min-h-0">
             <PickerButton
               active={view === "performance"}
               title={viewMeta["performance"].title}
@@ -320,24 +354,15 @@ export default function SessionAnalytics({
           </div>
         </div>
 
-        {/* Columns 2–4: chart card; shrinks to 2 cols at lg, 1 col at md/sm */}
-        <div className="col-span-1 md:col-span-1 lg:col-span-2 xl:col-span-3 min-h-0">
-          <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-4 md:p-6 shadow-sm h-full min-h-0">
+        {/* Right: chart card — height capped to rail height from md↑ */}
+        <div className="min-h-0 flex">
+          <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-4 md:p-6 shadow-sm w-full min-h-0 overflow-hidden self-start md:h-[var(--ana-rail-h)]">
             <div className="flex items-baseline justify-between gap-3 mb-2">
               <h3 className="text-lg md:text-xl font-semibold text-[#0f0f0f]">{viewMeta[view].title}</h3>
               <div className="text-xs md:text-sm text-[#373737]">{viewMeta[view].subtitle}</div>
             </div>
 
-            {/* Chart frame: clamped heights by breakpoint so we never overflow the stage */}
-            <div
-              className={[
-                "min-h-[220px] h-[min(56vh,740px)]", // base (4k and up)
-                "lg:h-[min(46vh,560px)]",            // lg downsize
-                "md:h-[min(40vh,480px)]",            // md downsize
-                "sm:h-[min(36vh,420px)]",            // sm downsize
-                "min-h-0",
-              ].join(" ")}
-            >
+            <div className="h-[calc(100%-1.75rem)] min-h-0">
               {viewMeta[view].hasData ? (
                 viewMeta[view].render()
               ) : (
@@ -353,7 +378,7 @@ export default function SessionAnalytics({
   );
 }
 
-/* ─────────── bento-style vertical picker button (active now has shadow-md) ─────────── */
+/* ─────────── picker button (fluid text on small screens) ─────────── */
 function PickerButton({
   title,
   subtitle,
@@ -373,7 +398,9 @@ function PickerButton({
       aria-label={title}
       className={[
         // base
-        "group text-left rounded-2xl border bg-gradient-to-b w-full h-full p-4",
+        "group text-left rounded-2xl border bg-gradient-to-b w-full",
+        // responsive height: 52px → 84px depending on viewport width
+        "h-[clamp(52px,3vw,84px)] px-2.5 sm:px-3 md:px-4",
         "flex items-center justify-between gap-3 transition",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
         // variants
@@ -383,18 +410,27 @@ function PickerButton({
       ].join(" ")}
     >
       <div className="min-w-0">
-        <div className="text-sm md:text-base font-semibold text-[#0f0f0f] truncate">
+        {/* Title: fluid 12px → 18px, tight leading to avoid spill */}
+        <div
+          className="font-semibold text-[#0f0f0f] truncate leading-tight tracking-tight"
+          style={{ fontSize: "clamp(12px, 1vw, 18px)" }}
+        >
           {title}
         </div>
         {subtitle ? (
-          <div className="text-[11px] md:text-xs text-[#373737] mt-0.5 truncate">
+          // Subtitle: fluid 10px → 14px, snug leading
+          <div
+            className="text-[#373737] mt-0.5 truncate leading-snug"
+            style={{ fontSize: "clamp(10px, .5vw, 14px)" }}
+          >
             {subtitle}
           </div>
         ) : null}
       </div>
       <div
         className={[
-          "shrink-0 rounded-full shadow-sm bg-[#f4f4f4] border border-[#e6e6e6] w-7 h-7 grid place-items-center",
+          "shrink-0 rounded-full shadow-sm bg-[#f4f4f4] border border-[#e6e6e6]",
+          "w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 grid place-items-center",
           active ? "text-[#0f0f0f]" : "text-[#0f0f0f]/70 group-hover:text-[#0f0f0f]",
           "transition",
         ].join(" ")}

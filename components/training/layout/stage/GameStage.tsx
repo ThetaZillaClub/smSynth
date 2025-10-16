@@ -105,7 +105,7 @@ export default function GameStage({
       <div className="w-full h-full min-h-[260px]">
         <div className="w-full h-full flex gap-3">
           {/* LEFT: Analytics */}
-          <div className="flex-1 min-w-0 rounded-xl shadow-md">
+          <div className="flex-1 min-w-0 min-h-0 rounded-xl shadow-md">
             <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
               <SessionAnalytics
                 scores={analytics?.scores ?? []}

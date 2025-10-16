@@ -4,9 +4,8 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import type { TakeScore } from '@/utils/scoring/score';
-import { ANA_COLORS } from './colors'; // match MultiSeriesLines grid styling
+import { ANA_COLORS } from './colors';
 
-/* ─────────── small utils ─────────── */
 const clamp = (x: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, x));
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
@@ -48,7 +47,6 @@ function useCanvas2d(width: number, height: number) {
   return { ref, dpr };
 }
 
-// Monotone cubic with Hyman filter (no overshoot)
 function computeMonotoneSlopes(xs: number[], ys: number[]) {
   const n = xs.length;
   const ms = new Array<number>(n).fill(0);
@@ -81,26 +79,25 @@ function computeMonotoneSlopes(xs: number[], ys: number[]) {
   return ms;
 }
 
-/* ─────────── types/consts ─────────── */
 type Components = {
-  pitch?: number;    // %
-  melody?: number;   // %
-  line?: number;     // %
-  intervals?: number;// %
+  pitch?: number;
+  melody?: number;
+  line?: number;
+  intervals?: number;
 };
 type Row = { take: number; final: number; comps: Components };
 type PointHit = { x1: number; x2: number; cx: number; y: number; row: Row };
 
 const SEG_COLOR: Record<keyof Components, string> = {
-  pitch:     '#86efac', // green-300
-  melody:    '#bbf7d0', // green-200
-  line:      '#4ade80', // green-400
-  intervals: '#22c55e', // green-500
+  pitch:     '#86efac',
+  melody:    '#bbf7d0',
+  line:      '#4ade80',
+  intervals: '#22c55e',
 };
 
-const LINE_WIDTH = 2.5;               // match MultiSeriesLines
+const LINE_WIDTH = 2.5;
 const LINE_COLOR = '#22c55e';
-const DOT_R = 3.5;                    // match MultiSeriesLines
+const DOT_R = 3.5;
 const DOT_STROKE = '#22c55e';
 const DOT_FILL = 'rgba(34,197,94,0.18)';
 
@@ -137,27 +134,35 @@ function LineChart({
   rows,
   height,
   gap = 10,
+  introEpoch = 0,
+  introDurationMs = 800,
 }: {
   rows: Row[];
   height: number | string;
   gap?: number;
+  introEpoch?: number;
+  introDurationMs?: number;
 }) {
   const { ref, width, height: hostH } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, typeof hostH === 'number' ? hostH : 0);
 
-  // intro animation
+  // ── Intro animation (avoid FOUC): reset before paint, animate after ──
   const [t, setT] = React.useState(0);
+  React.useLayoutEffect(() => {
+    setT(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [introEpoch, rows.length]);
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
-    const tick = (now: number) => { const u = ease((now - start) / 800); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
+    const tick = (now: number) => { const u = ease((now - start) / introDurationMs); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
-  }, [rows.length]);
+  }, [introEpoch, rows.length, introDurationMs]);
 
   // hover animation between dots (single dot only)
   const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
   const lastHoverRef = React.useRef<number | null>(null);
   const [animPrevIdx, setAnimPrevIdx] = React.useState<number | null>(null);
-  const [animU, setAnimU] = React.useState(1); // 0..1 transition
+  const [animU, setAnimU] = React.useState(1);
   React.useEffect(() => {
     const prev = lastHoverRef.current;
     if (prev === hoverIdx) return;
@@ -180,13 +185,13 @@ function LineChart({
   const [tip, setTip] = React.useState<{ x: number; y: number; row: Row } | null>(null);
   const hitsRef = React.useRef<PointHit[]>([]);
 
-  React.useEffect(() => {
+  // Draw before paint so first frame uses t=0.
+  React.useLayoutEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext('2d'); if (!ctx) return;
     const W = width, H = hostH;
     ctx.clearRect(0, 0, W, H);
 
-    // ─── Layout: identical paddings to MultiSeriesLines ───
     const pad = { l: 56, r: 18, t: 10, b: 20 };
     const iw = Math.max(10, W - pad.l - pad.r);
     const ih = Math.max(10, H - pad.t - pad.b);
@@ -234,16 +239,18 @@ function LineChart({
 
     const n = toDraw.length; if (!n) { hitsRef.current = []; return; }
 
-    // Points
+    // Points (animate from baseline → target)
     const Y_MARGIN = 10;
     const xs: number[] = new Array(n);
+    const ysTarget: number[] = new Array(n);
     const ys: number[] = new Array(n);
     for (let i = 0; i < n; i++) {
       const r = toDraw[i];
       const x = xStart + i * dx;
-      const yRaw = baseline - ih * clamp((r.final / 100) * t, 0, 1);
+      const target = baseline - ih * clamp(r.final / 100, 0, 1);
+      const yRaw = baseline - (baseline - target) * t;
       const y = Math.max(pad.t + Y_MARGIN, Math.min(baseline - Y_MARGIN, yRaw));
-      xs[i] = x; ys[i] = y;
+      xs[i] = x; ysTarget[i] = target; ys[i] = y;
     }
 
     const m = computeMonotoneSlopes(xs, ys);
@@ -263,7 +270,7 @@ function LineChart({
       }
     };
 
-    // Clip to plot area
+    // Clip + draw
     ctx.save();
     ctx.beginPath(); ctx.rect(x0, pad.t, iw, ih); ctx.clip();
 
@@ -313,7 +320,7 @@ function LineChart({
 
     ctx.restore();
 
-    // Build hover hit zones (midpoint splits)
+    // Hover hit zones
     const half = Math.max(6, (n > 1 ? (xs[1] - xs[0]) : 12) / 2);
     hitsRef.current = xs.map((x, i) => {
       const left  = i === 0     ? x - half : (x + xs[i - 1]) / 2;
@@ -322,7 +329,6 @@ function LineChart({
     });
   }, [canvasRef, width, hostH, rows, gap, t, hoverIdx, animPrevIdx, animU]);
 
-  // hover + tooltip handlers
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -335,7 +341,7 @@ function LineChart({
     if (idx != null) {
       const h = hitsRef.current[idx];
       setTip({
-        x: clamp(h.cx, 8, rect.width - 8),
+        x: Math.max(8, Math.min(rect.width - 8, h.cx)),
         y: Math.max(12, h.y - 14),
         row: h.row,
       });
@@ -345,10 +351,8 @@ function LineChart({
   }, []);
   const onMouseLeave = React.useCallback(() => { setHoverIdx(null); setTip(null); }, []);
 
-  // compute absolute coords for portal
   const hostRect = (ref.current as HTMLDivElement | null)?.getBoundingClientRect();
 
-  // TS-safe style
   const chartStyle: React.CSSProperties = {};
   if (typeof height === 'number' || typeof height === 'string') chartStyle.height = height;
 
@@ -402,14 +406,15 @@ function LineChart({
   );
 }
 
-/* ─────────── exported: symmetric top/bottom rhythm ─────────── */
 export default function PerformanceOverTakes({
   scores,
   height = 200,
   reserveLegendRow = true,
-  legendRowHeight = 26,     // ~chip height
-  legendGapPx = 8,          // Tailwind mt-2
-  reserveTopGutter = true,  // add same space above chart
+  legendRowHeight = 26,
+  legendGapPx = 8,
+  reserveTopGutter = true,
+  introEpoch = 0,
+  introDurationMs = 800,
 }: {
   scores: TakeScore[];
   height?: number | string;
@@ -417,8 +422,10 @@ export default function PerformanceOverTakes({
   legendRowHeight?: number;
   legendGapPx?: number;
   reserveTopGutter?: boolean;
+  introEpoch?: number;
+  introDurationMs?: number;
 }) {
-  const rows: Row[] = React.useMemo(() => {
+  const rows = React.useMemo(() => {
     return scores.map((s, i) => ({
       take: i + 1,
       final: clamp(s.final.percent, 0, 100),
@@ -435,16 +442,14 @@ export default function PerformanceOverTakes({
 
   return (
     <div className="h-full min-h-0 overflow-hidden flex flex-col p-0">
-      {/* Top spacer to mirror the legend row below */}
       {reserveTopGutter ? (
         <div className="shrink-0" style={{ height: legendRowHeight + legendGapPx }} aria-hidden />
       ) : null}
 
       <div className="relative w-full flex-1 min-h-0">
-        <LineChart rows={rows} height={height} />
+        <LineChart rows={rows} height={height} introEpoch={introEpoch} introDurationMs={introDurationMs} />
       </div>
 
-      {/* Fake legend row to keep vertical rhythm identical */}
       {reserveLegendRow ? (
         <div className="mt-2 flex flex-wrap gap-2" aria-hidden>
           <div style={{ height: legendRowHeight }} />
