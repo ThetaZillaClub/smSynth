@@ -138,6 +138,7 @@ export default function MultiSeriesLines({
   legendGapPx = 8,
   introEpoch = 0,
   introDurationMs = 800,
+  tipExtra, // ← NEW: optional extra tooltip content by take index
 }: {
   title?: string;
   series: Series[];
@@ -152,6 +153,7 @@ export default function MultiSeriesLines({
   legendGapPx?: number;
   introEpoch?: number;         // restart intro anim when this changes
   introDurationMs?: number;    // optional custom duration
+  tipExtra?: (takeIdx: number) => React.ReactNode; // ← NEW
 }) {
   const N = series.reduce((m, s) => Math.max(m, s.values.length), 0);
   const { ref, width, height: hostH } = useMeasure();
@@ -159,12 +161,10 @@ export default function MultiSeriesLines({
 
   // ── Intro animation state (avoid FOUC by resetting before paint) ──
   const [introT, setIntroT] = React.useState(0);
-  // Reset synchronously before paint to ensure first draw uses t=0.
   React.useLayoutEffect(() => {
     setIntroT(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [introEpoch, series.length, yMin, yMax]);
-  // Animate with RAF after commit.
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
     const tick = (now: number) => {
@@ -441,10 +441,15 @@ export default function MultiSeriesLines({
 
         {tip && hostRect ? (
           <TooltipPortal left={hostRect.left + tip.x} top={hostRect.top + tip.y}>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold">Take {tip.takeIdx + 1}</span>
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: tip.color }} />
-              {tip.label}: {tip.value}{ySuffix}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">Take {tip.takeIdx + 1}</span>
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: tip.color }} />
+                {tip.label}: {tip.value}{ySuffix}
+              </div>
+              {typeof tipExtra === "function" ? (
+                <div className="mt-0.5">{tipExtra(tip.takeIdx)}</div>
+              ) : null}
             </div>
           </TooltipPortal>
         ) : null}
