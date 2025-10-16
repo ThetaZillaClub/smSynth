@@ -26,18 +26,28 @@ export default function BrandRow({
 
   return (
     <Link
-      href="/"            // ✅ Stable on server & client to avoid hydration mismatch
+      href="/"
       prefetch={false}
       className={baseRow}
       onClick={(e) => {
-        // After hydration, route to /home if authed
         if (authed) {
           e.preventDefault();
           goHome();
         }
       }}
     >
-      <div className={col1}><Logo style={{ width: 'var(--sidebar-icon, 36px)', height: 'var(--sidebar-icon, 36px)' }} /></div>
+      {/* Make the brand mark the largest icon in the rail. */}
+      <div className={col1}>
+        <Logo
+          style={{
+            // Brand icon intentionally larger than 32px nav icons.
+            // Override via :root { --brand-icon: 52px; } if you want it even bigger.
+            width: 'var(--brand-icon, 48px)',
+            height: 'var(--brand-icon, 48px)',
+            display: 'block',
+          }}
+        />
+      </div>
       {!collapsed && <div className={col2}>{brand}</div>}
     </Link>
   );

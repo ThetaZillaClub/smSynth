@@ -2,9 +2,12 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { ANA_COLORS, colorForKey, withAlpha } from "./colors";
 
 const clamp = (x: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, x));
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 function useMeasure() {
   const ref = React.useRef<HTMLDivElement | null>(null);
@@ -81,6 +84,46 @@ export type Series = {
   values: Array<number | null>;
 };
 
+type Hit = {
+  key: string; // `${sIdx}:${i}`
+  sIdx: number;
+  i: number;
+  x: number;
+  y: number;
+  label: string;
+  color: string;
+  value: number; // rounded for tooltip
+};
+
+function TooltipPortal({
+  left, top, children,
+}: { left: number; top: number; children: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  const [w, setW] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const ro = new ResizeObserver(() => setW(el.getBoundingClientRect().width));
+    ro.observe(el);
+    setW(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+  if (typeof document === 'undefined') return null;
+  const margin = 8;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1920;
+  const clampedLeft = Math.min(Math.max(left, margin + w / 2), vw - margin - w / 2);
+  const y = Math.max(8, top);
+  return createPortal(
+    <div
+      ref={ref}
+      className="pointer-events-none fixed -translate-x-1/2 -translate-y-full rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
+      style={{ left: clampedLeft, top: y, borderColor: "#e5e7eb", color: "#0f0f0f", whiteSpace: "nowrap", zIndex: 60 }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
+
 export default function MultiSeriesLines({
   title, // unused
   series,
@@ -90,7 +133,7 @@ export default function MultiSeriesLines({
   ySuffix = "%",
   maxSeriesLegend = 8,
   invertY = false,
-  // new: mirror the legend height above the chart
+  // mirror the legend height above the chart
   reserveTopGutter = true,
   legendRowHeight = 26,
   legendGapPx = 8, // Tailwind mt-2
@@ -110,6 +153,37 @@ export default function MultiSeriesLines({
   const N = series.reduce((m, s) => Math.max(m, s.values.length), 0);
   const { ref, width, height: hostH } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, hostH);
+
+  // nearest-dot hover selection (single dot)
+  const [hoverKey, setHoverKey] = React.useState<string | null>(null);
+  const prevKeyRef = React.useRef<string | null>(null);
+  const [prevHoverKey, setPrevHoverKey] = React.useState<string | null>(null);
+  const [animU, setAnimU] = React.useState(1); // 0..1
+  React.useEffect(() => {
+    const prev = prevKeyRef.current;
+    if (prev === hoverKey) return;
+    prevKeyRef.current = hoverKey;
+    setPrevHoverKey(prev);
+    setAnimU(0);
+    let raf = 0;
+    const start = performance.now();
+    const dur = 200;
+    const tick = (now: number) => {
+      const p = clamp01((now - start) / dur);
+      setAnimU(ease(p));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [hoverKey]);
+
+  // tooltip state (single entry)
+  const [tip, setTip] = React.useState<{
+    x: number; y: number; takeIdx: number; label: string; color: string; value: number;
+  } | null>(null);
+
+  // hits for all defined points
+  const hitsRef = React.useRef<Hit[]>([]);
 
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
@@ -155,7 +229,7 @@ export default function MultiSeriesLines({
       return y0 + u * ih;
     };
 
-    // helpers for curved path
+    // helper to trace curves
     const traceCurve = (xs: number[], ys: number[]) => {
       const n = xs.length; if (n === 0) return;
       if (n === 1) { ctx.lineTo(xs[0], ys[0]); return; }
@@ -178,7 +252,6 @@ export default function MultiSeriesLines({
     const fillCurve = (stroke: string, xs: number[], ys: number[]) => {
       const n = xs.length; if (n < 2) return;
       const m = computeMonotoneSlopes(xs, ys);
-
       ctx.beginPath();
       ctx.moveTo(xs[0], baseline);
       ctx.lineTo(xs[0], ys[0]);
@@ -205,6 +278,13 @@ export default function MultiSeriesLines({
       ctx.fill();
     };
 
+    // precompute x centers
+    const xsCenters = new Array<number>(N);
+    for (let i = 0; i < N; i++) xsCenters[i] = xStart + dx * i;
+
+    // clear hits
+    const hits: Hit[] = [];
+
     // plot each series
     for (let sIdx = 0; sIdx < series.length; sIdx++) {
       const s = series[sIdx]!;
@@ -217,7 +297,7 @@ export default function MultiSeriesLines({
       for (let i = 0; i < N; i++) {
         const v = s.values[i];
         if (v == null || !Number.isFinite(v)) continue;
-        xsAll[i] = xStart + dx * i;
+        xsAll[i] = xsCenters[i];
         ysAll[i] = yFor(v);
         def[i] = true;
       }
@@ -233,39 +313,86 @@ export default function MultiSeriesLines({
       let ysPath: number[] = [];
 
       if (idxs.length === 1) {
-        xsPath = [xStart, xEnd];
+        xsPath = [xsCenters[0], xsCenters[N - 1]];
         ysPath = [ysAll[firstIdx], ysAll[firstIdx]];
       } else {
-        if (firstIdx > 0) { xsPath.push(xStart); ysPath.push(ysAll[firstIdx]); }
+        if (firstIdx > 0) { xsPath.push(xsCenters[0]); ysPath.push(ysAll[firstIdx]); }
         for (const i of idxs) { xsPath.push(xsAll[i]); ysPath.push(ysAll[i]); }
-        if (lastIdx < N - 1) { xsPath.push(xEnd); ysPath.push(ysAll[lastIdx]); }
+        if (lastIdx < N - 1) { xsPath.push(xsCenters[N - 1]); ysPath.push(ysAll[lastIdx]); }
       }
 
       // area
       fillCurve(stroke, xsPath, ysPath);
 
       // line
-      const ctx = (canvasRef.current as HTMLCanvasElement).getContext("2d")!;
       ctx.lineWidth = 2.5; ctx.lineJoin = "round"; ctx.lineCap = "round";
       ctx.strokeStyle = stroke;
       ctx.beginPath();
       traceCurve(xsPath, ysPath);
       ctx.stroke();
 
-      // dots on defined takes
+      // dots (single selection animation)
       ctx.fillStyle = dotFill; ctx.strokeStyle = stroke;
       for (let i = 0; i < N; i++) {
         if (!def[i]) continue;
+        const k = `${sIdx}:${i}`;
+        let amp = 0;
+        if (hoverKey && !prevHoverKey) amp = k === hoverKey ? animU : 0;
+        else if (!hoverKey && prevHoverKey) amp = k === prevHoverKey ? 1 - animU : 0;
+        else if (hoverKey && prevHoverKey) amp = k === hoverKey ? animU : (k === prevHoverKey ? 1 - animU : 0);
+        const r = 3.5 + (7 - 3.5) * clamp01(amp);
+
         const x = xsAll[i], y = ysAll[i];
-        ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.lineWidth = 1.75; ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.lineWidth = 1.75; ctx.stroke();
+
+        hits.push({ key: k, sIdx, i, x, y, label: s.label, color: stroke, value: Math.round((s.values[i] as number)) });
       }
     }
-  }, [canvasRef, width, hostH, series, yMin, yMax, ySuffix, N, invertY]);
 
-  // TS-safe style object for optional numeric height
+    hitsRef.current = hits;
+  }, [canvasRef, width, hostH, series, yMin, yMax, ySuffix, N, invertY, hoverKey, prevHoverKey, animU]);
+
+  // TS-safe style object for height
   const chartStyle: React.CSSProperties = {};
   if (typeof height === "number") chartStyle.height = height;
   if (typeof height === "string") chartStyle.height = height;
+
+  // mouse handlers (nearest dot)
+  const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+
+    let best: Hit | null = null;
+    let bestD2 = Infinity;
+    const HITS = hitsRef.current;
+    for (let i = 0; i < HITS.length; i++) {
+      const h = HITS[i]!;
+      const dx = h.x - px, dy = h.y - py;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; best = h; }
+    }
+
+    // a small max radius so we don't snap across the chart (20px radius)
+    if (!best || bestD2 > 20 * 20) {
+      setHoverKey(null);
+      setTip(null);
+      return;
+    }
+
+    setHoverKey(best.key);
+    setTip({
+      x: clamp(best.x, 8, rect.width - 8),
+      y: Math.max(12, best.y - 14),
+      takeIdx: best.i,
+      label: best.label,
+      color: best.color,
+      value: best.value,
+    });
+  }, []);
+  const onMouseLeave = React.useCallback(() => { setHoverKey(null); setTip(null); }, []);
+
+  const hostRect = (ref.current as HTMLDivElement | null)?.getBoundingClientRect();
 
   return (
     <div className="h-full min-h-0 overflow-hidden flex flex-col p-0">
@@ -278,11 +405,23 @@ export default function MultiSeriesLines({
         ref={ref}
         className="relative w-full flex-1 min-h-0"
         style={chartStyle}
+        onMouseMove={onMouseMove}
+        onMouseLeave={onMouseLeave}
       >
         <canvas
           ref={canvasRef}
           style={{ width: "100%", height: "100%", display: "block", borderRadius: 12 }}
         />
+
+        {tip && hostRect ? (
+          <TooltipPortal left={hostRect.left + tip.x} top={hostRect.top + tip.y}>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold">Take {tip.takeIdx + 1}</span>
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: tip.color }} />
+              {tip.label}: {tip.value}{ySuffix}
+            </div>
+          </TooltipPortal>
+        ) : null}
       </div>
 
       {/* Legend */}

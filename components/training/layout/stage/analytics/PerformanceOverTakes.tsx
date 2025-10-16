@@ -2,11 +2,13 @@
 'use client';
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import type { TakeScore } from '@/utils/scoring/score';
 import { ANA_COLORS } from './colors'; // match MultiSeriesLines grid styling
 
 /* ─────────── small utils ─────────── */
 const clamp = (x: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, x));
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 function useMeasure() {
@@ -80,13 +82,56 @@ function computeMonotoneSlopes(xs: number[], ys: number[]) {
 }
 
 /* ─────────── types/consts ─────────── */
-type Row = { take: number; final: number };
+type Components = {
+  pitch?: number;    // %
+  melody?: number;   // %
+  line?: number;     // %
+  intervals?: number;// %
+};
+type Row = { take: number; final: number; comps: Components };
+type PointHit = { x1: number; x2: number; cx: number; y: number; row: Row };
+
+const SEG_COLOR: Record<keyof Components, string> = {
+  pitch:     '#86efac', // green-300
+  melody:    '#bbf7d0', // green-200
+  line:      '#4ade80', // green-400
+  intervals: '#22c55e', // green-500
+};
 
 const LINE_WIDTH = 2.5;               // match MultiSeriesLines
 const LINE_COLOR = '#22c55e';
 const DOT_R = 3.5;                    // match MultiSeriesLines
 const DOT_STROKE = '#22c55e';
 const DOT_FILL = 'rgba(34,197,94,0.18)';
+
+function TooltipPortal({
+  left, top, children,
+}: { left: number; top: number; children: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  const [w, setW] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const ro = new ResizeObserver(() => setW(el.getBoundingClientRect().width));
+    ro.observe(el);
+    setW(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
+  if (typeof document === 'undefined') return null;
+  const margin = 8;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1920;
+  const clampedLeft = Math.min(Math.max(left, margin + w / 2), vw - margin - w / 2);
+  const y = Math.max(8, top);
+  return createPortal(
+    <div
+      ref={ref}
+      className="pointer-events-none fixed -translate-x-1/2 -translate-y-full rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium shadow-md"
+      style={{ left: clampedLeft, top: y, borderColor: '#e5e7eb', color: '#0f0f0f', whiteSpace: 'nowrap', zIndex: 60 }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
 
 function LineChart({
   rows,
@@ -100,12 +145,40 @@ function LineChart({
   const { ref, width, height: hostH } = useMeasure();
   const { ref: canvasRef } = useCanvas2d(width, typeof hostH === 'number' ? hostH : 0);
 
+  // intro animation
   const [t, setT] = React.useState(0);
   React.useEffect(() => {
     let raf = 0; const start = performance.now();
     const tick = (now: number) => { const u = ease((now - start) / 800); setT(u); if (u < 1) raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
   }, [rows.length]);
+
+  // hover animation between dots (single dot only)
+  const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
+  const lastHoverRef = React.useRef<number | null>(null);
+  const [animPrevIdx, setAnimPrevIdx] = React.useState<number | null>(null);
+  const [animU, setAnimU] = React.useState(1); // 0..1 transition
+  React.useEffect(() => {
+    const prev = lastHoverRef.current;
+    if (prev === hoverIdx) return;
+    lastHoverRef.current = hoverIdx;
+    setAnimPrevIdx(prev);
+    setAnimU(0);
+    let raf = 0;
+    const start = performance.now();
+    const dur = 200;
+    const tick = (now: number) => {
+      const p = clamp01((now - start) / dur);
+      setAnimU(ease(p));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [hoverIdx]);
+
+  // tooltip state
+  const [tip, setTip] = React.useState<{ x: number; y: number; row: Row } | null>(null);
+  const hitsRef = React.useRef<PointHit[]>([]);
 
   React.useEffect(() => {
     const c = canvasRef.current; if (!c) return;
@@ -120,7 +193,7 @@ function LineChart({
     const x0 = pad.l;
     const baseline = pad.t + ih;
 
-    // Y grid + labels (font/weights/colors match MultiSeriesLines)
+    // Y grid + labels
     const yTicks = 4;
     ctx.save();
     ctx.font = '12px ui-sans-serif, system-ui';
@@ -138,14 +211,14 @@ function LineChart({
     }
     ctx.restore();
 
-    // X range (same ±8px as Multi for the curve itself)
+    // X range
     const X_MARGIN = 8;
     const xStart = x0 + X_MARGIN;
     const xEnd   = x0 + iw - X_MARGIN;
+    const plotW = Math.max(10, xEnd - xStart);
     const dx = rows.length > 1 ? (xEnd - xStart) / (rows.length - 1) : 0;
 
-    // Downsample capacity uses the actual plot width between xStart..xEnd
-    const plotW = Math.max(10, xEnd - xStart);
+    // Downsample
     const MIN_GAP = Math.max(6, gap);
     const capacity = Math.max(2, Math.floor(plotW / MIN_GAP));
     let toDraw = rows;
@@ -159,7 +232,7 @@ function LineChart({
       toDraw = sampled;
     }
 
-    const n = toDraw.length; if (!n) return;
+    const n = toDraw.length; if (!n) { hitsRef.current = []; return; }
 
     // Points
     const Y_MARGIN = 10;
@@ -190,11 +263,11 @@ function LineChart({
       }
     };
 
-    // Clip to the exact plot area (no extra gutter)
+    // Clip to plot area
     ctx.save();
     ctx.beginPath(); ctx.rect(x0, pad.t, iw, ih); ctx.clip();
 
-    // Area fill (consistent green gradient)
+    // Area
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(xs[0], baseline);
@@ -220,28 +293,111 @@ function LineChart({
     ctx.fillStyle = grad; ctx.fill();
     ctx.restore();
 
-    // Line (no glow; match MultiSeriesLines)
+    // Line
     ctx.lineWidth = LINE_WIDTH; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.strokeStyle = LINE_COLOR; ctx.beginPath(); traceCurve(); ctx.stroke();
 
-    // Dots (match MultiSeriesLines)
+    // Dots (single selection anim)
     ctx.fillStyle = DOT_FILL; ctx.strokeStyle = DOT_STROKE;
     for (let i = 0; i < n; i++) {
+      let amp = 0;
+      if (hoverIdx != null && animPrevIdx == null) amp = i === hoverIdx ? animU : 0;
+      else if (hoverIdx == null && animPrevIdx != null) amp = i === animPrevIdx ? 1 - animU : 0;
+      else if (hoverIdx != null && animPrevIdx != null) amp = i === hoverIdx ? animU : (i === animPrevIdx ? 1 - animU : 0);
+      const r = DOT_R + (7 - DOT_R) * clamp01(amp);
+
       ctx.beginPath();
-      ctx.arc(xs[i], ys[i], DOT_R, 0, Math.PI * 2);
+      ctx.arc(xs[i], ys[i], r, 0, Math.PI * 2);
       ctx.fill(); ctx.lineWidth = 1.75; ctx.stroke();
     }
 
     ctx.restore();
-  }, [canvasRef, width, hostH, rows, gap, t]);
 
-  // TS-safe style object
+    // Build hover hit zones (midpoint splits)
+    const half = Math.max(6, (n > 1 ? (xs[1] - xs[0]) : 12) / 2);
+    hitsRef.current = xs.map((x, i) => {
+      const left  = i === 0     ? x - half : (x + xs[i - 1]) / 2;
+      const right = i === n - 1 ? x + half : (x + xs[i + 1]) / 2;
+      return { cx: x, x1: left, x2: right, y: ys[i], row: toDraw[i] };
+    });
+  }, [canvasRef, width, hostH, rows, gap, t, hoverIdx, animPrevIdx, animU]);
+
+  // hover + tooltip handlers
+  const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    let idx: number | null = null;
+    for (let i = 0; i < hitsRef.current.length; i++) {
+      const h = hitsRef.current[i];
+      if (x >= h.x1 && x <= h.x2) { idx = i; break; }
+    }
+    setHoverIdx(idx);
+    if (idx != null) {
+      const h = hitsRef.current[idx];
+      setTip({
+        x: clamp(h.cx, 8, rect.width - 8),
+        y: Math.max(12, h.y - 14),
+        row: h.row,
+      });
+    } else {
+      setTip(null);
+    }
+  }, []);
+  const onMouseLeave = React.useCallback(() => { setHoverIdx(null); setTip(null); }, []);
+
+  // compute absolute coords for portal
+  const hostRect = (ref.current as HTMLDivElement | null)?.getBoundingClientRect();
+
+  // TS-safe style
   const chartStyle: React.CSSProperties = {};
   if (typeof height === 'number' || typeof height === 'string') chartStyle.height = height;
 
   return (
-    <div ref={ref} className="relative w-full" style={chartStyle} >
+    <div
+      ref={ref}
+      className="relative w-full"
+      style={chartStyle}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+    >
       <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block', borderRadius: 12 }} />
+      {tip && hostRect ? (
+        <TooltipPortal left={hostRect.left + tip.x} top={hostRect.top + tip.y}>
+          <div className="flex flex-col gap-1">
+            <div className="font-semibold">Take {tip.row.take}</div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: LINE_COLOR }} />
+              Final: {Math.round(tip.row.final)}%
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-0.5">
+              {'pitch' in tip.row.comps && tip.row.comps.pitch != null ? (
+                <div className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: SEG_COLOR.pitch }} />
+                  Pitch: {Math.round(tip.row.comps.pitch!)}%
+                </div>
+              ) : null}
+              {'melody' in tip.row.comps && tip.row.comps.melody != null ? (
+                <div className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: SEG_COLOR.melody }} />
+                  Melody: {Math.round(tip.row.comps.melody!)}%
+                </div>
+              ) : null}
+              {'line' in tip.row.comps && tip.row.comps.line != null ? (
+                <div className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: SEG_COLOR.line }} />
+                  Rhythm: {Math.round(tip.row.comps.line!)}%
+                </div>
+              ) : null}
+              {'intervals' in tip.row.comps && tip.row.comps.intervals != null ? (
+                <div className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: SEG_COLOR.intervals }} />
+                  Intervals: {Math.round(tip.row.comps.intervals!)}%
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </TooltipPortal>
+      ) : null}
     </div>
   );
 }
@@ -262,10 +418,20 @@ export default function PerformanceOverTakes({
   legendGapPx?: number;
   reserveTopGutter?: boolean;
 }) {
-  const rows: Row[] = React.useMemo(
-    () => scores.map((s, i) => ({ take: i + 1, final: clamp(s.final.percent, 0, 100) })),
-    [scores]
-  );
+  const rows: Row[] = React.useMemo(() => {
+    return scores.map((s, i) => ({
+      take: i + 1,
+      final: clamp(s.final.percent, 0, 100),
+      comps: {
+        pitch: typeof s.pitch?.percent === 'number' ? s.pitch.percent : undefined,
+        melody: typeof s.rhythm?.melodyPercent === 'number' ? s.rhythm.melodyPercent : undefined,
+        line: typeof (s as any)?.rhythm?.linePercent === 'number' ? (s as any).rhythm.linePercent : undefined,
+        intervals: typeof s.intervals?.correctRatio === 'number'
+          ? Math.round(s.intervals.correctRatio * 10000) / 100
+          : undefined,
+      },
+    }));
+  }, [scores]);
 
   return (
     <div className="h-full min-h-0 overflow-hidden flex flex-col p-0">

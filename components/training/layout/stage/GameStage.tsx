@@ -99,29 +99,29 @@ export default function GameStage({
 
   analytics,
 }: Props) {
-  // If analytics view, render it directly (left) + always keep the side panel on the right.
+  // If analytics view, render it directly (left) + always keep the side panel on the right).
   if (view === "analytics") {
     return (
       <div className="w-full h-full min-h-[260px]">
-<div className="w-full h-full flex gap-3">
-  {/* LEFT: Analytics */}
-  <div className="flex-1 min-w-0 rounded-xl shadow-md">
-    <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
-      <SessionAnalytics
-        scores={analytics?.scores ?? []}
-        snapshots={analytics?.snapshots ?? []}
-        bpm={analytics?.bpm ?? bpm}
-        den={analytics?.den ?? den}
-        tonicPc={analytics?.tonicPc ?? tonicPc ?? 0}
-        scaleName={(analytics?.scaleName ?? scaleName ?? "major") as any}
-      />
-    </div>
-  </div>
-  {/* RIGHT: Side panel */}
-  <aside className="shrink-0 w-[320px] lg:w-[360px] xl:w-[380px] rounded-xl shadow-md">
-    <SidePanelLayout>{stageAside}</SidePanelLayout>
-  </aside>
-</div>
+        <div className="w-full h-full flex gap-3">
+          {/* LEFT: Analytics */}
+          <div className="flex-1 min-w-0 rounded-xl shadow-md">
+            <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
+              <SessionAnalytics
+                scores={analytics?.scores ?? []}
+                snapshots={analytics?.snapshots ?? []}
+                bpm={analytics?.bpm ?? bpm}
+                den={analytics?.den ?? den}
+                tonicPc={analytics?.tonicPc ?? tonicPc ?? 0}
+                scaleName={(analytics?.scaleName ?? scaleName ?? "major") as any}
+              />
+            </div>
+          </div>
+          {/* RIGHT: Side panel */}
+          <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
+            <SidePanelLayout>{stageAside}</SidePanelLayout>
+          </aside>
+        </div>
       </div>
     );
   }
@@ -199,9 +199,29 @@ export default function GameStage({
     }
   }, []);
 
+  const hasPhrase = !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
   const showRhythm = !!(rhythm && rhythm.length);
-  const rhythmH = 72;
-  const mainH = Math.max(200, fillH - (view !== "sheet" && showRhythm ? rhythmH + 8 : 0));
+  const wantRhythm = hasPhrase && showRhythm && view !== "sheet";
+
+  // Make the rhythm lane EXACTLY one piano-roll row high.
+  // Piano roll is 1 octave of rows → 13 cells (inclusive upper line).
+  // Solve for main + rhythm + gap = fillH:
+  //   main + (main/13) + GAP = fillH  =>  main = (fillH - GAP) * 13/14
+  //   rhythm = main/13                =>  rhythm = (fillH - GAP) / 14
+  const GAP = 8;
+  const ROWS = 13;
+  let mainH: number;
+  let rhythmH: number;
+
+  if (wantRhythm) {
+    const avail = fillH - GAP;
+    const mainTarget = Math.round((avail * ROWS) / (ROWS + 1));
+    mainH = Math.max(200, mainTarget);
+    rhythmH = Math.max(0, avail - mainH); // ensures exact sum + exact single row height
+  } else {
+    mainH = Math.max(200, fillH);
+    rhythmH = 0;
+  }
 
   const useSharpsPref = useMemo(() => preferSharpsForKeySig(keySig || null), [keySig]);
 
@@ -213,7 +233,6 @@ export default function GameStage({
 
   const renderedPanel = <SidePanelLayout>{stageAside}</SidePanelLayout>;
 
-  const hasPhrase = !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
   const resolvedClef = (clef ?? pickClef(phrase)) as "treble" | "bass";
   const sheetStaffHeight = Math.max(160, Math.floor(mainH * 0.72));
 
@@ -283,8 +302,8 @@ export default function GameStage({
                 lyrics={lyrics}
                 keySig={keySig}
                 /** keep in lockstep with rhythm roll */
-                windowSec={4}
-                anchorRatio={0.1}
+                windowSec={WINDOW_SEC}
+                anchorRatio={ANCHOR_RATIO}
                 /** Visual toggles for rectangles */
                 showNoteBlocks={showNoteBlocks}
                 showNoteBorders={showNoteBorders}
@@ -296,7 +315,7 @@ export default function GameStage({
             )}
           </div>
 
-          {hasPhrase && showRhythm && view !== "sheet" ? (
+          {wantRhythm ? (
             <div className="w-full mt-2">
               <RhythmRollCanvas
                 height={rhythmH}
@@ -306,15 +325,15 @@ export default function GameStage({
                 leadInSec={leadInSecEff}
                 bpm={bpm}
                 den={den}
-                windowSec={4}
-                anchorRatio={0.1}
+                windowSec={WINDOW_SEC}
+                anchorRatio={ANCHOR_RATIO}
               />
             </div>
           ) : null}
         </div>
 
         {/* RIGHT: Vertical panel — ALWAYS visible */}
-        <aside className="shrink-0 w-[320px] lg:w-[360px] xl:w-[380px] rounded-xl shadow-md">
+        <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
           {renderedPanel}
         </aside>
       </div>

@@ -3,7 +3,7 @@
 
 import * as React from 'react';
 
-type Width = '0px' | '64px' | '240px';
+type Width = string; // allow CSS vars, clamp(), etc.
 
 export function useCSSSidebarWidth() {
   return React.useCallback((w: Width) => {

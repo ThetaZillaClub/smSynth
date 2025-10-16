@@ -108,9 +108,9 @@ export default function RhythmRollCanvas({
     const totalW = Math.ceil(totalSec * pxPerSec); // CSS px width
     if (totalW <= 0 || totalW > MAX_RHYTHM_BITMAP_PX) return;
 
-    const padY = 6;
-    const laneY = padY;
-    const laneH = Math.max(8, height - padY * 2);
+    // Fill the entire lane height (no vertical padding) so it matches exactly one piano-roll row.
+    const laneY = 0;
+    const laneH = height;
     const sixteenthPx = Math.max(0, sixteenthSec * pxPerSec);
 
     const c = buildCanvas(totalW, height);
@@ -201,9 +201,8 @@ export default function RhythmRollCanvas({
       // playhead + border (crisp)
       const DOT_R = 6;
       const xGuide = Math.round(anchorX) + 0.5;
-      const padY = 6;
-      const laneY = padY;
-      const laneH = Math.max(8, height - padY * 2);
+      const laneY = 0;
+      const laneH = height;
       const yCenter = laneY + laneH / 2;
       ctx.fillStyle = PR_COLORS.dotFill;
       ctx.beginPath();

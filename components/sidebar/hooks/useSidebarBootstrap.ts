@@ -20,7 +20,7 @@ function readAuthedCookie(): boolean {
 
 export function useSidebarBootstrap(opts: {
   isAuthRoute: boolean;
-  setSidebarWidth: (w: '0px' | '64px' | '240px') => void;
+  setSidebarWidth: (w: string) => void;
 }) {
   const { isAuthRoute, setSidebarWidth } = opts;
 
@@ -39,7 +39,7 @@ export function useSidebarBootstrap(opts: {
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return;
 
-      // Only DOWNGRADE to logged-out on SIGNAED_OUT.
+      // Only DOWNGRADE to logged-out on SIGNED_OUT.
       if (event === 'SIGNED_OUT') {
         setAuthed(false);
         setDisplayName('You');
@@ -48,7 +48,7 @@ export function useSidebarBootstrap(opts: {
           localStorage.removeItem(STUDENT_IMAGE_HINT_KEY);
         } catch {}
         // While logged out (and not on /auth), keep sidebar open for CTAs.
-        if (!isAuthRoute) setSidebarWidth('240px');
+        if (!isAuthRoute) setSidebarWidth('var(--sidebar-w-open)');
         return;
       }
 
@@ -77,7 +77,7 @@ export function useSidebarBootstrap(opts: {
 
       // Never DOWNGRADE here; if we have no user, keep current state.
       if (!user) {
-        if (!isAuthRoute) setSidebarWidth('240px'); // show CTAs while logged out
+        if (!isAuthRoute) setSidebarWidth('var(--sidebar-w-open)'); // show CTAs while logged out
         setStudentImgUrl(null);
         setDisplayName('You');
         return;

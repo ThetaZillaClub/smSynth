@@ -353,7 +353,7 @@ export default function SessionAnalytics({
   );
 }
 
-/* ─────────── bento-style vertical picker button (lighter active, keep shadow) ─────────── */
+/* ─────────── bento-style vertical picker button (active now has shadow-md) ─────────── */
 function PickerButton({
   title,
   subtitle,
@@ -372,12 +372,14 @@ function PickerButton({
       aria-pressed={active}
       aria-label={title}
       className={[
+        // base
         "group text-left rounded-2xl border bg-gradient-to-b w-full h-full p-4",
-        "flex items-center justify-between gap-3 shadow-sm hover:shadow-md transition",
+        "flex items-center justify-between gap-3 transition",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        // variants
         active
-          ? "from-[#fafafa] to-[#f3f3f3] border-[#e6e6e6] shadow-md" // lighter, keep shadow; no dark ring
-          : "from-[#f2f2f2] to-[#eeeeee] border-[#d2d2d2]",
+          ? "from-[#fafafa] to-[#f3f3f3] border-[#e6e6e6] shadow-md"
+          : "from-[#f2f2f2] to-[#eeeeee] border-[#d2d2d2] shadow-sm hover:shadow-md",
       ].join(" ")}
     >
       <div className="min-w-0">
@@ -392,7 +394,7 @@ function PickerButton({
       </div>
       <div
         className={[
-          "shrink-0 rounded-full bg-[#f4f4f4] border border-[#e6e6e6] w-7 h-7 grid place-items-center",
+          "shrink-0 rounded-full shadow-sm bg-[#f4f4f4] border border-[#e6e6e6] w-7 h-7 grid place-items-center",
           active ? "text-[#0f0f0f]" : "text-[#0f0f0f]/70 group-hover:text-[#0f0f0f]",
           "transition",
         ].join(" ")}

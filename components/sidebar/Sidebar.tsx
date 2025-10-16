@@ -33,12 +33,13 @@ export default function Sidebar() {
   const effectiveCollapsed = authed ? collapsed : false;
 
   // Keep CSS var in sync
+  const OPEN_W = 'var(--sidebar-w-open)';
   React.useEffect(() => {
     if (isAuthRoute) {
       setSidebarWidth('0px');
       return;
     }
-    setSidebarWidth(effectiveCollapsed ? '64px' : '240px');
+    setSidebarWidth(effectiveCollapsed ? '64px' : OPEN_W);
   }, [effectiveCollapsed, isAuthRoute, setSidebarWidth]);
 
   const go = React.useCallback((href: string) => router.push(href), [router]);

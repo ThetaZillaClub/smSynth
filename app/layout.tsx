@@ -25,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Pre-paint: if we're on /auth, force 0px before any CSS; otherwise we'll default to 240px */}
+        {/* Pre-paint: if we're on /auth, force 0px before any CSS; otherwise we'll default to open width */}
         <script
           // Inline + synchronous so it runs before first paint
           dangerouslySetInnerHTML={{
@@ -33,7 +33,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
         {/* Default FIRST-PAINT width for all non-/auth pages */}
-        <style id="sidebar-var-default">{`:root{--sidebar-w:240px}`}</style>
+        <style id="sidebar-var-default">{`:root{
+  /* Open (expanded) sidebar width, proportionally clamped for all screens */
+  --sidebar-w-open: clamp(192px, 15vw, 240px);
+  /* Live width read by the app shell grid (toggled between collapsed/open) */
+  --sidebar-w: var(--sidebar-w-open);
+  /* Optional: scale the brand/icon with the sidebar width for nicer proportions */
+  --sidebar-icon: clamp(20px, calc(var(--sidebar-w) * 0.16), 36px);
+}`}</style>
       </head>
       <body className={`${geistSans.className} antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
