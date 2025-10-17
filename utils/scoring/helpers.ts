@@ -36,3 +36,27 @@ export function filterVoiced(
     ? samples.filter((s) => (s.hz ?? 0) > 0 && s.conf >= confMin)
     : samples.filter((s) => (s.hz ?? 0) > 0);
 }
+
+/**
+ * Linear precision credit between full and zero thresholds.
+ * - Full credit at <= fullCents (default 50¢)
+ * - Linearly falls to 0 credit at >= zeroCents (default 100¢)
+ *   e.g. with defaults: 51¢ -> 0.98 credit, 75¢ -> 0.50 credit, 100¢ -> 0
+ *
+ * @param absCents Absolute cents error (can be signed; we take |·|)
+ * @param fullCents Cents at/under which credit is 1.0
+ * @param zeroCents Cents at/over which credit is 0.0
+ * @returns Credit in [0,1]
+ */
+export function linearCredit50_100(
+  absCents: number,
+  fullCents = 50,
+  zeroCents = 100
+): number {
+  if (!Number.isFinite(absCents)) return 0;
+  const a = Math.abs(absCents);
+  if (a <= fullCents) return 1;
+  if (a >= zeroCents) return 0;
+  const credit = 1 - (a - fullCents) / (zeroCents - fullCents);
+  return clamp01(credit);
+}

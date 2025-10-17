@@ -16,32 +16,39 @@ export default function IntervalsChart({
   introEpoch?: number;
 }) {
   const series: Series[] = React.useMemo(() => {
-    const wantedBase = [0, 12, 1, 4]; // Unison, Octave, m2, M3
     const nT = scores.length;
 
-    const attempted = new Set<number>();
+    // Collect ALL interval classes (0..12) that had >0 attempts across any take
+    const attemptsBySemi = new Map<number, number>(); // semitones -> total attempts
     for (let i = 0; i < nT; i++) {
       const classes = scores[i]?.intervals?.classes ?? [];
       for (const c of classes) {
-        if (wantedBase.includes(c.semitones) && (c.attempts ?? 0) > 0) attempted.add(c.semitones);
+        const a = c?.attempts ?? 0;
+        if (a > 0) {
+          attemptsBySemi.set(c.semitones, (attemptsBySemi.get(c.semitones) ?? 0) + a);
+        }
       }
     }
-    const wanted = wantedBase.filter((semi) => attempted.has(semi));
+
+    const wanted = Array.from(attemptsBySemi.keys()).sort((a, b) => a - b);
     if (wanted.length === 0) return [];
 
+    // Build line series for each attempted class
     const lines = wanted.map((semi) => ({
       semitones: semi,
       label: intervalLabel(semi),
       values: Array.from({ length: nT }, () => null as number | null),
     }));
 
+    // Fill values per take as % correct (fractional credit OK)
     for (let i = 0; i < nT; i++) {
       const classes = scores[i]?.intervals?.classes ?? [];
       for (const line of lines) {
         const row = classes.find((c) => c.semitones === line.semitones);
         if (!row) continue;
-        const pct = (row.attempts ?? 0) > 0 ? (100 * (row.correct ?? 0)) / (row.attempts ?? 1) : null;
-        line.values[i] = pct;
+        const attempts = row.attempts ?? 0;
+        const correct = row.correct ?? 0;
+        line.values[i] = attempts > 0 ? (100 * correct) / attempts : null;
       }
     }
 

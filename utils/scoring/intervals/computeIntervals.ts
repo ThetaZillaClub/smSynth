@@ -2,13 +2,20 @@ import type { Phrase } from "@/utils/stage";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { IntervalScore, PitchSample } from "../types";
 import { intervalLabel } from "@/components/training/layout/stage/side-panel/SidePanelScores/format";
+import { linearCredit50_100 } from "../helpers";
 
 /**
- * Computes interval accuracy across adjacent notes in a phrase
- * using median MIDI in each notated window, with a ±50¢ correctness band.
- * Includes a bucket for 0 semitones (Perfect Unison) and buckets up to 12 (Octave).
+ * Interval accuracy with fractional credit:
+ * - 100% credit ≤ centsOk (default 50¢)
+ * - Linear falloff to 0% by 100¢
+ * - Median MIDI per note window (unchanged)
+ * - Buckets 0..12 semitones (unison..octave)
  */
-export function computeIntervalScore(phrase: Phrase, voiced: PitchSample[]): IntervalScore {
+export function computeIntervalScore(
+  phrase: Phrase,
+  voiced: PitchSample[],
+  centsOk: number = 50
+): IntervalScore {
   if (!phrase.notes || phrase.notes.length < 2) {
     return { total: 0, correct: 0, correctRatio: 1, classes: makeEmptyClasses() };
   }
@@ -17,37 +24,29 @@ export function computeIntervalScore(phrase: Phrase, voiced: PitchSample[]): Int
     medianMidiInRange(voiced, n.startSec, n.startSec + n.durSec)
   );
 
-  // Prepare buckets 0..12 (0=unison, 12=octave)
   const by: Map<number, { attempts: number; correct: number }> = new Map();
   for (let k = 0; k <= 12; k++) by.set(k, { attempts: 0, correct: 0 });
 
-  let correct = 0;
   let total = 0;
+  let sumCredit = 0;
 
   for (let i = 1; i < phrase.notes.length; i++) {
     if (!isFinite(mids[i - 1]) || !isFinite(mids[i])) continue;
 
-    const exp = phrase.notes[i].midi - phrase.notes[i - 1].midi;
-    const got = mids[i] - mids[i - 1];
+    const exp = phrase.notes[i].midi - phrase.notes[i - 1].midi; // semitones
+    const got = mids[i] - mids[i - 1];                           // semitones
+    const errCents = Math.abs(100 * (got - exp));                // cents
 
-    // Clamp to 0..12 classes
-    const clampClass = (x: number) => {
-      const a = Math.abs(Math.round(x));
-      return a > 12 ? 12 : a;
-    };
-    const expSemi = clampClass(exp);
+    // same linear credit as pitch
+    const credit = linearCredit50_100(errCents, centsOk, 100);
 
-    const errCents = 100 * (got - exp);
-    const ok = Math.abs(errCents) <= 50;
-
-    const cell = by.get(expSemi);
-    if (cell) {
-      cell.attempts += 1;
-      if (ok) cell.correct += 1;
-    }
+    const cls = Math.min(12, Math.abs(Math.round(exp)));
+    const cell = by.get(cls)!;
+    cell.attempts += 1;
+    cell.correct += credit;
 
     total++;
-    if (ok) correct++;
+    sumCredit += credit;
   }
 
   const classes = Array.from(by.entries()).map(([semi, v]) => ({
@@ -58,11 +57,15 @@ export function computeIntervalScore(phrase: Phrase, voiced: PitchSample[]): Int
     percent: v.attempts ? (100 * v.correct) / v.attempts : 0,
   }));
 
-  return { total, correct, correctRatio: total ? correct / total : 1, classes };
+  return {
+    total,
+    correct: sumCredit,
+    correctRatio: total ? sumCredit / total : 1,
+    classes,
+  };
 }
 
 function makeEmptyClasses() {
-  // Build 0..12 for consistency with runtime buckets
   return Array.from({ length: 13 }, (_, i) => ({
     semitones: i,
     label: intervalLabel(i),
@@ -73,9 +76,7 @@ function makeEmptyClasses() {
 }
 
 function medianMidiInRange(samples: PitchSample[], t0: number, t1: number): number {
-  const S = samples.filter(
-    (s) => s.tSec >= t0 && s.tSec <= t1 && (s.hz ?? 0) > 0
-  );
+  const S = samples.filter((s) => s.tSec >= t0 && s.tSec <= t1 && (s.hz ?? 0) > 0);
   if (!S.length) return NaN;
   const mids = S.map((s) => hzToMidi(s.hz!))
     .filter((x) => Number.isFinite(x))

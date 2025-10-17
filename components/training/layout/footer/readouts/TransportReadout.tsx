@@ -21,10 +21,11 @@ export default function TransportReadout({
 }) {
   return (
     <div className={`min-w-0 flex-none ${className ?? ""}`}>
+      {/* Compact right-aligned row to avoid big gaps */}
       <div className="flex items-center justify-end gap-x-3 md:gap-x-4">
-        <Readout label="Take" value={`${roundCurrent}/${roundTotal}`} />
         <Readout label="BPM"  value={`${bpm}BPM`} />
         <Readout label="Time" value={`${ts.num}/${ts.den}`} />
+        <Readout label="Take" value={`${roundCurrent}/${roundTotal}`} />
       </div>
     </div>
   );

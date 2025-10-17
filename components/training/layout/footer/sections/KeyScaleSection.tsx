@@ -1,3 +1,4 @@
+// components/training/layout/footer/sections/KeyScaleSection.tsx
 "use client";
 
 import React from "react";
@@ -36,7 +37,8 @@ export default function KeyScaleSection({
     >
       {triadAction ? <LabeledAction topLabel="Triad" action={triadAction} /> : null}
       {tonicAction ? <LabeledAction topLabel="Key" action={tonicAction} /> : null}
-      <ScaleReadout className="w-[7rem] flex-none" scaleName={scaleName} keySig={keySig} />
+      {/* Optional breakpoint: narrower on small screens to prevent crowding */}
+      <ScaleReadout className="w-[6rem] md:w-[7rem] flex-none" scaleName={scaleName} keySig={keySig} />
     </div>
   );
 }

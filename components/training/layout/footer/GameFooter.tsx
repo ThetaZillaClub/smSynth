@@ -63,6 +63,7 @@ export default function GameFooter({
   tonicAction,
   arpAction,
 }: Props) {
+  // Support both new (`transport`) and old (`sessionPanel`) prop names.
   const transportProps = transport ?? sessionPanel;
 
   return (
@@ -99,22 +100,36 @@ export default function GameFooter({
               />
             </div>
 
-            {/* CENTER: Play/Pause (kept perfectly centered) + Pitch readout hugging its left */}
-            <div className="justify-self-center overflow-visible relative">
-              {/* Pitch pinned to the LEFT side of the play button, without affecting centering */}
-              <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2">
-                <PitchReadout
-                  livePitchHz={livePitchHz}
-                  isReady={isReady}
-                  error={error}
-                  keySig={keySig}
-                  clef={clef}
-                  lowHz={lowHz}
-                  highHz={highHz}
-                />
-              </div>
-              <div className="relative overflow-visible">
-                <PlayPauseButton running={running} onToggle={onToggle} />
+            {/* CENTER: Pitch (left) + Play (center) + symmetric spacer (right) */}
+            <div className="justify-self-center overflow-visible">
+              <div className="flex items-center">
+                {/* Pitch readout to the LEFT of the button */}
+                <div className="mr-3">
+                  <PitchReadout
+                    livePitchHz={livePitchHz}
+                    isReady={isReady}
+                    error={error}
+                    keySig={keySig}
+                    clef={clef}
+                    lowHz={lowHz}
+                    highHz={highHz}
+                  />
+                </div>
+
+                {/* Play/Pause stays perfectly centered within the center cell */}
+                <div className="relative overflow-visible">
+                  {showPlay ? (
+                    <PlayPauseButton running={running} onToggle={onToggle} />
+                  ) : (
+                    <div
+                      className="w-11 h-11 sm:w-12 sm:h-12 md:w-14 md:h-14 lg:w-16 lg:h-16"
+                      aria-hidden
+                    />
+                  )}
+                </div>
+
+                {/* Symmetry spacer: mirrors Pitch width so the button remains visually centered */}
+                <div className="ml-3 w-[7rem] flex-none" aria-hidden />
               </div>
             </div>
 

@@ -6,16 +6,16 @@ import type {
   PitchSample,
   TakeScore,
 } from "./types";
-import { letterFromPercent } from "./grade";
 import { computePitchScore } from "./pitch/computePitch";
 import { computeRhythmScore } from "./rhythm";
 import { computeIntervalScore } from "./intervals/computeIntervals";
+import { finalizeScore } from "./final/finalize"; // ⬅️ use harmonic mean
 
 export type { PitchSample, TakeScore } from "./types";
 
 export function computeTakeScore({
   phrase,
-  bpm, den, // den reserved
+  bpm, den,
   samples,
   gestureEventsSec,
   melodyOnsetsSec,
@@ -43,20 +43,13 @@ export function computeTakeScore({
     options: { confMin, onsetGraceMs, maxAlignMs, goodAlignMs },
   });
 
-  // ---- Intervals ----
+  // ---- Intervals (same centsOk behavior) ----
   const voiced: PitchSample[] = filterVoiced(samples, confMin);
-  const intervals = computeIntervalScore(phrase, voiced);
+  const intervals = computeIntervalScore(phrase, voiced, centsOk);
 
-  // ---- Finalize ----
-const parts: number[] = [pitch.percent, rhythm.melodyPercent];
-if (rhythm.lineEvaluated) parts.push(rhythm.linePercent);
+  // ---- Finalize via harmonic mean (pitch ⨉ rhythm) ----
+  const rhythmPctForFinal = rhythm.combinedPercent; // melody-only or avg with line
+  const final = finalizeScore(pitch.percent, rhythmPctForFinal);
 
-const finalPctRaw = parts.reduce((a, b) => a + b, 0) / parts.length;
-const finalPct = Math.max(0, Math.min(100, finalPctRaw));
-
-const final = {
-  percent: finalPct,
-  letter: letterFromPercent(finalPct),
-};
   return { pitch, rhythm, intervals, final };
 }
