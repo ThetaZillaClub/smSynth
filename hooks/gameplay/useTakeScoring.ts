@@ -82,7 +82,7 @@ export default function useTakeScoring() {
         confMin: 0.5,
         centsOk: 60,
         onsetGraceMs: 100,
-        maxAlignMs: 0,
+        maxAlignMs: 250,
         goodAlignMs: 120,
       },
     });
