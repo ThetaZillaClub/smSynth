@@ -1,18 +1,10 @@
-// components/training/layout/footer/meta/scale.ts
-export type ScaleName =
-  | "major"
-  | "natural_minor"
-  | "harmonic_minor"
-  | "melodic_minor"
-  | "dorian"
-  | "phrygian"
-  | "lydian"
-  | "mixolydian"
-  | "locrian"
-  | "major_pentatonic"
-  | "minor_pentatonic"
-  | "chromatic";
+"use client";
 
+import React from "react";
+import Readout from "./Readout";
+import type { ScaleName } from "@/utils/phrase/scales";
+
+// Local friendly label map to remove legacy meta/ files
 const SCALE_LABEL: Record<ScaleName, string> = {
   major: "Major",
   natural_minor: "Aeolian",
@@ -28,10 +20,7 @@ const SCALE_LABEL: Record<ScaleName, string> = {
   chromatic: "Chromatic",
 };
 
-export function friendlyScaleLabel(
-  scaleName: ScaleName | null | undefined,
-  keySig: string | null | undefined
-): string {
+function friendlyScaleLabel(scaleName: ScaleName | null | undefined, keySig: string | null | undefined): string {
   if (scaleName && SCALE_LABEL[scaleName]) return SCALE_LABEL[scaleName];
   if (keySig) {
     const tail = keySig.toLowerCase();
@@ -49,4 +38,17 @@ export function friendlyScaleLabel(
     if (/\bminor\s*penta|\bpentatonic\s*minor\b/.test(tail)) return "Minor Pentatonic";
   }
   return "—";
+}
+
+export default function ScaleReadout({
+  scaleName,
+  keySig,
+  className,
+}: {
+  scaleName: ScaleName | null;
+  keySig: string | null;
+  className?: string;
+}) {
+  const value = friendlyScaleLabel(scaleName, keySig);
+  return <Readout className={className} label="Scale" value={value} />;
 }

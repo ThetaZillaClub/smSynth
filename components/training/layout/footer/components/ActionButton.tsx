@@ -1,10 +1,10 @@
-// components/training/layout/footer/actions/FooterActionButton.tsx
 "use client";
 
 import React from "react";
 import type { FooterAction } from "../types";
 
-export default function FooterActionButton({ label, icon, onClick, disabled, title }: FooterAction) {
+/** Round icon-or-label action button (visuals unchanged). */
+export default function ActionButton({ label, icon, onClick, disabled, title }: FooterAction) {
   const len = (label ?? "").length;
 
   const base = [
