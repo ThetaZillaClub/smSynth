@@ -34,7 +34,13 @@ export type BuildPhraseWithRhythmParams = {
 
   /** Legacy absolute whitelist (still supported if present). */
   allowedMidis?: number[] | null;
-  
+
+  /**
+   * NEW: If true (default when `allowedDegreeIndices` is provided), remove the
+   * upper-octave duplicate of the selected degree(s) inside each tonic window
+   * [T, T+12]. This prevents A3 being chosen when A2 is intended, etc.
+   */
+  dropUpperWindowDegrees?: boolean;
 };
 
 /** Generate a phrase inside [lowHz, highHz] using a scale + rhythm. */
@@ -50,6 +56,7 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     includeOver = false,
     allowedDegreeIndices = null,
     allowedMidis = null,
+    dropUpperWindowDegrees, // may be undefined → see defaulting below
   } = params;
 
   const lowM = Math.round(hzToMidi(lowHz, a4Hz));
@@ -90,6 +97,36 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
         const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
         return di >= 0 && set.has(di);
       });
+    }
+
+    // ✨ NEW: drop upper-octave duplicates of selected degree(s) inside each window
+    // Default behavior: if user specified allowedDegreeIndices, treat dropUpperWindowDegrees=true
+    const shouldDropUpper =
+      (dropUpperWindowDegrees !== undefined ? dropUpperWindowDegrees : !!(allowedDegreeIndices && allowedDegreeIndices.length)) &&
+      sorted.length > 0;
+
+    if (shouldDropUpper && inWinFiltered.length) {
+      const offs = scaleSemitones(scale);
+      // If degrees specified → cull *those* degrees; otherwise be conservative and cull only tonic
+      const degOffsets = new Set<number>(
+        (allowedDegreeIndices && allowedDegreeIndices.length
+          ? allowedDegreeIndices
+              .map((i) => (i >= 0 && i < offs.length ? offs[i] : undefined))
+              .filter((x): x is number => typeof x === "number")
+          : [offs[0] ?? 0]) // tonic only if not specified
+      );
+
+      // Precompute the "upper" absolute MIDI numbers to remove per window
+      const upperSet = new Set<number>();
+      for (const T of sorted) {
+        for (const off of degOffsets) {
+          upperSet.add(Math.round(T + 12 + off));
+        }
+      }
+
+      const trimmed = inWinFiltered.filter((m) => !upperSet.has(m));
+      if (trimmed.length) inWinFiltered = trimmed;
+      // If trimming removed everything (edge case), keep original pool.
     }
 
     // Recombine (unique + sorted to keep stable behaviour)

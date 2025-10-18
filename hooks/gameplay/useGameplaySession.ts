@@ -152,10 +152,13 @@ export function useGameplaySession(params: {
     base.leadBars = leadBars;
     base.loopingMode = !!autoplay;
 
-    // Apply view preference unless the course explicitly demands Sheet Music.
-    // If a lesson hard-codes `view: "sheet"`, we respect it.
-    // Otherwise we use the user's setting (default Piano Roll).
-    base.view = sessionConfig.view === "sheet" ? "sheet" : viewPref;
+    // If a course explicitly sets a view (e.g. "sheet" or "polar"), honor it.
+    // Otherwise fall back to the user's preference ("piano" | "sheet").
+    const explicitView = sessionConfig.view;
+    base.view =
+      explicitView && explicitView !== "piano"
+        ? explicitView
+        : viewPref;
 
     const prevScale = base.scale ?? { tonicPc: 0, name: "major" as const };
     base.scale = { ...prevScale, tonicPc: resolvedTonicPc, randomTonic: false };

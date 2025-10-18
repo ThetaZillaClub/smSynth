@@ -52,7 +52,7 @@ type LayoutProps = {
 
   keySig?: string | null;
 
-  view?: "piano" | "sheet" | "analytics";
+  view?: "piano" | "sheet" | "polar" | "analytics";
 
   clef?: "treble" | "bass" | null;
   lowHz?: number | null;

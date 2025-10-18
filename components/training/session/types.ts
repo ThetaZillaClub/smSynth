@@ -54,7 +54,7 @@ export type RhythmConfig =
       numIntervals: number;
     } & RhythmCommon);
 
-export type ViewMode = "piano" | "sheet";
+export type ViewMode = "piano" | "sheet" | "polar";
 
 export type SessionConfig = {
   bpm: number;
@@ -86,8 +86,21 @@ export type SessionConfig = {
   /** NEW: Looping mode (auto-continue after REST). */
   loopingMode: boolean;
 
+  /**
+   * NEW: Treat the whole record window as a single free-timing response.
+   * Scoring ignores rhythmic alignment & bins; one score per take.
+   */
+  timingFreeResponse?: boolean;
+
   /** Absolute tonic(s) to anchor exercises (each T defines [T, T+12]). */
   tonicMidis?: number[] | null;
+
+  /**
+   * When multiple tonic windows fit the user's range (e.g., A2 and A3),
+   * include the upper-most window as well. Default: true.
+   * Set false to force only the lower tonic window.
+   */
+  includeUpperTonic?: boolean;
 
   /** Random mode — also allow notes below/above the selected windows. */
   randomIncludeUnder?: boolean;
@@ -162,7 +175,11 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   /** NEW default: auto-continue like today unless user turns it off in curriculum */
   loopingMode: true,
 
+  /** NEW: default off; courses (e.g., Pitch Tune) can enable it */
+  timingFreeResponse: false,
+
   tonicMidis: null,
+  includeUpperTonic: true,
   randomIncludeUnder: false,
   randomIncludeOver: false,
 

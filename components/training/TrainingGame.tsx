@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -36,7 +36,7 @@ import type { CourseDef, LessonDef } from "@/lib/courses/types";
 // NEW: course navigation panel
 import CourseNavPanel from "./layout/stage/side-panel/CourseNavPanel";
 
-type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean; };
+type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean };
 
 type Props = {
   title?: string;
@@ -77,9 +77,18 @@ export default function TrainingGame({
 
   const step = "play" as const;
   const {
-    bpm, ts, leadBars, restBars, noteValue, noteDurSec,
-    callResponseSequence, exerciseLoops, regenerateBetweenTakes,
-    metronome, loopingMode, gestureLatencyMs = 90,
+    bpm,
+    ts,
+    leadBars,
+    restBars,
+    noteValue,
+    noteDurSec,
+    callResponseSequence,
+    exerciseLoops,
+    regenerateBetweenTakes,
+    metronome,
+    loopingMode,
+    gestureLatencyMs = 90,
   } = sessionEff;
 
   // Phrase + clef
@@ -93,8 +102,11 @@ export default function TrainingGame({
   const phrase: Phrase | null = fabric.phrase;
 
   const melodyClef = useMelodyClef({
-    phrase, scale: sessionEff.scale, sessionConfig: sessionEff,
-    lowHz: lowHz ?? null, highHz: highHz ?? null,
+    phrase,
+    scale: sessionEff.scale,
+    sessionConfig: sessionEff,
+    lowHz: lowHz ?? null,
+    highHz: highHz ?? null,
   });
 
   // Timing windows
@@ -116,7 +128,11 @@ export default function TrainingGame({
 
   // IO
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {
-    enabled: true, fps: 50, minDb: -45, smoothing: 2, centsTolerance: 3,
+    enabled: true,
+    fps: 50,
+    minDb: -45,
+    smoothing: 2,
+    centsTolerance: 3,
   });
   const liveHz = typeof pitch === "number" ? pitch : null;
 
@@ -133,10 +149,19 @@ export default function TrainingGame({
 
   const pretest = usePretest({
     sequence: callResponseSequence ?? [],
-    bpm, ts,
+    bpm,
+    ts,
     scale: sessionEff.scale ?? { tonicPc: 0, name: "major" },
-    lowHz: lowHz ?? null, highHz: highHz ?? null,
-    player: { playA440: async (s) => { await playA440(s); }, playMidiList: async (m, d) => { await playMidiList(m, d); } },
+    lowHz: lowHz ?? null,
+    highHz: highHz ?? null,
+    player: {
+      playA440: async (s) => {
+        await playA440(s);
+      },
+      playMidiList: async (m, d) => {
+        await playMidiList(m, d);
+      },
+    },
   });
 
   const pretestRequired = (callResponseSequence?.length ?? 0) > 0;
@@ -153,36 +178,112 @@ export default function TrainingGame({
   const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled && visionEnabled;
 
   // Recorder + loop
-  const { isRecording, start: startRec, stop: stopRec, startedAtMs, warm: warmRecorder } =
-    useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
+  const {
+    isRecording,
+    start: startRec,
+    stop: stopRec,
+    startedAtMs,
+    warm: warmRecorder,
+  } = useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
+
+  // Lead-in cue behavior:
+  // For courses like Pitch Tune (polar view), we *don't* want metronome ticks.
+  // Instead, during the lead-in we play the content cue (first bar / phrase).
+  const metronomeEff = sessionEff.view === "polar" ? false : !!metronome;
+
+  const handleEnterPlay = useCallback(() => {
+    // Only for the main exercise (not pretest), and only when metronome is off.
+    if (pretestActive || metronomeEff) return;
+
+    try {
+      stopPlayback();
+      if (phrase) {
+        const baseOpts = {
+          bpm,
+          tsNum: ts.num,
+          tsDen: ts.den,
+          a4Hz: 440,
+          metronome: false,
+        } as const;
+
+        if (fabric.melodyRhythm && fabric.melodyRhythm.length > 0) {
+          // For Pitch Tune this is typically a single whole note (one bar), which is exactly the desired cue.
+          void playMelodyAndRhythm(phrase, fabric.melodyRhythm, {
+            ...baseOpts,
+            startAtPerfMs: null,
+          });
+        } else {
+          void playPhrase(phrase, {
+            ...baseOpts,
+            leadBars: 0,
+          });
+        }
+      }
+    } catch {}
+  }, [
+    pretestActive,
+    metronomeEff,
+    phrase,
+    fabric.melodyRhythm,
+    playMelodyAndRhythm,
+    playPhrase,
+    stopPlayback,
+    bpm,
+    ts.num,
+    ts.den,
+  ]);
 
   const loop = usePracticeLoop({
-    step, lowHz: lowHz ?? null, highHz: highHz ?? null, phrase, words: fabric.words,
-    windowOnSec: recordWindowSec, windowOffSec: restSec, preRollSec: leadInSec,
-    maxTakes: MAX_TAKES, maxSessionSec: MAX_SESSION_SEC,
-    isRecording, startedAtMs: startedAtMs ?? null,
-    callResponse: false, callWindowSec: 0, onStartCall: undefined,
-    onAdvancePhrase: () => { if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1); },
-    onEnterPlay: () => {},
+    step,
+    lowHz: lowHz ?? null,
+    highHz: highHz ?? null,
+    phrase,
+    words: fabric.words,
+    windowOnSec: recordWindowSec,
+    windowOffSec: restSec,
+    preRollSec: leadInSec,
+    maxTakes: MAX_TAKES,
+    maxSessionSec: MAX_SESSION_SEC,
+    isRecording,
+    startedAtMs: startedAtMs ?? null,
+    callResponse: false,
+    callWindowSec: 0,
+    onStartCall: undefined,
+    onAdvancePhrase: () => {
+      if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1);
+    },
+    onEnterPlay: handleEnterPlay, // ← content-as-lead-in instead of metronome when applicable
     autoContinue: !!loopingMode,
-    onRestComplete: () => { if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1); },
+    onRestComplete: () => {
+      if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
+    },
   });
 
   const shouldRecord =
     (pretestActive && pretest.shouldRecord) || (!pretestActive && loop.shouldRecord);
-  useRecorderAutoSync({ enabled: step === "play", shouldRecord, isRecording, startRec, stopRec });
+  useRecorderAutoSync({
+    enabled: step === "play",
+    shouldRecord,
+    isRecording,
+    startRec,
+    stopRec,
+  });
 
   useLeadInMetronome({
-    enabled: exerciseUnlocked, metronome, leadBeats,
-    loopPhase: loop.loopPhase, anchorMs: loop.anchorMs,
-    playLeadInTicks, secPerBeat,
+    enabled: exerciseUnlocked,
+    metronome: metronomeEff, // ← disable ticks for polar (Pitch Tune); we provide content cue instead
+    leadBeats,
+    loopPhase: loop.loopPhase,
+    anchorMs: loop.anchorMs,
+    playLeadInTicks,
+    secPerBeat,
   });
 
   const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
 
   // Pitch sampler
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
-  const samplerAnchor: number | null = !pretestActive ? (loop.anchorMs ?? null) : null;
+  const samplerAnchor: number | null = !pretestActive ? loop.anchorMs ?? null : null;
   const sampler = usePitchSampler({
     active: samplerActive,
     anchorMs: samplerAnchor,
@@ -204,8 +305,12 @@ export default function TrainingGame({
   // warm audio I/O
   useEffect(() => {
     (async () => {
-      try { await warmPlayer(); } catch {}
-      try { await warmRecorder(); } catch {}
+      try {
+        await warmPlayer();
+      } catch {}
+      try {
+        await warmRecorder();
+      } catch {}
     })();
   }, [warmPlayer, warmRecorder]);
 
@@ -241,30 +346,34 @@ export default function TrainingGame({
   });
 
   // Footer actions
-  const {
-    footerTonicLabel, footerArpLabel,
-    playFooterTonic, playFooterArp,
-  } = useFooterActions({
-    lowHz,
-    bpm,
-    den: ts.den,
-    tsNum: ts.num,
-    scaleName: sessionEff.scale?.name ?? "major",
-    tonicPc: sessionEff.scale?.tonicPc ?? 0,
-    playMidiList,
-  });
+  const { footerTonicLabel, footerArpLabel, playFooterTonic, playFooterArp } =
+    useFooterActions({
+      lowHz,
+      bpm,
+      den: ts.den,
+      tsNum: ts.num,
+      scaleName: sessionEff.scale?.name ?? "major",
+      tonicPc: sessionEff.scale?.tonicPc ?? 0,
+      playMidiList,
+    });
 
   // UI state
   const showLyrics = step === "play" && !!fabric.words?.length;
   const readinessError =
-    (rangeError ? `Range load failed: ${rangeError}` :
-      (!rangeLoading && (lowHz == null || highHz == null) ? "No saved range found. Please set your vocal range first." : null));
+    rangeError
+      ? `Range load failed: ${rangeError}`
+      : !rangeLoading && (lowHz == null || highHz == null)
+      ? "No saved range found. Please set your vocal range first."
+      : null;
   const showExercise = !pretestActive;
   const running = showExercise && loop.running;
   const startAtMs = showExercise ? loop.anchorMs : null;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
-  const uiRunning = pretestActive ? running : (loop.loopPhase !== "rest" ? running : false);
-  const onToggleExercise = () => { if (!(!pretestRequired || pretest.status === "done")) return; loop.toggle(); };
+  const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
+  const onToggleExercise = () => {
+    if (!(!pretestRequired || pretest.status === "done")) return;
+    loop.toggle();
+  };
 
   const showFooterSessionPanel = !!phrase && !pretestActive;
   const completedTakes = loop.takeCount ?? 0;
@@ -275,7 +384,11 @@ export default function TrainingGame({
 
   const currentPretestKind =
     (callResponseSequence?.[pretest.modeIndex]?.kind as
-      | "single_tonic" | "derived_tonic" | "guided_arpeggio" | "internal_arpeggio" | undefined) ?? undefined;
+      | "single_tonic"
+      | "derived_tonic"
+      | "guided_arpeggio"
+      | "internal_arpeggio"
+      | undefined) ?? undefined;
 
   // Side panel (memoized)
   const sidePanel = useSidePanel({
@@ -284,7 +397,12 @@ export default function TrainingGame({
     pretestRunning: pretest.running,
     pretestInResponse: pretest.status === "response",
     currentPretestKind,
-    pretestStart: () => { loop.clearAll(); stopPlayback(); stopRec().catch(() => {}); pretest.start(); },
+    pretestStart: () => {
+      loop.clearAll();
+      stopPlayback();
+      stopRec().catch(() => {});
+      pretest.start();
+    },
     continueResponse: pretest.continueResponse,
     bpm,
     tsNum: ts.num,
@@ -304,26 +422,40 @@ export default function TrainingGame({
   });
 
   const footerTonicAction = exerciseUnlocked
-    ? { label: footerTonicLabel, onClick: playFooterTonic, disabled: false, title: "Play tonic" }
+    ? {
+        label: footerTonicLabel,
+        onClick: playFooterTonic,
+        disabled: false,
+        title: "Play tonic",
+      }
     : undefined;
 
   const footerArpAction = exerciseUnlocked
-    ? { label: footerArpLabel, onClick: playFooterArp, disabled: false, title: "Play arpeggio" }
+    ? {
+        label: footerArpLabel,
+        onClick: playFooterArp,
+        disabled: false,
+        title: "Play arpeggio",
+      }
     : undefined;
 
   // ───────────────────────────────────────────────────────────────
   // Stage view routing: switch to analytics after the last take
   // ───────────────────────────────────────────────────────────────
-  const sessionComplete = !pretestActive && completedTakes >= MAX_TAKES && sessionScores.length >= MAX_TAKES;
-  const stageView: "piano" | "sheet" | "analytics" =
-    sessionComplete ? "analytics" : (sessionEff.view === "sheet" ? "sheet" : "piano");
+  const sessionComplete =
+    !pretestActive && completedTakes >= MAX_TAKES && sessionScores.length >= MAX_TAKES;
+  const stageView: "piano" | "sheet" | "polar" | "analytics" = sessionComplete
+    ? "analytics"
+    : ((sessionEff.view as "piano" | "sheet" | "polar"));
 
   // ───────────────────────────────────────────────────────────────
   // Analytics → Course / Lesson navigation (REAL registry only)
   // ───────────────────────────────────────────────────────────────
 
   // Resolve current course from param; if missing, try to find by lesson slug.
-  let currentCourse: CourseDef | undefined = courseSlugParam ? findCourse(courseSlugParam) : undefined;
+  let currentCourse: CourseDef | undefined = courseSlugParam
+    ? findCourse(courseSlugParam)
+    : undefined;
   if (!currentCourse && lessonSlug) {
     currentCourse = COURSES.find((c) => c.lessons.some((l) => l.slug === lessonSlug));
   }
@@ -333,15 +465,19 @@ export default function TrainingGame({
 
   // Prev/Next within the *current course* (only real lessons)
   const { prevLessonRef, nextLessonRef } = (() => {
-    if (!currentCourse || !currentLesson) return { prevLessonRef: null, nextLessonRef: null };
+    if (!currentCourse || !currentLesson)
+      return { prevLessonRef: null, nextLessonRef: null };
     const idx = currentCourse.lessons.findIndex((l) => l.slug === currentLesson.slug);
     const prev = idx > 0 ? currentCourse.lessons[idx - 1] : null;
-    const next = idx >= 0 && idx < currentCourse.lessons.length - 1 ? currentCourse.lessons[idx + 1] : null;
+    const next =
+      idx >= 0 && idx < currentCourse.lessons.length - 1
+        ? currentCourse.lessons[idx + 1]
+        : null;
 
     const toRef = (c: CourseDef, l: LessonDef) => ({
       slug: `${c.slug}/${l.slug}`, // path part used by onGoTo
       title: l.title,
-      summary: l.summary,          // << provide summary for card subtext
+      summary: l.summary, // << provide summary for card subtext
     });
     return {
       prevLessonRef: prev ? toRef(currentCourse, prev) : null,
@@ -385,7 +521,7 @@ export default function TrainingGame({
       uiRunning={uiRunning}
       onToggle={onToggleExercise}
       phrase={phrase ?? undefined}
-      lyrics={showLyrics ? (fabric.words ?? undefined) : undefined}
+      lyrics={showLyrics ? fabric.words ?? undefined : undefined}
       livePitchHz={liveHz}
       confidence={confidence}
       confThreshold={CONF_THRESHOLD}
@@ -406,8 +542,8 @@ export default function TrainingGame({
       highHz={highHz ?? null}
       sessionPanel={footerSessionPanel}
       sidePanel={sidePanel}
-      tonicPc={exerciseUnlocked ? (sessionEff.scale?.tonicPc ?? null) : null}
-      scaleName={exerciseUnlocked ? (sessionEff.scale?.name ?? null) : null}
+      tonicPc={exerciseUnlocked ? sessionEff.scale?.tonicPc ?? null : null}
+      scaleName={exerciseUnlocked ? sessionEff.scale?.name ?? null : null}
       tonicAction={footerTonicAction}
       arpAction={footerArpAction}
       // NEW: provide analytics data for the stage when session completes

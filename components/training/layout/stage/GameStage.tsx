@@ -21,7 +21,7 @@ import type { ScaleName } from "@/utils/phrase/scales";
 import SessionAnalytics from "./analytics/SessionAnalytics";
 import type { TakeScore } from "@/utils/scoring/score";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
-
+import TuneView from "./polar-tune/TuneView";
 /* ────────────────────────────────────────────────────────────── */
 /* Types                                                          */
 /* ────────────────────────────────────────────────────────────── */
@@ -59,7 +59,7 @@ type Props = {
   tsNum?: number;
   leadBars?: number;
   keySig?: string | null;
-  view?: "piano" | "sheet" | "analytics";
+  view?: "piano" | "sheet" | "polar" | "analytics";
   lowHz?: number | null;
   highHz?: number | null;
   clef?: "treble" | "bass" | null;
@@ -274,8 +274,7 @@ function MainStageView({
   const hasPhrase =
     !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
   const showRhythm = !!(rhythm && rhythm.length);
-  const wantRhythm = hasPhrase && showRhythm && view !== "sheet";
-
+  const wantRhythm = hasPhrase && showRhythm && view !== "sheet" && view !== "polar";
   // Make the rhythm lane EXACTLY one piano-roll row high.
   // Piano roll is 1 octave of rows → 13 cells (inclusive upper line).
   // Solve for main + rhythm + gap = fillH:
@@ -368,6 +367,19 @@ function MainStageView({
                   ) : null}
                 </div>
               </div>
+          ) : view === "polar" ? (
+            <div className="w-full" style={{ height: mainH }}>
+              <TuneView
+                phrase={phrase ?? null}
+                liveHz={livePitchHz ?? null}
+                confidence={confidence ?? 0}
+                confThreshold={confThreshold ?? 0.5}
+                tonicPc={typeof tonicPc === "number" ? tonicPc : 0}
+                scaleName={(scaleName as SolfegeScaleName) ?? "major"}
+                title="Match the target"
+              />
+            </div>
+
             ) : (
               <PianoRollCanvas
                 height={mainH}
