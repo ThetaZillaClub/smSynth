@@ -58,8 +58,8 @@ export function HomeResultsProvider({ children }: { children: React.ReactNode })
         // Keep chronology for any UI pieces that expect ascending time
         const rows: Row[] = [...newestFirst].reverse();
 
-        // Latest 30 IDs for downstream consumers (e.g., PitchFocusCard)
-        const recentIds: string[] = newestFirst.slice(0, 30).map((r) => r.id);
+        // Latest 50 IDs for downstream consumers (e.g., PitchFocusCard)
+        const recentIds: string[] = newestFirst.slice(0, 50).map((r) => r.id);
 
         if (!cancelled) {
           setState({ rows, recentIds, loading: false, error: null });

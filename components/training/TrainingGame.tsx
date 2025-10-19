@@ -1,7 +1,7 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useState, useEffect, useRef } from "react";
-import { useRouter, useParams } from "next/navigation";
+import React, { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
 import useWavRecorder from "@/hooks/audio/useWavRecorder";
@@ -29,12 +29,12 @@ import { useVisionBeatRunner } from "@/hooks/vision/useVisionBeatRunner";
 import { useFooterActions } from "@/hooks/gameplay/useFooterActions";
 import { useScoringLifecycle } from "@/hooks/gameplay/useScoringLifecycle";
 
-// NEW: course registry (actual lessons)
-import { COURSES, findCourse } from "@/lib/courses/registry";
-import type { CourseDef, LessonDef } from "@/lib/courses/types";
-
-// NEW: course navigation panel
-import CourseNavPanel from "./layout/stage/side-panel/CourseNavPanel";
+// NEW: timing-free capture helper (early end + progress ring)
+import useTimingFreeCapture from "@/hooks/gameplay/useTimingFreeCapture";
+// NEW: content cue hook (lead-in)
+import useContentLeadInCue from "@/hooks/gameplay/useContentLeadInCue";
+// NEW: compact course/lesson nav gate
+import CourseNavGate from "./layout/stage/side-panel/CourseNavGate";
 
 type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean };
 
@@ -59,7 +59,6 @@ export default function TrainingGame({
   lessonSlug = null,
   sessionId = null,
 }: Props) {
-  const router = useRouter();
   const params = useParams<{ course?: string; lesson?: string }>();
   const courseSlugParam = (params?.course as string | undefined) ?? undefined;
 
@@ -250,52 +249,22 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // Per-take content cue during LEAD-IN (Pitch Tune / polar view).
-  useEffect(() => {
-    const wantContentLeadIn = exerciseUnlocked && !pretestActive && !metronomeEff;
-    if (!wantContentLeadIn) return;
-    if (loop.loopPhase !== "lead-in") return;
-    if (!phrase) return;
-
-    try {
-      // stop anything previously scheduled before we align the cue
-      stopPlayback();
-      const baseOpts = {
-        bpm,
-        tsNum: ts.num,
-        tsDen: ts.den,
-        a4Hz: 440,
-        metronome: false,
-      } as const;
-
-      if (fabric.melodyRhythm && fabric.melodyRhythm.length > 0) {
-        void playMelodyAndRhythm(phrase, fabric.melodyRhythm, {
-          ...baseOpts,
-          startAtPerfMs: loop.anchorMs ?? null,
-        });
-      } else {
-        void playPhrase(phrase, {
-          ...baseOpts,
-          leadBars: 0,
-          startAtPerfMs: loop.anchorMs ?? null,
-        } as any);
-      }
-    } catch {}
-  }, [
-    exerciseUnlocked,
+  // NEW: Per-take content cue during LEAD-IN extracted to a hook
+  useContentLeadInCue({
+    enabled: exerciseUnlocked,
     pretestActive,
-    metronomeEff,
-    loop.loopPhase,
-    loop.anchorMs,
+    metronomeEnabled: metronomeEff,
+    loopPhase: loop.loopPhase,
+    anchorMs: loop.anchorMs,
     phrase,
-    fabric.melodyRhythm,
-    playMelodyAndRhythm,
-    playPhrase,
-    stopPlayback,
+    melodyRhythm: fabric.melodyRhythm ?? null,
     bpm,
-    ts.num,
-    ts.den,
-  ]);
+    tsNum: ts.num,
+    tsDen: ts.den,
+    playPhrase,
+    playMelodyAndRhythm,
+    stopPlayback,
+  });
 
   const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
 
@@ -469,165 +438,32 @@ export default function TrainingGame({
       }
     : undefined;
 
-  // ───────────────────────────────────────────────────────────────
-  // NEW: early-end in timing-free mode after N seconds of confident audio
-  // ───────────────────────────────────────────────────────────────
-  const confidentStreakStartMsRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (!timingFreeResponse || pretestActive) {
-      confidentStreakStartMsRef.current = null;
-      return;
-    }
-    if (loop.loopPhase !== "record") {
-      confidentStreakStartMsRef.current = null;
-      return;
-    }
-
-    const isConfident =
-      typeof liveHz === "number" &&
-      liveHz > 0 &&
-      typeof confidence === "number" &&
-      confidence >= CONF_THRESHOLD;
-
-    const now = performance.now();
-
-    if (isConfident) {
-      if (confidentStreakStartMsRef.current == null) {
-        confidentStreakStartMsRef.current = now;
-      } else {
-        const elapsed = (now - confidentStreakStartMsRef.current) / 1000;
-        if (elapsed >= minCaptureSecEff) {
-          // End the take early; hook guards against wrong phases internally.
-          loop.endRecordEarly();
-          confidentStreakStartMsRef.current = null; // avoid double-fire
-        }
-      }
-    } else {
-      // reset streak when signal drops
-      confidentStreakStartMsRef.current = null;
-    }
-  }, [
-    timingFreeResponse,
-    pretestActive,
-    loop.loopPhase,
+  // NEW: timing-free capture (auto-end + polar progress ring)
+  const { centerProgress01 } = useTimingFreeCapture({
+    enabled: !!timingFreeResponse && !pretestActive,
+    loopPhase: loop.loopPhase,
     liveHz,
     confidence,
-    minCaptureSecEff,
-    loop,
-  ]);
+    minCaptureSec: minCaptureSecEff,
+    threshold: CONF_THRESHOLD,
+    endRecordEarly: loop.endRecordEarly,
+  });
 
-  // ───────────────────────────────────────────────────────────────
-  // Polar center progress ring (CONFIDENCE-BASED, timing-free only)
-  // - Fills 0→1 while the user maintains a confident tone.
-  // - Independent of record window length.
-  // - No pulse; no snap to 100% unless you've truly reached the threshold.
-  // ───────────────────────────────────────────────────────────────
-  const [centerProgress01, setCenterProgress01] = useState<number>(0);
-  useEffect(() => {
-    let raf = 0;
-    let runningAnim = true;
-
-    const animate = () => {
-      if (!runningAnim) return;
-
-      if (timingFreeResponse && !pretestActive && loop.loopPhase === "record") {
-        const start = confidentStreakStartMsRef.current;
-        if (typeof start === "number" && minCaptureSecEff > 0) {
-          const elapsed = (performance.now() - start) / 1000;
-          const frac = Math.max(0, Math.min(1, elapsed / minCaptureSecEff));
-          setCenterProgress01(frac);
-        } else {
-          // either no confident streak yet or confidence dropped
-          setCenterProgress01(0);
-        }
-      } else {
-        // outside of timing-free RECORD, keep ring empty
-        setCenterProgress01(0);
-      }
-
-      raf = requestAnimationFrame(animate);
-    };
-
-    raf = requestAnimationFrame(animate);
-    return () => {
-      runningAnim = false;
-      cancelAnimationFrame(raf);
-    };
-  }, [timingFreeResponse, pretestActive, loop.loopPhase, minCaptureSecEff]);
-
-  // ───────────────────────────────────────────────────────────────
   // Stage view routing: switch to analytics after the last take
-  // ───────────────────────────────────────────────────────────────
   const sessionComplete =
     !pretestActive && completedTakes >= MAX_TAKES && sessionScores.length >= MAX_TAKES;
   const stageView: "piano" | "sheet" | "polar" | "analytics" = sessionComplete
     ? "analytics"
     : ((sessionEff.view as "piano" | "sheet" | "polar"));
 
-  // ───────────────────────────────────────────────────────────────
-  // Analytics → Course / Lesson navigation (REAL registry only)
-  // ───────────────────────────────────────────────────────────────
-
-  // Resolve current course from param; if missing, try to find by lesson slug.
-  let currentCourse: CourseDef | undefined = courseSlugParam
-    ? findCourse(courseSlugParam)
-    : undefined;
-  if (!currentCourse && lessonSlug) {
-    currentCourse = COURSES.find((c) => c.lessons.some((l) => l.slug === lessonSlug));
-  }
-
-  const currentLesson: LessonDef | undefined =
-    currentCourse?.lessons.find((l) => l.slug === lessonSlug) ?? undefined;
-
-  // Prev/Next within the *current course* (only real lessons)
-  const { prevLessonRef, nextLessonRef } = (() => {
-    if (!currentCourse || !currentLesson)
-      return { prevLessonRef: null, nextLessonRef: null };
-    const idx = currentCourse.lessons.findIndex((l) => l.slug === currentLesson.slug);
-    const prev = idx > 0 ? currentCourse.lessons[idx - 1] : null;
-    const next =
-      idx >= 0 && idx < currentCourse.lessons.length - 1
-        ? currentCourse.lessons[idx + 1]
-        : null;
-
-    const toRef = (c: CourseDef, l: LessonDef) => ({
-      slug: `${c.slug}/${l.slug}`, // path part used by onGoTo
-      title: l.title,
-      summary: l.summary, // << provide summary for card subtext
-    });
-    return {
-      prevLessonRef: prev ? toRef(currentCourse, prev) : null,
-      nextLessonRef: next ? toRef(currentCourse, next) : null,
-    };
-  })();
-
-  const onGoToPath = (slugPath: string) => {
-    // slugPath is "courseSlug/lessonSlug"
-    router.push(`/courses/${slugPath}`);
-  };
-
-  const onRepeat = () => {
-    // Refresh current lesson page → new session id upstream
-    router.refresh();
-  };
-
-  const analyticsSidePanel = sessionComplete ? (
-    <CourseNavPanel
-      currentLesson={
-        currentCourse && currentLesson
-          ? {
-              slug: `${currentCourse.slug}/${currentLesson.slug}`,
-              title: currentLesson.title,
-              summary: currentLesson.summary, // << show summary on Repeat card
-            }
-          : undefined
-      }
-      prevLesson={prevLessonRef ?? undefined}
-      nextLesson={nextLessonRef ?? undefined}
-      onGoTo={onGoToPath}
-      onRepeat={onRepeat}
+  // Analytics side panel via the compact gate component
+  const analyticsSidePanel = (
+    <CourseNavGate
+      courseSlugParam={courseSlugParam}
+      lessonSlug={lessonSlug}
+      sessionComplete={sessionComplete}
     />
-  ) : null;
+  );
 
   return (
     <GameLayout

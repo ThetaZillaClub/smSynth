@@ -3,7 +3,7 @@ import type { CourseDef } from "../types";
 import type { SessionConfig } from "@/components/training/session/types";
 
 const BASE: Partial<SessionConfig> = {
-  bpm: 100,                // ← bump from 80 to 100 for this course
+  bpm: 120,                // ← bump from 80 to 100 for this course
   view: "polar",
   metronome: true,
   callResponse: true,
