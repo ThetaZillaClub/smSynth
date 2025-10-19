@@ -40,32 +40,22 @@ export default function useTakeScoring() {
     return end;
   };
 
-  /**
-   * Build a "timing-free" single-note phrase whose duration equals the captured audio span.
-   * We keep the first note's MIDI as the target pitch anchor.
-   */
+  /** Flatten to single sustained note for timing-free scoring. */
   const buildTimingFreePhrase = (src: Phrase, durSec: number): Phrase => {
-    const midi = src?.notes?.[0]?.midi ?? 60; // fallback to C4 if missing
-    const base: Phrase = {
-      ...src,
-      durationSec: durSec,
-      notes: [{ midi, startSec: 0, durSec }],
-    };
-    return base;
+    const midi = src?.notes?.[0]?.midi ?? 60;
+    return { ...src, durationSec: durSec, notes: [{ midi, startSec: 0, durSec }] };
   };
 
-  const measureCapturedSpanSec = (samples: PitchSample[], confMin: number): number => {
+  /** First/last confident voiced timestamps in the raw capture. */
+  const voicedBounds = (
+    samples: PitchSample[],
+    confMin: number
+  ): { startSec: number; endSec: number } | null => {
     const voiced = samples
       .filter((s) => (s.hz ?? 0) > 0 && (s.conf ?? 0) >= confMin)
       .sort((a, b) => a.tSec - b.tSec);
-
-    if (voiced.length >= 2) {
-      const span = voiced[voiced.length - 1].tSec - voiced[0].tSec;
-      // Be conservative; clamp to a sane window
-      return Math.max(0.5, Math.min(span, 15));
-    }
-    // Worst case: tiny blip — still evaluate against a short, humane window
-    return 0.5;
+    if (!voiced.length) return null;
+    return { startSec: voiced[0].tSec, endSec: voiced[voiced.length - 1].tSec };
   };
 
   const scoreTake = useCallback((args: {
@@ -84,7 +74,7 @@ export default function useTakeScoring() {
     /** Relax/tighten scoring per mode */
     optionsOverride?: Partial<ScoreOptions>;
   }) => {
-    // ----- Defaults used by alignment & pitch/rhythm scoring
+    // Defaults for pitch/rhythm scoring
     const defaults: ScoreOptions = {
       confMin: 0.5,
       centsOk: 60,
@@ -94,44 +84,68 @@ export default function useTakeScoring() {
     };
     const opts: ScoreOptions = { ...defaults, ...(args.optionsOverride ?? {}) };
 
-    // ----- Detect "timing-free" intent (Pitch-Tune style): single capture with no rhythmic line
+    // Detect timing-free intent
     const isTimingFree =
       (args.melodyOnsetsSec?.length ?? 0) <= 1 &&
       (!args.rhythmOnsetsSec || args.rhythmOnsetsSec.length === 0);
 
-    // Snapshot raw samples BEFORE alignment to measure the actual captured span
+    // Snapshot BEFORE alignment
     const rawSamples = args.snapshotSamples();
 
-    // Choose evaluation phrase & aligned window length
+    // Choose evaluation phrase & window
     let phraseForEval: Phrase = args.phrase;
-    let evalPhraseLenSec =
-      args.phraseLengthOverrideSec ?? phraseWindowSec(args.phrase);
+    let evalPhraseLenSec = args.phraseLengthOverrideSec ?? phraseWindowSec(args.phrase);
+
+    // In timing-free: rebase to first voiced, and evaluate only the voiced span.
+    let extraOffsetSec: number | undefined = undefined;
+    let beatsRawForAlign: number[] = [];
+    let gestureLagForAlign = args.gestureLagSec;
 
     if (isTimingFree) {
-      // Use the *actual voiced span* as the evaluation window,
-      // then flatten to a single long note to avoid penalizing for non-sung time.
-      const spanSec = measureCapturedSpanSec(rawSamples, opts.confMin);
-      evalPhraseLenSec = spanSec;
-      phraseForEval = buildTimingFreePhrase(args.phrase, spanSec);
+      const vb = voicedBounds(rawSamples, opts.confMin);
+      if (vb) {
+        const spanSec = Math.max(0.5, Math.min(vb.endSec - vb.startSec, 15));
+        evalPhraseLenSec = spanSec;
+        phraseForEval = buildTimingFreePhrase(args.phrase, spanSec);
+
+        // Make first voiced frame map to ~t=0 for SAMPLES:
+        // align shifts by (leadIn + pitchLag + extraOffset) → choose extraOffset
+        // so t' = t - vb.startSec  (i.e., samples first-voice lands at 0).
+        extraOffsetSec = vb.startSec - args.leadInSec - args.pitchLagSec;
+
+        // For BEATS: feed an artificial event AT vb.startSec and make
+        // gestureLag == pitchLag for this align call so the beat lands at 0 too.
+        beatsRawForAlign = [vb.startSec];
+        gestureLagForAlign = args.pitchLagSec;
+      } else {
+        // No confident audio: keep legacy behavior
+        evalPhraseLenSec = 0.5;
+        phraseForEval = buildTimingFreePhrase(args.phrase, 0.5);
+        beatsRawForAlign = [0];
+      }
+    } else {
+      // Non timing-free: use the real gesture events
+      beatsRawForAlign = args.snapshotBeats();
     }
 
-    // Align samples & (optional) gesture beats to the evaluation window
+    // Align samples & beats to the evaluation window
     const { samples, beats } = args.align(
       rawSamples,
-      isTimingFree ? [0] : args.snapshotBeats(),
+      beatsRawForAlign,
       args.leadInSec,
       {
-        keepPreRollSec: 0.5,
+        keepPreRollSec: isTimingFree ? 0 : 0.5, // drop any pre-voice negatives
         phraseLengthSec: evalPhraseLenSec,
         tailGuardSec: 0.25,
         pitchLagSec: args.pitchLagSec,
-        gestureLagSec: args.gestureLagSec,
+        gestureLagSec: gestureLagForAlign,
+        extraOffsetSec, // only non-undefined in timing-free
         devAssert: process.env.NODE_ENV !== "production",
         consolePrefix: "score-align",
       }
     );
 
-    // Compute the take score against the *evaluation* phrase (possibly flattened)
+    // Final scoring (timing-free passes [0] as the sole melody onset)
     const score = computeTakeScore({
       phrase: phraseForEval,
       bpm: args.bpm,
@@ -149,6 +163,7 @@ export default function useTakeScoring() {
       },
     });
 
+    // session state
     setLastScore(score);
     setSessionScores((s) => [...s, score]);
     return score;

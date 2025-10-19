@@ -2,31 +2,20 @@
 import type { CourseDef } from "../types";
 import type { SessionConfig } from "@/components/training/session/types";
 
-/**
- * Simple single-pitch call & response in movable-do (major).
- * - Uses the POLAR tuner view.
- * - Call/Response enabled; metronome on.
- * - No rhythm detection/line for this course.
- * - User key choice is honored by gameplay settings.
- */
 const BASE: Partial<SessionConfig> = {
+  bpm: 100,                // ← bump from 80 to 100 for this course
   view: "polar",
   metronome: true,
   callResponse: true,
-  exerciseLoops: 6,
+  exerciseLoops: 4,
   regenerateBetweenTakes: true,
 
-  // KEY: single, timing-agnostic score per take
   timingFreeResponse: true,
-
-  // NEW: relax the record window and end early after 1s confident audio
   timingFreeMaxSec: 10,
   timingFreeMinCaptureSec: 1,
 
-  // keep solfege default
   scale: { name: "major", tonicPc: 0, maxPerDegree: 8 },
 
-  // keep recording windows simple; hide rhythm lane/detection
   rhythm: {
     mode: "random",
     available: ["whole"],
