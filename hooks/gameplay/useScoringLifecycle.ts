@@ -1,3 +1,4 @@
+// hooks/gameplay/useScoringLifecycle.ts
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { Phrase } from "@/utils/stage";
@@ -7,7 +8,7 @@ import { aggregateForSubmission } from "@/utils/scoring/aggregate";
 import type { TakeScore } from "@/utils/scoring/score";
 import type { PitchSample } from "@/utils/scoring/score";
 import type { ScoringAlignmentOptions } from "@/hooks/gameplay/useScoringAlignment";
-// Match your align function signature
+
 export type AlignFn = (
   samplesRaw: PitchSample[] | null | undefined,
   beatsRaw: number[] | null | undefined,
@@ -15,7 +16,6 @@ export type AlignFn = (
   opts?: ScoringAlignmentOptions
 ) => { samples: PitchSample[]; beats: number[] };
 
-// Match your scoreTake signature
 type ScoreTakeFn = (args: {
   phrase: Phrase;
   bpm: number;
@@ -28,6 +28,16 @@ type ScoreTakeFn = (args: {
   melodyOnsetsSec: number[];
   rhythmOnsetsSec?: number[] | null;
   align: AlignFn;
+  /** Clamp alignment/scoring length (seconds) */
+  phraseLengthOverrideSec?: number;
+  /** Adjust scoring tolerance per mode */
+  optionsOverride?: {
+    confMin?: number;
+    centsOk?: number;
+    onsetGraceMs?: number;
+    maxAlignMs?: number;
+    goodAlignMs?: number;
+  };
 }) => TakeScore;
 
 export type TakeSnapshot = {
@@ -64,6 +74,11 @@ type ScoringLifecycleArgs = {
   hand: HandLike;
 
   haveRhythm: boolean;
+
+  /** Timing-free: treat whole window as a single capture */
+  timingFreeResponse?: boolean;
+  /** Effective capture window used (seconds) */
+  freeCaptureSec?: number;
 };
 
 export function useScoringLifecycle(args: ScoringLifecycleArgs) {
@@ -87,11 +102,13 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     sampler,
     hand,
     haveRhythm,
+    timingFreeResponse = false,
+    freeCaptureSec,
   } = args;
 
   const [takeSnapshots, setTakeSnapshots] = useState<TakeSnapshot[]>([]);
 
-  // capture the exact phrase/rhythm chosen at lead-in
+  // Freeze content at lead-in
   const phraseForTakeRef = useRef<Phrase | null>(null);
   const rhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
   const melodyRhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
@@ -105,7 +122,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     }
   }, [pretestActive, loopPhase, phrase, rhythmEffective, melodyRhythm]);
 
-  // detect record->rest transition to score/submit/snapshot
+  // Record → Rest transition → score, snapshot, maybe submit aggregate
   const prevPhaseRef = useRef(loopPhase);
   useEffect(() => {
     const prev = prevPhaseRef.current;
@@ -116,8 +133,28 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
       const usedRhythm = rhythmForTakeRef.current ?? rhythmEffective;
       if (!usedPhrase) return;
 
-      const pitchLagSec = 0.02; // DEFAULT_PITCH_LATENCY_MS / 1000
+      const pitchLagSec = 0.02;
       const gestureLagSec = ((calibratedLatencyMs ?? gestureLatencyMs) || 0) / 1000;
+
+      // ── Timing-free adjustments:
+      //  - ignore rhythmic alignment pressure (beats=[0], onsets=[0])
+      //  - make pitch scoring slightly more forgiving
+      const snapshotBeats =
+        timingFreeResponse ? () => [0] : () => (haveRhythm ? hand.snapshotEvents() : []);
+
+      const melodyOnsets =
+        timingFreeResponse ? [0] : usedPhrase.notes.map((n) => n.startSec);
+
+      const rhythmOnsets =
+        timingFreeResponse ? undefined : makeOnsetsFromRhythm(usedRhythm, bpm, den);
+
+      const optionsOverride = timingFreeResponse
+        ? {
+            confMin: 0.45,    // a bit more tolerant on low-volume voices
+            centsOk: 80,      // widen "OK" window for pitch stability
+            onsetGraceMs: 160 // just in case any onset math remains
+          }
+        : undefined;
 
       const score = scoreTake({
         phrase: usedPhrase,
@@ -127,13 +164,18 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
         pitchLagSec,
         gestureLagSec,
         snapshotSamples: () => sampler.snapshot(),
-        snapshotBeats: () => (haveRhythm ? hand.snapshotEvents() : []),
-        melodyOnsetsSec: usedPhrase.notes.map((n) => n.startSec),
-        rhythmOnsetsSec: makeOnsetsFromRhythm(usedRhythm, bpm, den),
+        snapshotBeats,
+        melodyOnsetsSec: melodyOnsets,
+        rhythmOnsetsSec: rhythmOnsets ?? null,
         align: alignForScoring,
+        phraseLengthOverrideSec:
+          timingFreeResponse && typeof freeCaptureSec === "number" && freeCaptureSec > 0
+            ? freeCaptureSec
+            : undefined,
+        optionsOverride,
       });
 
-      // Submit aggregated row once we reach exerciseLoops
+      // Aggregate submit at end of session
       const totalTakesNow = sessionScores.length + 1;
       const maxTakes = Math.max(1, Number(exerciseLoops ?? 10));
 
@@ -160,7 +202,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
         }).catch(() => {});
       }
 
-      // side-panel snapshots
+      // Right-panel snapshots for analytics
       setTakeSnapshots((xs) => [
         ...xs,
         {
@@ -189,6 +231,8 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     sampler,
     hand,
     haveRhythm,
+    timingFreeResponse,
+    freeCaptureSec,
   ]);
 
   return { takeSnapshots };

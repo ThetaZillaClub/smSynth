@@ -92,6 +92,15 @@ export type SessionConfig = {
    */
   timingFreeResponse?: boolean;
 
+  /** (Timing-free) Max relaxed record window (seconds). Example: 10. */
+  timingFreeMaxSec?: number;
+
+  /**
+   * (Timing-free) Required consecutive detected/confident capture (seconds)
+   * before we end the take early. Example: 1.0.
+   */
+  timingFreeMinCaptureSec?: number;
+
   /** Absolute tonic(s) to anchor exercises (each T defines [T, T+12]). */
   tonicMidis?: number[] | null;
 
@@ -177,6 +186,10 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
 
   /** NEW: default off; courses (e.g., Pitch Tune) can enable it */
   timingFreeResponse: false,
+
+  /** Only read when timingFreeResponse === true (safe defaults) */
+  timingFreeMaxSec: 10,
+  timingFreeMinCaptureSec: 1,
 
   tonicMidis: null,
   includeUpperTonic: true,

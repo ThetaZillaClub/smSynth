@@ -13,14 +13,18 @@ type AlignFn = (
 ) => { samples: PitchSample[]; beats: number[] };
 
 type SubmitArgs = {
-  /** lesson slug for the API path: /api/lessons/[lesson]/results */
   lessonSlug: string;
-  /** your session UUID for the “Overall session” */
   sessionId: string;
-  /** 0-based index within the session */
   takeIndex: number;
-  /** optional extra payload to stash alongside the take */
   snapshots?: unknown;
+};
+
+type ScoreOptions = {
+  confMin: number;
+  centsOk: number;
+  onsetGraceMs: number;
+  maxAlignMs: number;
+  goodAlignMs: number;
 };
 
 export default function useTakeScoring() {
@@ -37,8 +41,33 @@ export default function useTakeScoring() {
   };
 
   /**
-   * Compute a TakeScore locally (no network). Existing callers can keep using this.
+   * Build a "timing-free" single-note phrase whose duration equals the captured audio span.
+   * We keep the first note's MIDI as the target pitch anchor.
    */
+  const buildTimingFreePhrase = (src: Phrase, durSec: number): Phrase => {
+    const midi = src?.notes?.[0]?.midi ?? 60; // fallback to C4 if missing
+    const base: Phrase = {
+      ...src,
+      durationSec: durSec,
+      notes: [{ midi, startSec: 0, durSec }],
+    };
+    return base;
+  };
+
+  const measureCapturedSpanSec = (samples: PitchSample[], confMin: number): number => {
+    const voiced = samples
+      .filter((s) => (s.hz ?? 0) > 0 && (s.conf ?? 0) >= confMin)
+      .sort((a, b) => a.tSec - b.tSec);
+
+    if (voiced.length >= 2) {
+      const span = voiced[voiced.length - 1].tSec - voiced[0].tSec;
+      // Be conservative; clamp to a sane window
+      return Math.max(0.5, Math.min(span, 15));
+    }
+    // Worst case: tiny blip — still evaluate against a short, humane window
+    return 0.5;
+  };
+
   const scoreTake = useCallback((args: {
     phrase: Phrase;
     bpm: number;
@@ -51,39 +80,72 @@ export default function useTakeScoring() {
     melodyOnsetsSec: number[];
     rhythmOnsetsSec?: number[] | null;
     align: AlignFn;
+    phraseLengthOverrideSec?: number;
+    /** Relax/tighten scoring per mode */
+    optionsOverride?: Partial<ScoreOptions>;
   }) => {
+    // ----- Defaults used by alignment & pitch/rhythm scoring
+    const defaults: ScoreOptions = {
+      confMin: 0.5,
+      centsOk: 60,
+      onsetGraceMs: 100,
+      maxAlignMs: 250,
+      goodAlignMs: 120,
+    };
+    const opts: ScoreOptions = { ...defaults, ...(args.optionsOverride ?? {}) };
+
+    // ----- Detect "timing-free" intent (Pitch-Tune style): single capture with no rhythmic line
+    const isTimingFree =
+      (args.melodyOnsetsSec?.length ?? 0) <= 1 &&
+      (!args.rhythmOnsetsSec || args.rhythmOnsetsSec.length === 0);
+
+    // Snapshot raw samples BEFORE alignment to measure the actual captured span
+    const rawSamples = args.snapshotSamples();
+
+    // Choose evaluation phrase & aligned window length
+    let phraseForEval: Phrase = args.phrase;
+    let evalPhraseLenSec =
+      args.phraseLengthOverrideSec ?? phraseWindowSec(args.phrase);
+
+    if (isTimingFree) {
+      // Use the *actual voiced span* as the evaluation window,
+      // then flatten to a single long note to avoid penalizing for non-sung time.
+      const spanSec = measureCapturedSpanSec(rawSamples, opts.confMin);
+      evalPhraseLenSec = spanSec;
+      phraseForEval = buildTimingFreePhrase(args.phrase, spanSec);
+    }
+
+    // Align samples & (optional) gesture beats to the evaluation window
     const { samples, beats } = args.align(
-      args.snapshotSamples(),
-      args.snapshotBeats(),
+      rawSamples,
+      isTimingFree ? [0] : args.snapshotBeats(),
       args.leadInSec,
       {
-        // keep a little grace before t=0 and clamp to the actual phrase window
         keepPreRollSec: 0.5,
-        phraseLengthSec: phraseWindowSec(args.phrase),
+        phraseLengthSec: evalPhraseLenSec,
         tailGuardSec: 0.25,
-        // per-pipeline lags
         pitchLagSec: args.pitchLagSec,
         gestureLagSec: args.gestureLagSec,
-        // helpful during dev
         devAssert: process.env.NODE_ENV !== "production",
         consolePrefix: "score-align",
       }
     );
 
+    // Compute the take score against the *evaluation* phrase (possibly flattened)
     const score = computeTakeScore({
-      phrase: args.phrase,
+      phrase: phraseForEval,
       bpm: args.bpm,
       den: args.den,
       samples,
       gestureEventsSec: beats,
-      melodyOnsetsSec: args.melodyOnsetsSec,
-      rhythmLineOnsetsSec: args.rhythmOnsetsSec ?? undefined,
+      melodyOnsetsSec: isTimingFree ? [0] : args.melodyOnsetsSec,
+      rhythmLineOnsetsSec: isTimingFree ? undefined : args.rhythmOnsetsSec ?? undefined,
       options: {
-        confMin: 0.5,
-        centsOk: 60,
-        onsetGraceMs: 100,
-        maxAlignMs: 250,
-        goodAlignMs: 120,
+        confMin: opts.confMin,
+        centsOk: opts.centsOk,
+        onsetGraceMs: opts.onsetGraceMs,
+        maxAlignMs: opts.maxAlignMs,
+        goodAlignMs: opts.goodAlignMs,
       },
     });
 
@@ -92,12 +154,7 @@ export default function useTakeScoring() {
     return score;
   }, []);
 
-  /**
-   * New: compute and immediately POST the combined score to the server.
-   * Returns the score and (if available) the inserted resultId from the API.
-   */
   const scoreTakeAndSubmit = useCallback(async (args: {
-    // scoring inputs (same as scoreTake)
     phrase: Phrase;
     bpm: number;
     den: number;
@@ -109,22 +166,23 @@ export default function useTakeScoring() {
     melodyOnsetsSec: number[];
     rhythmOnsetsSec?: number[] | null;
     align: AlignFn;
-    // submit inputs
     submit: SubmitArgs;
+    phraseLengthOverrideSec?: number;
+    optionsOverride?: Partial<ScoreOptions>;
   }): Promise<{ score: TakeScore; resultId?: string }> => {
     const {
       phrase, bpm, den, leadInSec, pitchLagSec, gestureLagSec,
       snapshotSamples, snapshotBeats, melodyOnsetsSec, rhythmOnsetsSec, align,
-      submit,
+      submit, phraseLengthOverrideSec, optionsOverride,
     } = args;
 
-    // 1) compute locally
     const score = scoreTake({
       phrase, bpm, den, leadInSec, pitchLagSec, gestureLagSec,
       snapshotSamples, snapshotBeats, melodyOnsetsSec, rhythmOnsetsSec, align,
+      phraseLengthOverrideSec,
+      optionsOverride,
     });
 
-    // 2) POST to API
     setPostError(null);
     setLastResultId(null);
     try {
@@ -135,7 +193,7 @@ export default function useTakeScoring() {
         body: JSON.stringify({
           sessionId: submit.sessionId,
           takeIndex: Math.max(0, Math.floor(submit.takeIndex)),
-          score, // full TakeScore (pitch, rhythm, intervals, final)
+          score,
           snapshots: submit.snapshots,
         }),
       });
@@ -160,7 +218,7 @@ export default function useTakeScoring() {
     lastScore,
     sessionScores,
     scoreTake,
-    scoreTakeAndSubmit, // ← use this after a take ends to compute + POST
+    scoreTakeAndSubmit,
     lastResultId,
     postError,
   };

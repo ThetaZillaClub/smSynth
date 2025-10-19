@@ -22,6 +22,7 @@ import SessionAnalytics from "./analytics/SessionAnalytics";
 import type { TakeScore } from "@/utils/scoring/score";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
 import TuneView from "./polar-tune/TuneView";
+
 /* ────────────────────────────────────────────────────────────── */
 /* Types                                                          */
 /* ────────────────────────────────────────────────────────────── */
@@ -275,6 +276,7 @@ function MainStageView({
     !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
   const showRhythm = !!(rhythm && rhythm.length);
   const wantRhythm = hasPhrase && showRhythm && view !== "sheet" && view !== "polar";
+
   // Make the rhythm lane EXACTLY one piano-roll row high.
   // Piano roll is 1 octave of rows → 13 cells (inclusive upper line).
   // Solve for main + rhythm + gap = fillH:
@@ -289,10 +291,7 @@ function MainStageView({
     const avail = fillH - GAP;
     const mainTarget = Math.round((avail * ROWS) / (ROWS + 1));
     mainH = Math.max(200, mainTarget);
-    rhythmH = Math.max(
-      0,
-      avail - mainH
-    ); /* ensures exact sum + exact single row height */
+    rhythmH = Math.max(0, avail - mainH); // ensures exact sum + exact single row height
   } else {
     mainH = Math.max(200, fillH);
     rhythmH = 0;

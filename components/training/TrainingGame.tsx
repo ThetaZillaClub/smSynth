@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -11,6 +11,7 @@ import useStudentRange from "@/hooks/students/useStudentRange";
 import usePhrasePlayer from "@/hooks/audio/usePhrasePlayer";
 import { barsToBeats } from "@/utils/time/tempo";
 import type { Phrase } from "@/utils/stage";
+import { useSidePanel } from "@/hooks/gameplay/useSidePanel";
 import { type SessionConfig, DEFAULT_SESSION_CONFIG } from "./session";
 import usePretest from "@/hooks/gameplay/usePretest";
 import { useExerciseFabric } from "@/hooks/gameplay/useExerciseFabric";
@@ -27,7 +28,6 @@ import { useTempoWindows } from "@/hooks/gameplay/useTempoWindows";
 import { useVisionBeatRunner } from "@/hooks/vision/useVisionBeatRunner";
 import { useFooterActions } from "@/hooks/gameplay/useFooterActions";
 import { useScoringLifecycle } from "@/hooks/gameplay/useScoringLifecycle";
-import { useSidePanel } from "@/hooks/gameplay/useSidePanel";
 
 // NEW: course registry (actual lessons)
 import { COURSES, findCourse } from "@/lib/courses/registry";
@@ -89,6 +89,10 @@ export default function TrainingGame({
     metronome,
     loopingMode,
     gestureLatencyMs = 90,
+    // NEW timing-free knobs
+    timingFreeResponse,
+    timingFreeMaxSec,
+    timingFreeMinCaptureSec,
   } = sessionEff;
 
   // Phrase + clef
@@ -109,7 +113,7 @@ export default function TrainingGame({
     highHz: highHz ?? null,
   });
 
-  // Timing windows
+  // Timing windows (musical baseline)
   const { secPerBeat, leadInSec, restSec, recordWindowSec } = useTempoWindows({
     bpm,
     tsNum: ts.num,
@@ -122,6 +126,15 @@ export default function TrainingGame({
     fallbackPhraseSecOverride: fabric.fallbackPhraseSec ?? null,
   });
   const leadBeats = barsToBeats(leadBars, ts.num);
+
+  // —— Effective record window: timing-free courses use a relaxed max window.
+  const recordWindowSecEff: number = timingFreeResponse
+    ? Math.max(0.5, Number.isFinite(timingFreeMaxSec ?? NaN) ? (timingFreeMaxSec as number) : 10)
+    : recordWindowSec;
+
+  const minCaptureSecEff: number = timingFreeResponse
+    ? Math.max(0.1, Number.isFinite(timingFreeMinCaptureSec ?? NaN) ? (timingFreeMinCaptureSec as number) : 1)
+    : 0; // unused otherwise
 
   const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 10));
   const MAX_SESSION_SEC = 15 * 60;
@@ -197,7 +210,7 @@ export default function TrainingGame({
     highHz: highHz ?? null,
     phrase,
     words: fabric.words,
-    windowOnSec: recordWindowSec,
+    windowOnSec: recordWindowSecEff, // ← use effective window for timing-free mode
     windowOffSec: restSec,
     preRollSec: leadInSec,
     maxTakes: MAX_TAKES,
@@ -353,6 +366,10 @@ export default function TrainingGame({
     sampler,
     hand,
     haveRhythm,
+
+    // NEW: make scoring timing-agnostic for timing-free courses
+    timingFreeResponse: !!timingFreeResponse,
+    freeCaptureSec: recordWindowSecEff,
   });
 
   // Footer actions
@@ -451,6 +468,50 @@ export default function TrainingGame({
         title: "Play arpeggio",
       }
     : undefined;
+
+  // ───────────────────────────────────────────────────────────────
+  // NEW: early-end in timing-free mode after N seconds of confident audio
+  // ───────────────────────────────────────────────────────────────
+  const confidentStreakStartMsRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!timingFreeResponse || pretestActive) {
+      confidentStreakStartMsRef.current = null;
+      return;
+    }
+    if (loop.loopPhase !== "record") {
+      confidentStreakStartMsRef.current = null;
+      return;
+    }
+
+    const isConfident =
+      typeof liveHz === "number" && liveHz > 0 && typeof confidence === "number" && confidence >= CONF_THRESHOLD;
+
+    const now = performance.now();
+
+    if (isConfident) {
+      if (confidentStreakStartMsRef.current == null) {
+        confidentStreakStartMsRef.current = now;
+      } else {
+        const elapsed = (now - confidentStreakStartMsRef.current) / 1000;
+        if (elapsed >= minCaptureSecEff) {
+          // End the take early; hook guards against wrong phases internally.
+          loop.endRecordEarly();
+          confidentStreakStartMsRef.current = null; // avoid double-fire
+        }
+      }
+    } else {
+      // reset streak when signal drops
+      confidentStreakStartMsRef.current = null;
+    }
+  }, [
+    timingFreeResponse,
+    pretestActive,
+    loop.loopPhase,
+    liveHz,
+    confidence,
+    minCaptureSecEff,
+    loop,
+  ]);
 
   // ───────────────────────────────────────────────────────────────
   // Stage view routing: switch to analytics after the last take

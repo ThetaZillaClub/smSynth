@@ -55,6 +55,11 @@ type ReturnShape = {
   clearAll: () => void;
   /** Anchor for UI overlays (ms since perf.now) at the start of pre-roll. */
   anchorMs: number | null;
+  /**
+   * NEW: For timing-free courses, allows the caller to end the RECORD phase early
+   * (e.g., once enough confident audio has been captured).
+   */
+  endRecordEarly: () => void;
 };
 
 export default function usePracticeLoop({
@@ -202,6 +207,24 @@ export default function usePracticeLoop({
     }, delayMs);
   }, [canRun, isSessionCapped, capOrIdle, preRollSec]);
 
+  // ─────────────────────────────────────────────────────────────
+  // SINGLE place that performs "record → rest" transition
+  // (no counting here anymore; counting moved to a phase-transition watcher)
+  // ─────────────────────────────────────────────────────────────
+  const endRecordNow = useCallback(() => {
+    setLoopPhase((ph) => {
+      if (ph !== "record") return ph;
+      if (recordTimerRef.current != null) {
+        clearTimeout(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+      // advance phrase only if auto-continue
+      if (autoContinue) onAdvancePhrase();
+      // enter REST
+      return "rest";
+    });
+  }, [autoContinue, onAdvancePhrase]);
+
   // exact end of RESPONSE record window
   useEffect(() => {
     if (loopPhase !== "record") {
@@ -219,15 +242,24 @@ export default function usePracticeLoop({
 
       recordTimerRef.current = window.setTimeout(() => {
         recordTimerRef.current = null;
-        setLoopPhase("rest");
-
-        // advance phrase only if auto-continue
-        if (autoContinue) onAdvancePhrase();
-
-        setTakeCount((n) => n + 1);
+        endRecordNow();
       }, totalMs);
     }
-  }, [loopPhase, windowOnSec, onAdvancePhrase, autoContinue]);
+  }, [loopPhase, windowOnSec, endRecordNow]);
+
+  // ─────────────────────────────────────────────────────────────
+  // NEW: Count takes exactly once on the transition RECORD → REST
+  // This prevents double-counting if endRecordNow() is triggered twice.
+  // ─────────────────────────────────────────────────────────────
+  const prevPhaseRef = useRef<LoopPhase>(loopPhase);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = loopPhase;
+
+    if (prev === "record" && loopPhase === "rest") {
+      setTakeCount((n) => n + 1);
+    }
+  }, [loopPhase]);
 
   // rest -> next take (if looping) or review (if !autoContinue)
   useEffect(() => {
@@ -368,5 +400,6 @@ export default function usePracticeLoop({
     toggle,
     clearAll,
     anchorMs,
+    endRecordEarly: endRecordNow,
   };
 }

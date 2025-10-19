@@ -15,9 +15,17 @@ const BASE: Partial<SessionConfig> = {
   callResponse: true,
   exerciseLoops: 6,
   regenerateBetweenTakes: true,
-  timingFreeResponse: true, // ← key: single, timing-agnostic score per take
+
+  // KEY: single, timing-agnostic score per take
+  timingFreeResponse: true,
+
+  // NEW: relax the record window and end early after 1s confident audio
+  timingFreeMaxSec: 10,
+  timingFreeMinCaptureSec: 1,
+
   // keep solfege default
   scale: { name: "major", tonicPc: 0, maxPerDegree: 8 },
+
   // keep recording windows simple; hide rhythm lane/detection
   rhythm: {
     mode: "random",
