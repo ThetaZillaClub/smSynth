@@ -1,9 +1,14 @@
+// components/training/layout/stage/polar-tune/TuneView.tsx
 'use client';
 import * as React from 'react';
 import PolarTuneView from "./PolarTuneView";
 import PolarPitchTune from "./PolarPitchTune";
+import CentsIndicator from "./CentsIndicator";
 import { hzToMidi, relPcFloat } from "./polar-helpers";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
+import { pcToSolfege } from "@/utils/lyrics/solfege";
+import { pcLabelForKey } from "@/utils/pitch/enharmonics";
+import type { ScaleName } from "@/utils/phrase/scales";
 
 type MiniPhrase = { notes?: { midi: number }[] } | null | undefined;
 
@@ -21,6 +26,40 @@ function deriveActiveRelsFromPhrase(
   return Array.from(set).sort((a, b) => a - b);
 }
 
+/** nearest-int MIDI helper (undefined-safe) */
+function firstTargetMidi(
+  phrase: MiniPhrase,
+  tonicPc: number,
+  targetRel: number | undefined
+) {
+  const notes = phrase?.notes ?? [];
+  if (!notes.length) return undefined;
+
+  if (typeof targetRel === "number") {
+    const tpc = ((tonicPc % 12) + 12) % 12;
+    for (const n of notes) {
+      const m = Math.round(n.midi);
+      const pc = ((m % 12) + 12) % 12;
+      const rel = ((pc - tpc) + 12) % 12;
+      if (rel === targetRel) return m;
+    }
+  }
+  return Math.round(notes[0].midi);
+}
+
+/** Key-aware scientific name (Bb vs A# etc.) */
+function midiToKeyAwareName(
+  midi: number,
+  tonicPc: number,
+  scaleName: ScaleName | string
+): string {
+  const m = Math.round(midi);
+  const pcAbs = ((m % 12) + 12) % 12;
+  const letter = pcLabelForKey(pcAbs, tonicPc, scaleName as unknown as ScaleName);
+  const octave = Math.floor(m / 12) - 1;
+  return `${letter}${octave}`;
+}
+
 export default function TuneView({
   phrase,
   liveHz,
@@ -29,7 +68,8 @@ export default function TuneView({
   tonicPc,
   scaleName,
   title,
-  // phase prop still accepted but not used
+  /** NEW: optional 0..1 progress for the center badge */
+  centerProgress01,
 }: {
   phrase?: MiniPhrase;
   liveHz: number | null;
@@ -38,7 +78,8 @@ export default function TuneView({
   tonicPc: number;
   scaleName: SolfegeScaleName;
   title?: string;
-  phase?: string; // "call" | "record" | "rest" | "idle"
+  /** NEW: 0..1 progress to show as a ring on the badge */
+  centerProgress01?: number;
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const [w, setW] = React.useState(0);
@@ -69,6 +110,25 @@ export default function TuneView({
   );
 
   const targetRel = activeRels[0] ?? 0;
+  const targetMidi = React.useMemo(
+    () => firstTargetMidi(phrase, tonicPc, targetRel),
+    [phrase, tonicPc, targetRel]
+  );
+
+  // Center labels
+  const centerPrimary = React.useMemo(() => {
+    const absPc = (((tonicPc + (targetRel ?? 0)) % 12) + 12) % 12;
+    return pcToSolfege(absPc, tonicPc, scaleName, {
+      chromaticStyle: 'auto',
+      caseStyle: 'capital',
+    });
+  }, [tonicPc, targetRel, scaleName]);
+
+  const centerSecondary = React.useMemo(() => {
+    return typeof targetMidi === "number" ? midiToKeyAwareName(targetMidi, tonicPc, scaleName) : "";
+  }, [targetMidi, tonicPc, scaleName]);
+
+  // Live transforms shared by both subcomponents
   const liveRel =
     (typeof liveHz === "number" && liveHz > 0)
       ? relPcFloat(hzToMidi(liveHz, 440), tonicPc)
@@ -83,10 +143,8 @@ export default function TuneView({
   }
 
   return (
-    <div
-      ref={hostRef}
-      className="w-full h-full flex items-center justify-center"
-    >
+    <div ref={hostRef} className="w-full h-full flex flex-col items-center justify-center">
+      {/* Chart */}
       <div style={{ position: "relative", width: w, height: h }}>
         <PolarTuneView
           tonicPc={tonicPc}
@@ -97,7 +155,11 @@ export default function TuneView({
           liveCents={liveCents}
           confidence={confidence}
           confThreshold={confThreshold}
+          centerPrimary={centerPrimary}
+          centerSecondary={centerSecondary}
+          centerProgress01={centerProgress01}  // NEW
         />
+        {/* live capture overlay (bands only) */}
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
           <PolarPitchTune
             width={w}
@@ -109,8 +171,16 @@ export default function TuneView({
             targetRel={targetRel}
           />
         </div>
-        {/* removed status overlay */}
       </div>
+
+      {/* Indicator BELOW the chart */}
+      <CentsIndicator
+        liveRel={liveRel}
+        liveCents={liveCents}
+        targetRel={targetRel}
+        confidence={confidence}
+        confThreshold={confThreshold}
+      />
     </div>
   );
 }

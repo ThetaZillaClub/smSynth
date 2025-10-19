@@ -93,6 +93,9 @@ type LayoutProps = {
 
   /** NEW: replace right-side panel *only* when view === "analytics" */
   analyticsSidePanel?: React.ReactNode;
+
+  /** NEW: 0..1 progress for Polar badge ring; just passed through to GameStage */
+  centerProgress01?: number;
 };
 
 export default function GameLayout({
@@ -134,6 +137,9 @@ export default function GameLayout({
 
   analytics,
   analyticsSidePanel,
+
+  // NEW: center progress ring fraction (Polar view)
+  centerProgress01,
 }: LayoutProps) {
   const showPlay = !!phrase;
 
@@ -180,6 +186,8 @@ export default function GameLayout({
             scaleName={scaleName ?? undefined}
             // NEW: analytics payload
             analytics={analytics}
+            // NEW: Polar center badge progress ring
+            centerProgress01={centerProgress01}
           />
         </div>
 

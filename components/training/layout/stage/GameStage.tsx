@@ -83,6 +83,9 @@ type Props = {
 
   /** NEW: analytics payload (used when view==="analytics") */
   analytics?: AnalyticsPayload;
+
+  /** NEW: 0..1 progress to render as a ring on the Polar view’s center badge */
+  centerProgress01?: number;
 };
 
 /* Helper: narrow unknown/string → SolfegeScaleName | undefined */
@@ -168,7 +171,7 @@ function AnalyticsStageView({
 }
 
 /* ────────────────────────────────────────────────────────────── */
-/* Main stage (piano/sheet). Hooks live here only.                */
+/* Main stage (piano/sheet/polar). Hooks live here only.          */
 /* ────────────────────────────────────────────────────────────── */
 
 function MainStageView({
@@ -202,6 +205,9 @@ function MainStageView({
 
   tonicPc,
   scaleName,
+
+  /** NEW: center progress ring fraction for Polar view */
+  centerProgress01,
 }: Omit<Props, "analytics">) {
   // Keep timeline math identical across canvases
   const WINDOW_SEC = 4;
@@ -375,6 +381,8 @@ function MainStageView({
                   confThreshold={confThreshold ?? 0.5}
                   tonicPc={typeof tonicPc === "number" ? tonicPc : 0}
                   scaleName={(scaleName as SolfegeScaleName) ?? "major"}
+                  /** NEW: progress ring on center badge */
+                  centerProgress01={centerProgress01}
                 />
               </div>
             ) : (

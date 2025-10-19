@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -484,7 +484,10 @@ export default function TrainingGame({
     }
 
     const isConfident =
-      typeof liveHz === "number" && liveHz > 0 && typeof confidence === "number" && confidence >= CONF_THRESHOLD;
+      typeof liveHz === "number" &&
+      liveHz > 0 &&
+      typeof confidence === "number" &&
+      confidence >= CONF_THRESHOLD;
 
     const now = performance.now();
 
@@ -512,6 +515,45 @@ export default function TrainingGame({
     minCaptureSecEff,
     loop,
   ]);
+
+  // ───────────────────────────────────────────────────────────────
+  // Polar center progress ring (CONFIDENCE-BASED, timing-free only)
+  // - Fills 0→1 while the user maintains a confident tone.
+  // - Independent of record window length.
+  // - No pulse; no snap to 100% unless you've truly reached the threshold.
+  // ───────────────────────────────────────────────────────────────
+  const [centerProgress01, setCenterProgress01] = useState<number>(0);
+  useEffect(() => {
+    let raf = 0;
+    let runningAnim = true;
+
+    const animate = () => {
+      if (!runningAnim) return;
+
+      if (timingFreeResponse && !pretestActive && loop.loopPhase === "record") {
+        const start = confidentStreakStartMsRef.current;
+        if (typeof start === "number" && minCaptureSecEff > 0) {
+          const elapsed = (performance.now() - start) / 1000;
+          const frac = Math.max(0, Math.min(1, elapsed / minCaptureSecEff));
+          setCenterProgress01(frac);
+        } else {
+          // either no confident streak yet or confidence dropped
+          setCenterProgress01(0);
+        }
+      } else {
+        // outside of timing-free RECORD, keep ring empty
+        setCenterProgress01(0);
+      }
+
+      raf = requestAnimationFrame(animate);
+    };
+
+    raf = requestAnimationFrame(animate);
+    return () => {
+      runningAnim = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [timingFreeResponse, pretestActive, loop.loopPhase, minCaptureSecEff]);
 
   // ───────────────────────────────────────────────────────────────
   // Stage view routing: switch to analytics after the last take
@@ -631,6 +673,8 @@ export default function TrainingGame({
       }}
       // NEW: swap right panel to Course Navigation when in analytics view
       analyticsSidePanel={analyticsSidePanel}
+      // NEW: Polar center badge progress ring (confidence-based)
+      centerProgress01={centerProgress01}
     />
   );
 }
