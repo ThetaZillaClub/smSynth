@@ -17,12 +17,35 @@ type PlayOptions = {
   metronome?: boolean;
 };
 
+/** Internal representation of a musical "voice" (a note tone) we can release gracefully. */
+type Voice = {
+  osc: OscillatorNode;
+  g: GainNode;
+  cleanup: () => void;
+  released?: boolean;
+};
+
+/** Timbre tuning: warmer partials + dynamic low-pass so highs don't feel "sharp"/edgy. */
+const TIMBRE = {
+  // Cosine-series amplitudes for harmonics 1..4 (very gentle)
+  partials: [1.0, 0.08, 0.04, 0.02] as const,
+  // Low-pass cutoff ~ k * fundamental, clamped to [min,max]
+  lpfMult: 2.6,   // try 2.4–3.2 to taste
+  lpfMin: 1200,
+  lpfMax: 3000,
+  lpfQ: 0.55,     // lower Q avoids perceptual pitch shift from resonant peaks
+};
+
 export default function usePhrasePlayer() {
   const ctxRef = useRef<AudioContext | null>(null);
   const metronomeGainRef = useRef<GainNode | null>(null);
   const noteMasterGainRef = useRef<GainNode | null>(null);
 
+  /** Ticks / misc scheduled stops. Voices are tracked separately for graceful release. */
   const scheduledStopFns = useRef<Array<() => void>>([]);
+
+  /** Set of active musical voices (notes) so we can fade them out on stop(). */
+  const activeVoicesRef = useRef<Set<Voice>>(new Set());
 
   // ---- Settings wiring (keys + helpers) ----
   const AUDIO_EVENT = "audio:gain-changed";
@@ -62,15 +85,16 @@ export default function usePhrasePlayer() {
     bus.gain.setTargetAtTime(Math.max(0, Math.min(1, val)), ctx.currentTime, 0.01);
   };
 
-  // Cached gentle harmonic spectrum for musical tone
-  const waveRef = useRef<PeriodicWave | null>(null);
-  const getPeriodicWave = (ctx: AudioContext) => {
-    if (waveRef.current) return waveRef.current;
-    // Fundamental + very small 2nd/3rd/4th partials (keeps fundamental dominant)
-    const real = new Float32Array([0, 1.0, 0.20, 0.10, 0.05]);
-    const imag = new Float32Array(real.length); // all sine terms = 0 (cosine series)
-    waveRef.current = ctx.createPeriodicWave(real, imag, { disableNormalization: false });
-    return waveRef.current;
+  // Cached gentle harmonic spectrum for musical tone (warmer than before)
+  const warmWaveRef = useRef<PeriodicWave | null>(null);
+  const getWarmPeriodicWave = (ctx: AudioContext) => {
+    if (warmWaveRef.current) return warmWaveRef.current;
+    // Cosine (real) series: fundamental dominant, very small 2nd/3rd/4th
+    // This reads as "round" and reduces the psychoacoustic sharpness brightness can cause.
+    const real = new Float32Array([0, ...TIMBRE.partials]); // index 0 ignored
+    const imag = new Float32Array(real.length); // sine terms 0
+    warmWaveRef.current = ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    return warmWaveRef.current;
   };
 
   const initCtx = useCallback(async () => {
@@ -103,17 +127,7 @@ export default function usePhrasePlayer() {
     applyPhraseGain();
   }, [initCtx]);
 
-  const stopAllScheduled = useCallback(() => {
-    try {
-      scheduledStopFns.current.forEach((fn) => {
-        try { fn(); } catch {}
-      });
-    } finally {
-      scheduledStopFns.current = [];
-    }
-  }, []);
-
-  /** Mild waveshaper to thicken transients without harshness */
+  /** Mild waveshaper to thicken metronome transients without harshness (ticks only) */
   const createSaturator = (ctx: AudioContext, amount = 2.0) => {
     const ws = ctx.createWaveShaper();
     const n = 1024;
@@ -129,17 +143,13 @@ export default function usePhrasePlayer() {
   };
 
   const isBarline = (beatsFromStart: number, tsNum: number) => {
-    // true when we're very close to an integer multiple of tsNum
     const eps = 1e-3;
     const mod = beatsFromStart % tsNum;
     return mod < eps || tsNum - mod < eps;
   };
 
   /**
-   * Thicker metronome tick:
-   * Layer A: short filtered noise burst.
-   * Layer B: ultra-short triangle "pip" with BP filter (adds body without steady pitch).
-   * Accent: slightly brighter, faster, and a tiny upward chirp.
+   * Thicker metronome tick (unchanged).
    */
   const playTick = useCallback((time: number, accent = false) => {
     if (!ctxRef.current || !metronomeGainRef.current) return;
@@ -147,7 +157,6 @@ export default function usePhrasePlayer() {
 
     const bus = metronomeGainRef.current;
 
-    // Per-tick master gain (lets us shape the combined envelope)
     const g = ctx.createGain();
     g.gain.value = 1;
     g.connect(bus);
@@ -195,10 +204,9 @@ export default function usePhrasePlayer() {
     // ===== Layer B: Pitched "pip" =====
     const osc = ctx.createOscillator();
     osc.type = "triangle";
-    const baseHz = accent ? 1950 : 1650; // short pip—high, but not "beep"
+    const baseHz = accent ? 1950 : 1650;
     osc.frequency.setValueAtTime(baseHz, time);
     if (accent) {
-      // tiny upward chirp adds punch without feeling tonal
       osc.frequency.exponentialRampToValueAtTime(baseHz * 1.12, time + 0.03);
     }
 
@@ -222,7 +230,7 @@ export default function usePhrasePlayer() {
     og.gain.exponentialRampToValueAtTime(accent ? 0.9 : 0.7, time + pATT);
     og.gain.exponentialRampToValueAtTime(0.0001, time + pREL);
 
-    // ===== Master tick tail (prevents hard cutoff clicks) =====
+    // Master tick tail
     const tickTail = ctx.createGain();
     tickTail.gain.value = 1;
     tickTail.connect(bus);
@@ -232,7 +240,6 @@ export default function usePhrasePlayer() {
     tickTail.gain.setValueAtTime(1, time);
     tickTail.gain.exponentialRampToValueAtTime(0.0001, time + Math.max(nREL, pREL) + tailREL);
 
-    // Start/stop + cleanup
     const stopAt = time + Math.max(nDUR + nREL, pREL) + tailREL + 0.01;
 
     noise.start(time);
@@ -250,7 +257,6 @@ export default function usePhrasePlayer() {
     };
     osc.onended = cleanup;
 
-    // Allow global stop() to silence scheduled ticks (even those in the future).
     scheduledStopFns.current.push(() => {
       try { noise.stop(ctx.currentTime + 0.001); } catch {}
       try { osc.stop(ctx.currentTime + 0.001); } catch {}
@@ -259,8 +265,7 @@ export default function usePhrasePlayer() {
   }, []);
 
   /**
-   * More natural amplitude envelope for tones:
-   * ~12–20 ms attack, ~80–120 ms release (scaled by note duration).
+   * Natural amplitude envelope for tones.
    */
   const applyEnvelope = (g: GainNode, start: number, dur: number, floor = 0.0001) => {
     const ATT = Math.max(0.012, Math.min(0.02, dur * 0.15));
@@ -276,12 +281,51 @@ export default function usePhrasePlayer() {
     g.gain.setValueAtTime(1, relStart);
     g.gain.exponentialRampToValueAtTime(floor, relStart + REL);
 
-    return { safeStart, stopAt: relStart + REL + 0.01 };
+    return { safeStart, stopAt: relStart + REL + 0.01, relSec: REL };
   };
 
   /**
-   * Musical tone: gentle harmonic spectrum + soft low-pass
-   * Keeps A4 exact while sounding less “edgy” than a bare sine.
+   * Graceful release for a voice: ramp gain down quickly and stop the osc after the tail.
+   */
+  const releaseVoice = useCallback((voice: Voice, relSecOverride?: number) => {
+    const ctx = ctxRef.current;
+    if (!ctx || !voice || voice.released) return;
+
+    const now = ctx.currentTime;
+    const REL = Math.max(0.06, Math.min(0.15, (relSecOverride ?? 0.1)));
+
+    try {
+      voice.g.gain.cancelScheduledValues(0);
+      const current = voice.g.gain.value;
+      voice.g.gain.setValueAtTime(Math.max(0.0001, current), now);
+      voice.g.gain.exponentialRampToValueAtTime(0.0001, now + REL);
+      voice.osc.stop(now + REL + 0.01);
+      voice.released = true;
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  /** stop all scheduled tones/ticks gracefully (no context suspend during session) */
+  const stopAllScheduled = useCallback(() => {
+    // Release all active phrase voices
+    activeVoicesRef.current.forEach((v) => releaseVoice(v));
+
+    // Stop any ticking/percussion sources
+    try {
+      scheduledStopFns.current.forEach((fn) => {
+        try { fn(); } catch {}
+      });
+    } finally {
+      scheduledStopFns.current = [];
+    }
+  }, [releaseVoice]);
+
+  /**
+   * Musical tone (warmer recipe):
+   * - Warm periodic wave (tiny upper partials)
+   * - LPF cutoff key-tracked to fundamental (prevents "bright = sharp" illusion)
+   * - Same soft envelope
    */
   const scheduleNote = useCallback((midi: number, start: number, dur: number, a4Hz: number) => {
     if (!ctxRef.current || !noteMasterGainRef.current) return;
@@ -289,33 +333,39 @@ export default function usePhrasePlayer() {
     const hz = midiToHz(midi, a4Hz);
 
     const osc = ctx.createOscillator();
-    osc.setPeriodicWave(getPeriodicWave(ctx));
+    osc.setPeriodicWave(getWarmPeriodicWave(ctx));
     osc.frequency.value = hz;
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = 3800; // gentle roll-off
-    filter.Q.value = 0.707;
+    const cutoff = Math.max(TIMBRE.lpfMin, Math.min(TIMBRE.lpfMax, hz * TIMBRE.lpfMult));
+    filter.frequency.setValueAtTime(cutoff, ctx.currentTime);
+    filter.Q.value = TIMBRE.lpfQ;
 
     const g = ctx.createGain();
     osc.connect(filter);
     filter.connect(g);
     g.connect(noteMasterGainRef.current);
 
-    const { safeStart, stopAt } = applyEnvelope(g, start, dur);
+    const { safeStart, stopAt, relSec } = applyEnvelope(g, start, dur);
+
+    const voice: Voice = {
+      osc,
+      g,
+      cleanup: () => {
+        try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
+        activeVoicesRef.current.delete(voice);
+      },
+    };
+    activeVoicesRef.current.add(voice);
+    osc.onended = () => voice.cleanup();
 
     osc.start(safeStart);
     osc.stop(stopAt);
 
-    const cleanup = () => {
-      try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
-    };
-    osc.onended = cleanup;
-
-    scheduledStopFns.current.push(() => {
-      try { osc.stop(ctx.currentTime + 0.001); cleanup(); } catch {}
-    });
-  }, []);
+    // If stop() happens mid-note, release gracefully using our envelope tail.
+    scheduledStopFns.current.push(() => releaseVoice(voice, relSec));
+  }, [releaseVoice]);
 
   const playPhrase = useCallback(
     async (phrase: Phrase, opts: PlayOptions & { startAtPerfMs?: number | null }) => {
@@ -347,7 +397,7 @@ export default function usePhrasePlayer() {
     [warm, playTick, scheduleNote, stopAllScheduled]
   );
 
-  /** stop all scheduled tones/ticks (no context suspend during session) */
+  /** public stop(): graceful release for voices + stop ticks */
   const stop = useCallback(() => {
     stopAllScheduled();
   }, [stopAllScheduled]);
@@ -360,7 +410,7 @@ export default function usePhrasePlayer() {
   useEffect(() => () => stopAllScheduled(), [stopAllScheduled]);
 
   /**
-   * Standalone tone (e.g., A440) with the same timbre chain.
+   * Standalone tone (e.g., A440) with the same timbre chain (warm).
    */
   const playToneHz = useCallback(
     async (hz: number, durSec: number) => {
@@ -373,27 +423,39 @@ export default function usePhrasePlayer() {
       const start = ctx.currentTime + 0.05;
 
       const osc = ctx.createOscillator();
-      osc.setPeriodicWave(getPeriodicWave(ctx));
+      osc.setPeriodicWave(getWarmPeriodicWave(ctx));
       osc.frequency.value = hz;
 
       const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
-      filter.frequency.value = 3800;
-      filter.Q.value = 0.707;
+      const cutoff = Math.max(TIMBRE.lpfMin, Math.min(TIMBRE.lpfMax, hz * TIMBRE.lpfMult));
+      filter.frequency.setValueAtTime(cutoff, ctx.currentTime);
+      filter.Q.value = TIMBRE.lpfQ;
 
       const g = ctx.createGain();
       osc.connect(filter);
       filter.connect(g);
       g.connect(noteMasterGainRef.current);
 
-      const { safeStart, stopAt } = applyEnvelope(g, start, durSec);
+      const { safeStart, stopAt, relSec } = applyEnvelope(g, start, durSec);
+
+      const voice: Voice = {
+        osc,
+        g,
+        cleanup: () => {
+          try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
+          activeVoicesRef.current.delete(voice);
+        },
+      };
+      activeVoicesRef.current.add(voice);
+      osc.onended = () => voice.cleanup();
+
       osc.start(safeStart);
       osc.stop(stopAt);
-      osc.onended = () => {
-        try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
-      };
+
+      scheduledStopFns.current.push(() => releaseVoice(voice, relSec));
     },
-    [warm, stopAllScheduled]
+    [warm, stopAllScheduled, releaseVoice]
   );
 
   const playA440 = useCallback(async (durSec: number = 0.5) => {
@@ -526,7 +588,7 @@ export default function usePhrasePlayer() {
     playRhythm,
     playLeadInTicks,
     playMelodyAndRhythm,
-    stop,
+    stop,                // graceful fade (no clicks)
     powerSaveSuspend,
   };
 }
