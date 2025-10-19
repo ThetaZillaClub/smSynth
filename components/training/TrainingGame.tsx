@@ -191,48 +191,6 @@ export default function TrainingGame({
   // Instead, during the lead-in we play the content cue (first bar / phrase).
   const metronomeEff = sessionEff.view === "polar" ? false : !!metronome;
 
-  const handleEnterPlay = useCallback(() => {
-    // Only for the main exercise (not pretest), and only when metronome is off.
-    if (pretestActive || metronomeEff) return;
-
-    try {
-      stopPlayback();
-      if (phrase) {
-        const baseOpts = {
-          bpm,
-          tsNum: ts.num,
-          tsDen: ts.den,
-          a4Hz: 440,
-          metronome: false,
-        } as const;
-
-        if (fabric.melodyRhythm && fabric.melodyRhythm.length > 0) {
-          // For Pitch Tune this is typically a single whole note (one bar), which is exactly the desired cue.
-          void playMelodyAndRhythm(phrase, fabric.melodyRhythm, {
-            ...baseOpts,
-            startAtPerfMs: null,
-          });
-        } else {
-          void playPhrase(phrase, {
-            ...baseOpts,
-            leadBars: 0,
-          });
-        }
-      }
-    } catch {}
-  }, [
-    pretestActive,
-    metronomeEff,
-    phrase,
-    fabric.melodyRhythm,
-    playMelodyAndRhythm,
-    playPhrase,
-    stopPlayback,
-    bpm,
-    ts.num,
-    ts.den,
-  ]);
-
   const loop = usePracticeLoop({
     step,
     lowHz: lowHz ?? null,
@@ -252,7 +210,7 @@ export default function TrainingGame({
     onAdvancePhrase: () => {
       if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1);
     },
-    onEnterPlay: handleEnterPlay, // ← content-as-lead-in instead of metronome when applicable
+    // no onEnterPlay: cue is scheduled below during the "lead-in" phase
     autoContinue: !!loopingMode,
     onRestComplete: () => {
       if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
@@ -278,6 +236,53 @@ export default function TrainingGame({
     playLeadInTicks,
     secPerBeat,
   });
+
+  // Per-take content cue during LEAD-IN (Pitch Tune / polar view).
+  useEffect(() => {
+    const wantContentLeadIn = exerciseUnlocked && !pretestActive && !metronomeEff;
+    if (!wantContentLeadIn) return;
+    if (loop.loopPhase !== "lead-in") return;
+    if (!phrase) return;
+
+    try {
+      // stop anything previously scheduled before we align the cue
+      stopPlayback();
+      const baseOpts = {
+        bpm,
+        tsNum: ts.num,
+        tsDen: ts.den,
+        a4Hz: 440,
+        metronome: false,
+      } as const;
+
+      if (fabric.melodyRhythm && fabric.melodyRhythm.length > 0) {
+        void playMelodyAndRhythm(phrase, fabric.melodyRhythm, {
+          ...baseOpts,
+          startAtPerfMs: loop.anchorMs ?? null,
+        });
+      } else {
+        void playPhrase(phrase, {
+          ...baseOpts,
+          leadBars: 0,
+          startAtPerfMs: loop.anchorMs ?? null,
+        } as any);
+      }
+    } catch {}
+  }, [
+    exerciseUnlocked,
+    pretestActive,
+    metronomeEff,
+    loop.loopPhase,
+    loop.anchorMs,
+    phrase,
+    fabric.melodyRhythm,
+    playMelodyAndRhythm,
+    playPhrase,
+    stopPlayback,
+    bpm,
+    ts.num,
+    ts.den,
+  ]);
 
   const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
 
@@ -313,6 +318,11 @@ export default function TrainingGame({
       } catch {}
     })();
   }, [warmPlayer, warmRecorder]);
+
+  // Ensure audio stops whenever we go idle (e.g., user paused during lead-in)
+  useEffect(() => {
+    if (loop.loopPhase === "idle") stopPlayback();
+  }, [loop.loopPhase, stopPlayback]);
 
   // Rhythm data
   const rhythmEffective: RhythmEvent[] | null = fabric.syncRhythmFabric ?? null;
@@ -370,8 +380,11 @@ export default function TrainingGame({
   const startAtMs = showExercise ? loop.anchorMs : null;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
+
   const onToggleExercise = () => {
     if (!(!pretestRequired || pretest.status === "done")) return;
+    // stop any scheduled metronome/cue audio immediately
+    stopPlayback();
     loop.toggle();
   };
 

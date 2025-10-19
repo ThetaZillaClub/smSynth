@@ -249,6 +249,13 @@ export default function usePhrasePlayer() {
       } catch {}
     };
     osc.onended = cleanup;
+
+    // Allow global stop() to silence scheduled ticks (even those in the future).
+    scheduledStopFns.current.push(() => {
+      try { noise.stop(ctx.currentTime + 0.001); } catch {}
+      try { osc.stop(ctx.currentTime + 0.001); } catch {}
+      try { g.disconnect(); tickTail.disconnect(); } catch {}
+    });
   }, []);
 
   /**
@@ -311,16 +318,20 @@ export default function usePhrasePlayer() {
   }, []);
 
   const playPhrase = useCallback(
-    async (phrase: Phrase, opts: PlayOptions) => {
+    async (phrase: Phrase, opts: PlayOptions & { startAtPerfMs?: number | null }) => {
       await warm();
       if (!ctxRef.current) return;
 
       stopAllScheduled();
 
-      const { bpm, tsNum, tsDen, leadBars = 0, a4Hz = 440, metronome = true } = opts;
+      const { bpm, tsNum, tsDen, leadBars = 0, a4Hz = 440, metronome = true, startAtPerfMs } = opts;
       const leadBeats = barsToBeats(leadBars, tsNum);
       const secPerBeat = beatsToSeconds(1, bpm, tsDen);
-      const startTime = ctxRef.current.currentTime + 0.08;
+
+      const nowPerf = performance.now();
+      const nowCtx = ctxRef.current.currentTime;
+      const mapped = startAtPerfMs != null ? nowCtx + (startAtPerfMs - nowPerf) / 1000 : null;
+      const startTime = Math.max(ctxRef.current.currentTime + 0.08, mapped ?? 0);
 
       if (metronome && leadBeats > 0) {
         for (let b = 0; b < leadBeats; b++) {

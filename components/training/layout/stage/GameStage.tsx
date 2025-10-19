@@ -367,19 +367,17 @@ function MainStageView({
                   ) : null}
                 </div>
               </div>
-          ) : view === "polar" ? (
-            <div className="w-full" style={{ height: mainH }}>
-              <TuneView
-                phrase={phrase ?? null}
-                liveHz={livePitchHz ?? null}
-                confidence={confidence ?? 0}
-                confThreshold={confThreshold ?? 0.5}
-                tonicPc={typeof tonicPc === "number" ? tonicPc : 0}
-                scaleName={(scaleName as SolfegeScaleName) ?? "major"}
-                title="Match the target"
-              />
-            </div>
-
+            ) : view === "polar" ? (
+              <div className="w-full" style={{ height: mainH }}>
+                <TuneView
+                  phrase={phrase ?? null}
+                  liveHz={livePitchHz ?? null}
+                  confidence={confidence ?? 0}
+                  confThreshold={confThreshold ?? 0.5}
+                  tonicPc={typeof tonicPc === "number" ? tonicPc : 0}
+                  scaleName={(scaleName as SolfegeScaleName) ?? "major"}
+                />
+              </div>
             ) : (
               <PianoRollCanvas
                 height={mainH}
