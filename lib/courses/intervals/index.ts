@@ -24,8 +24,8 @@ const BASE: Partial<SessionConfig> = {
   timingFreeMaxSec: 10,
   timingFreeMinCaptureSec: 1,
 
-  // Chromatic so semitone/tritone lessons work; tonicPc is user-adjustable at runtime
-  scale: { name: "chromatic", tonicPc: 0 },
+  // Chromatic; limit consecutive hits of same degree (soft cap) to 1
+  scale: { name: "chromatic", tonicPc: 0, maxPerDegree: 1 },
 
   // Random mode rhythm: exactly 1 bar, HALF notes only (→ two notes per take), no rests/line/detect
   rhythm: {

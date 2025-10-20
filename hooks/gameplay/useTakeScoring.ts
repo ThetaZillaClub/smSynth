@@ -40,22 +40,57 @@ export default function useTakeScoring() {
     return end;
   };
 
-  /** Flatten to single sustained note for timing-free scoring. */
+  /** Flatten to single sustained note for timing-free scoring (fallback). */
   const buildTimingFreePhrase = (src: Phrase, durSec: number): Phrase => {
     const midi = src?.notes?.[0]?.midi ?? 60;
     return { ...src, durationSec: durSec, notes: [{ midi, startSec: 0, durSec }] };
   };
 
-  /** First/last confident voiced timestamps in the raw capture. */
-  const voicedBounds = (
+  /** Build a multi-note eval phrase from detected runs, using target MIDIs from the generated phrase. */
+  const buildTimingFreeMultiPhrase = (
+    src: Phrase,
+    runs: Array<{ startSec: number; endSec: number }>
+  ): Phrase => {
+    const want = Math.max(1, src?.notes?.length ?? 1);
+    const K = Math.min(runs.length, want);
+    let t = 0;
+    const notes = Array.from({ length: K }, (_, i) => {
+      const durSec = Math.max(0, runs[i].endSec - runs[i].startSec);
+      const midi = src?.notes?.[i]?.midi ?? src?.notes?.[0]?.midi ?? 60;
+      const out = { midi, startSec: t, durSec };
+      t += durSec;
+      return out;
+    });
+    const durationSec = notes.reduce((s, n) => s + n.durSec, 0);
+    return { ...src, durationSec, notes };
+  };
+
+  /**
+   * Find up to `maxRuns` contiguous confident runs (earliest-first),
+   * each at least `minHoldSec` long. Gaps > maxGapSec split runs.
+   */
+  const findSuccessfulRuns = (
     samples: PitchSample[],
-    confMin: number
-  ): { startSec: number; endSec: number } | null => {
+    confMin: number,
+    minHoldSec: number,
+    maxRuns: number,
+    maxGapSec = 0.12
+  ): Array<{ startSec: number; endSec: number }> => {
     const voiced = samples
       .filter((s) => (s.hz ?? 0) > 0 && (s.conf ?? 0) >= confMin)
       .sort((a, b) => a.tSec - b.tSec);
-    if (!voiced.length) return null;
-    return { startSec: voiced[0].tSec, endSec: voiced[voiced.length - 1].tSec };
+    if (!voiced.length || maxRuns <= 0) return [];
+    const segs: Array<{ startSec: number; endSec: number }> = [];
+    let segStart = 0;
+    for (let i = 1; i < voiced.length; i++) {
+      if (voiced[i].tSec - voiced[i - 1].tSec > maxGapSec) {
+        segs.push({ startSec: voiced[segStart].tSec, endSec: voiced[i - 1].tSec });
+        segStart = i;
+      }
+    }
+    segs.push({ startSec: voiced[segStart].tSec, endSec: voiced[voiced.length - 1].tSec });
+    const ok = segs.filter((s) => s.endSec - s.startSec >= Math.max(0, minHoldSec));
+    return ok.slice(0, maxRuns); // earliest-first, up to the number of expected notes
   };
 
   const scoreTake = useCallback((args: {
@@ -73,6 +108,8 @@ export default function useTakeScoring() {
     phraseLengthOverrideSec?: number;
     /** Relax/tighten scoring per mode */
     optionsOverride?: Partial<ScoreOptions>;
+    /** NEW: how long the run must be held to be considered “captured” */
+    minHoldSec?: number;
   }) => {
     // Defaults for pitch/rhythm scoring
     const defaults: ScoreOptions = {
@@ -86,7 +123,7 @@ export default function useTakeScoring() {
 
     // Detect timing-free intent
     const isTimingFree =
-      (args.melodyOnsetsSec?.length ?? 0) <= 1 &&
+      ((args.melodyOnsetsSec?.length ?? 0) <= 1) &&
       (!args.rhythmOnsetsSec || args.rhythmOnsetsSec.length === 0);
 
     // Snapshot BEFORE alignment
@@ -96,31 +133,35 @@ export default function useTakeScoring() {
     let phraseForEval: Phrase = args.phrase;
     let evalPhraseLenSec = args.phraseLengthOverrideSec ?? phraseWindowSec(args.phrase);
 
-    // In timing-free: rebase to first voiced, and evaluate only the voiced span.
+    // In timing-free: detect per-note runs and build a multi-note window.
     let extraOffsetSec: number | undefined = undefined;
     let beatsRawForAlign: number[] = [];
     let gestureLagForAlign = args.gestureLagSec;
 
     if (isTimingFree) {
-      const vb = voicedBounds(rawSamples, opts.confMin);
-      if (vb) {
-        const spanSec = Math.max(0.5, Math.min(vb.endSec - vb.startSec, 15));
-        evalPhraseLenSec = spanSec;
-        phraseForEval = buildTimingFreePhrase(args.phrase, spanSec);
+      const minHold = Math.max(0.1, args.minHoldSec ?? 1);
+      const wantNotes = Math.max(1, args.phrase?.notes?.length ?? 1);
+      const runs = findSuccessfulRuns(rawSamples, opts.confMin, minHold, wantNotes);
 
-        // Make first voiced frame map to ~t=0 for SAMPLES:
-        // align shifts by (leadIn + pitchLag + extraOffset) → choose extraOffset
-        // so t' = t - vb.startSec  (i.e., samples first-voice lands at 0).
-        extraOffsetSec = vb.startSec - args.leadInSec - args.pitchLagSec;
+      if (runs.length > 0) {
+        // Eval phrase mirrors generated targets (midi per note),
+        // with durations from detected runs and t=0 at first run start.
+        phraseForEval = buildTimingFreeMultiPhrase(args.phrase, runs);
+        evalPhraseLenSec = phraseForEval.durationSec;
 
-        // For BEATS: feed an artificial event AT vb.startSec and make
-        // gestureLag == pitchLag for this align call so the beat lands at 0 too.
-        beatsRawForAlign = [vb.startSec];
+        const firstStart = runs[0].startSec;
+        extraOffsetSec = firstStart - args.leadInSec - args.pitchLagSec;
+
+        // Gesture beats at each run start so alignment lands each note window correctly.
+        beatsRawForAlign = runs.map((r) => r.startSec);
+
+        // Make beat shifting identical to samples by using same lag for this align call.
         gestureLagForAlign = args.pitchLagSec;
       } else {
-        // No confident audio: keep legacy behavior
-        evalPhraseLenSec = 0.5;
-        phraseForEval = buildTimingFreePhrase(args.phrase, 0.5);
+        // No held run long enough → keep a tiny single window to avoid NaNs.
+        const fallbackLen = Math.max(0.5, minHold);
+        phraseForEval = buildTimingFreePhrase(args.phrase, fallbackLen);
+        evalPhraseLenSec = fallbackLen;
         beatsRawForAlign = [0];
       }
     } else {
@@ -134,12 +175,12 @@ export default function useTakeScoring() {
       beatsRawForAlign,
       args.leadInSec,
       {
-        keepPreRollSec: isTimingFree ? 0 : 0.5, // drop any pre-voice negatives
+        keepPreRollSec: isTimingFree ? 0 : 0.5, // drop deep pre-voice negatives
         phraseLengthSec: evalPhraseLenSec,
         tailGuardSec: 0.25,
         pitchLagSec: args.pitchLagSec,
         gestureLagSec: gestureLagForAlign,
-        extraOffsetSec, // only non-undefined in timing-free
+        extraOffsetSec, // only set in timing-free multi-run mode
         devAssert: process.env.NODE_ENV !== "production",
         consolePrefix: "score-align",
       }

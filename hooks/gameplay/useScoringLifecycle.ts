@@ -38,6 +38,8 @@ type ScoreTakeFn = (args: {
     maxAlignMs?: number;
     goodAlignMs?: number;
   };
+  /** NEW: required hold length (seconds) for a timing-free window to count */
+  minHoldSec?: number;
 }) => TakeScore;
 
 export type TakeSnapshot = {
@@ -79,6 +81,8 @@ type ScoringLifecycleArgs = {
   timingFreeResponse?: boolean;
   /** Effective capture window used (seconds) */
   freeCaptureSec?: number;
+  /** NEW: min confident hold required to accept a window */
+  freeMinHoldSec?: number;
 };
 
 export function useScoringLifecycle(args: ScoringLifecycleArgs) {
@@ -104,6 +108,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     haveRhythm,
     timingFreeResponse = false,
     freeCaptureSec,
+    freeMinHoldSec,
   } = args;
 
   const [takeSnapshots, setTakeSnapshots] = useState<TakeSnapshot[]>([]);
@@ -150,7 +155,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
 
       const optionsOverride = timingFreeResponse
         ? {
-            confMin: 0.45,    // a bit more tolerant on low-volume voices
+            confMin: 0.5,    // a bit more tolerant on low-volume voices
             centsOk: 80,      // widen "OK" window for pitch stability
             onsetGraceMs: 160 // just in case any onset math remains
           }
@@ -173,6 +178,8 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
             ? freeCaptureSec
             : undefined,
         optionsOverride,
+        // ensure we only accept a window if it’s held long enough
+        minHoldSec: typeof freeMinHoldSec === "number" ? freeMinHoldSec : undefined,
       });
 
       // Aggregate submit at end of session
@@ -233,6 +240,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     haveRhythm,
     timingFreeResponse,
     freeCaptureSec,
+    freeMinHoldSec,
   ]);
 
   return { takeSnapshots };

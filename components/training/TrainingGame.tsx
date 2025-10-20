@@ -330,6 +330,8 @@ export default function TrainingGame({
     // timing-free
     timingFreeResponse: !!timingFreeResponse,
     freeCaptureSec: recordWindowSecEff,
+    // NEW: require a held window this long to be considered a successful capture
+    freeMinHoldSec: minCaptureSecEff,
   });
 
   // Footer actions
@@ -434,6 +436,42 @@ export default function TrainingGame({
     />
   );
 
+  // ─────────────────────────────────────────────────────────────
+  // Lead-in → show the note currently being played (for Polar center text)
+  // Reuses the same targetRelOverride prop the record phase already uses.
+  // ─────────────────────────────────────────────────────────────
+  const [leadInRel, setLeadInRel] = useState<number | null>(null);
+  useEffect(() => {
+    if (pretestActive || loop.loopPhase !== "lead-in" || !phrase || loop.anchorMs == null) {
+      setLeadInRel(null);
+      return;
+    }
+    let raf = 0;
+    const tonicPc = ((sessionEff.scale?.tonicPc ?? 0) % 12 + 12) % 12;
+    const tick = () => {
+      const tSec = (performance.now() - (loop.anchorMs as number)) / 1000;
+      let rel: number | null = null;
+      for (const n of phrase.notes) {
+        const s = n.startSec, e = s + n.durSec;
+        if (tSec >= s && tSec < e) {
+          const pcAbs = ((Math.round(n.midi) % 12) + 12) % 12;
+          rel = ((pcAbs - tonicPc) + 12) % 12;
+          break;
+        }
+      }
+      setLeadInRel(rel);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [pretestActive, loop.loopPhase, phrase, loop.anchorMs, sessionEff.scale?.tonicPc]);
+
+  // Choose override for Polar center badge text:
+  const targetRelForPolar =
+    loop.loopPhase === "lead-in"
+      ? (typeof leadInRel === "number" ? leadInRel : undefined)
+      : (typeof targetRel === "number" ? targetRel : undefined);
+
   return (
     <GameLayout
       title={title}
@@ -479,8 +517,9 @@ export default function TrainingGame({
       }}
       analyticsSidePanel={analyticsSidePanel}
       centerProgress01={centerProgress01}
-      // NEW: tell Polar which note is currently expected
-      targetRelOverride={typeof targetRel === "number" ? targetRel : undefined}
+      // During LEAD-IN: follow the played phrase (shows note/solfege text in Polar center).
+      // During RECORD: keep existing behavior from timing-free capture.
+      targetRelOverride={targetRelForPolar}
     />
   );
 
