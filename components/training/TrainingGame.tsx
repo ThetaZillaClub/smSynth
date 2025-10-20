@@ -29,11 +29,9 @@ import { useVisionBeatRunner } from "@/hooks/vision/useVisionBeatRunner";
 import { useFooterActions } from "@/hooks/gameplay/useFooterActions";
 import { useScoringLifecycle } from "@/hooks/gameplay/useScoringLifecycle";
 
-// NEW: timing-free capture helper (early end + progress ring)
+// UPDATED: timing-free capture (per note)
 import useTimingFreeCapture from "@/hooks/gameplay/useTimingFreeCapture";
-// NEW: content cue hook (lead-in)
 import useContentLeadInCue from "@/hooks/gameplay/useContentLeadInCue";
-// NEW: compact course/lesson nav gate
 import CourseNavGate from "./layout/stage/side-panel/CourseNavGate";
 
 type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean };
@@ -88,10 +86,10 @@ export default function TrainingGame({
     metronome,
     loopingMode,
     gestureLatencyMs = 90,
-    // NEW timing-free knobs
+    // timing-free knobs
     timingFreeResponse,
-    timingFreeMaxSec,
-    timingFreeMinCaptureSec,
+    timingFreeMaxSec,          // legacy overall cap (kept but we’ll not rely on it)
+    timingFreeMinCaptureSec,   // per-note capture
   } = sessionEff;
 
   // Phrase + clef
@@ -126,14 +124,16 @@ export default function TrainingGame({
   });
   const leadBeats = barsToBeats(leadBars, ts.num);
 
-  // —— Effective record window: timing-free courses use a relaxed max window.
+  // NEW: per-note response window length (5s per expected note)
+  const expectedNotes = Math.max(1, phrase?.notes?.length ?? 1);
+  const perNoteMaxSec = 5;
   const recordWindowSecEff: number = timingFreeResponse
-    ? Math.max(0.5, Number.isFinite(timingFreeMaxSec ?? NaN) ? (timingFreeMaxSec as number) : 10)
+    ? expectedNotes * perNoteMaxSec
     : recordWindowSec;
 
   const minCaptureSecEff: number = timingFreeResponse
     ? Math.max(0.1, Number.isFinite(timingFreeMinCaptureSec ?? NaN) ? (timingFreeMinCaptureSec as number) : 1)
-    : 0; // unused otherwise
+    : 0;
 
   const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 10));
   const MAX_SESSION_SEC = 15 * 60;
@@ -199,8 +199,6 @@ export default function TrainingGame({
   } = useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
 
   // Lead-in cue behavior:
-  // For courses like Pitch Tune (polar view), we *don't* want metronome ticks.
-  // Instead, during the lead-in we play the content cue (first bar / phrase).
   const metronomeEff = sessionEff.view === "polar" ? false : !!metronome;
 
   const loop = usePracticeLoop({
@@ -209,7 +207,7 @@ export default function TrainingGame({
     highHz: highHz ?? null,
     phrase,
     words: fabric.words,
-    windowOnSec: recordWindowSecEff, // ← use effective window for timing-free mode
+    windowOnSec: recordWindowSecEff, // ← per-note budget applied (5s * notes)
     windowOffSec: restSec,
     preRollSec: leadInSec,
     maxTakes: MAX_TAKES,
@@ -222,7 +220,6 @@ export default function TrainingGame({
     onAdvancePhrase: () => {
       if (regenerateBetweenTakes && loopingMode) setSeedBump((n) => n + 1);
     },
-    // no onEnterPlay: cue is scheduled below during the "lead-in" phase
     autoContinue: !!loopingMode,
     onRestComplete: () => {
       if (!loopingMode && regenerateBetweenTakes) setSeedBump((n) => n + 1);
@@ -241,7 +238,7 @@ export default function TrainingGame({
 
   useLeadInMetronome({
     enabled: exerciseUnlocked,
-    metronome: metronomeEff, // ← disable ticks for polar (Pitch Tune); we provide content cue instead
+    metronome: metronomeEff,
     leadBeats,
     loopPhase: loop.loopPhase,
     anchorMs: loop.anchorMs,
@@ -249,7 +246,6 @@ export default function TrainingGame({
     secPerBeat,
   });
 
-  // NEW: Per-take content cue during LEAD-IN extracted to a hook
   useContentLeadInCue({
     enabled: exerciseUnlocked,
     pretestActive,
@@ -266,7 +262,7 @@ export default function TrainingGame({
     stopPlayback,
   });
 
-  const calibratedLatencyMs = useVisionLatency(gestureLatencyMs);
+  const calibratedLatencyMs = useVisionLatency(gestureLatencyMs ?? 90);
 
   // Pitch sampler
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
@@ -282,7 +278,7 @@ export default function TrainingGame({
   // Vision/tap runner
   const hand = useVisionBeatRunner({
     enabled: needVision,
-    latencyMs: calibratedLatencyMs ?? gestureLatencyMs,
+    latencyMs: (calibratedLatencyMs ?? gestureLatencyMs) || 90,
     loopPhase: loop.loopPhase,
     anchorMs: loop.anchorMs,
     pretestActive,
@@ -292,16 +288,12 @@ export default function TrainingGame({
   // warm audio I/O
   useEffect(() => {
     (async () => {
-      try {
-        await warmPlayer();
-      } catch {}
-      try {
-        await warmRecorder();
-      } catch {}
+      try { await warmPlayer(); } catch {}
+      try { await warmRecorder(); } catch {}
     })();
   }, [warmPlayer, warmRecorder]);
 
-  // Ensure audio stops whenever we go idle (e.g., user paused during lead-in)
+  // Ensure audio stops whenever we go idle
   useEffect(() => {
     if (loop.loopPhase === "idle") stopPlayback();
   }, [loop.loopPhase, stopPlayback]);
@@ -335,8 +327,7 @@ export default function TrainingGame({
     sampler,
     hand,
     haveRhythm,
-
-    // NEW: make scoring timing-agnostic for timing-free courses
+    // timing-free
     timingFreeResponse: !!timingFreeResponse,
     freeCaptureSec: recordWindowSecEff,
   });
@@ -366,20 +357,6 @@ export default function TrainingGame({
   const startAtMs = showExercise ? loop.anchorMs : null;
   const statusText = pretestActive ? pretest.currentLabel : loop.statusText;
   const uiRunning = pretestActive ? running : loop.loopPhase !== "rest" ? running : false;
-
-  const onToggleExercise = () => {
-    if (!(!pretestRequired || pretest.status === "done")) return;
-    // stop any scheduled metronome/cue audio immediately
-    stopPlayback();
-    loop.toggle();
-  };
-
-  const showFooterSessionPanel = !!phrase && !pretestActive;
-  const completedTakes = loop.takeCount ?? 0;
-  const roundCurrent = Math.min(MAX_TAKES, completedTakes + 1);
-  const footerSessionPanel = showFooterSessionPanel
-    ? { bpm, ts, roundCurrent, roundTotal: MAX_TAKES }
-    : undefined;
 
   const currentPretestKind =
     (callResponseSequence?.[pretest.modeIndex]?.kind as
@@ -421,42 +398,34 @@ export default function TrainingGame({
   });
 
   const footerTonicAction = exerciseUnlocked
-    ? {
-        label: footerTonicLabel,
-        onClick: playFooterTonic,
-        disabled: false,
-        title: "Play tonic",
-      }
+    ? { label: footerTonicLabel, onClick: playFooterTonic, disabled: false, title: "Play tonic" }
     : undefined;
 
   const footerArpAction = exerciseUnlocked
-    ? {
-        label: footerArpLabel,
-        onClick: playFooterArp,
-        disabled: false,
-        title: "Play arpeggio",
-      }
+    ? { label: footerArpLabel, onClick: playFooterArp, disabled: false, title: "Play arpeggio" }
     : undefined;
 
-  // NEW: timing-free capture (auto-end + polar progress ring)
-  const { centerProgress01 } = useTimingFreeCapture({
+  // UPDATED: timing-free capture per note (progress + target for Polar)
+  const { centerProgress01, targetRel } = useTimingFreeCapture({
     enabled: !!timingFreeResponse && !pretestActive,
-    loopPhase: loop.loopPhase,
+    loopPhase: loop.loopPhase as any,
     liveHz,
     confidence,
-    minCaptureSec: minCaptureSecEff,
+    minCaptureSec: minCaptureSecEff,  // 1s per note
+    perNoteMaxSec,                    // 5s per note
     threshold: CONF_THRESHOLD,
+    phrase,
+    tonicPc: sessionEff.scale?.tonicPc ?? 0,
     endRecordEarly: loop.endRecordEarly,
   });
 
   // Stage view routing: switch to analytics after the last take
   const sessionComplete =
-    !pretestActive && completedTakes >= MAX_TAKES && sessionScores.length >= MAX_TAKES;
+    !pretestActive && (loop.takeCount ?? 0) >= MAX_TAKES && sessionScores.length >= MAX_TAKES;
   const stageView: "piano" | "sheet" | "polar" | "analytics" = sessionComplete
     ? "analytics"
     : ((sessionEff.view as "piano" | "sheet" | "polar"));
 
-  // Analytics side panel via the compact gate component
   const analyticsSidePanel = (
     <CourseNavGate
       courseSlugParam={courseSlugParam}
@@ -492,13 +461,14 @@ export default function TrainingGame({
       clef={melodyClef}
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
-      sessionPanel={footerSessionPanel}
+      sessionPanel={
+        (!!phrase && !pretestActive) ? { bpm, ts, roundCurrent: Math.min(MAX_TAKES, (loop.takeCount ?? 0) + 1), roundTotal: MAX_TAKES } : undefined
+      }
       sidePanel={sidePanel}
       tonicPc={exerciseUnlocked ? sessionEff.scale?.tonicPc ?? null : null}
       scaleName={exerciseUnlocked ? sessionEff.scale?.name ?? null : null}
       tonicAction={footerTonicAction}
       arpAction={footerArpAction}
-      // NEW: provide analytics data for the stage when session completes
       analytics={{
         scores: sessionScores,
         snapshots: takeSnapshots,
@@ -507,10 +477,16 @@ export default function TrainingGame({
         tonicPc: sessionEff.scale?.tonicPc ?? 0,
         scaleName: sessionEff.scale?.name ?? "major",
       }}
-      // NEW: swap right panel to Course Navigation when in analytics view
       analyticsSidePanel={analyticsSidePanel}
-      // NEW: Polar center badge progress ring (confidence-based)
       centerProgress01={centerProgress01}
+      // NEW: tell Polar which note is currently expected
+      targetRelOverride={typeof targetRel === "number" ? targetRel : undefined}
     />
   );
+
+  function onToggleExercise() {
+    if (!(!pretestRequired || pretest.status === "done")) return;
+    stopPlayback();
+    loop.toggle();
+  }
 }

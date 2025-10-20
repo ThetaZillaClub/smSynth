@@ -32,7 +32,7 @@ export default function PolarPitchTune({
     const c = ref.current;
     if (!c) return;
 
-    const dpr = Math.max(1, (window as any).devicePixelRatio || 1);
+    const dpr = Math.max(1, window?.devicePixelRatio ?? 1);
     c.width = Math.max(1, Math.floor(width * dpr));
     c.height = Math.max(1, Math.floor(height * dpr));
 

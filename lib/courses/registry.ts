@@ -13,8 +13,8 @@ import SCALES_RHYTHMS_COURSE from "./scales-rhythms";
 // 1) Your intended order lives here (single source of truth)
 export const INTENDED_ORDER = [
   "pitch-tune",
-  "pitch-time",
   "intervals",
+  "pitch-time",
   "interval-detection",
   "scales",
   "key-detection",

@@ -26,7 +26,7 @@ function deriveActiveRelsFromPhrase(
   return Array.from(set).sort((a, b) => a - b);
 }
 
-/** nearest-int MIDI helper (undefined-safe) */
+/** nearest-int MIDI helper (undefined-safe), choose first note with matching rel */
 function firstTargetMidi(
   phrase: MiniPhrase,
   tonicPc: number,
@@ -34,9 +34,8 @@ function firstTargetMidi(
 ) {
   const notes = phrase?.notes ?? [];
   if (!notes.length) return undefined;
-
+  const tpc = ((tonicPc % 12) + 12) % 12;
   if (typeof targetRel === "number") {
-    const tpc = ((tonicPc % 12) + 12) % 12;
     for (const n of notes) {
       const m = Math.round(n.midi);
       const pc = ((m % 12) + 12) % 12;
@@ -68,8 +67,9 @@ export default function TuneView({
   tonicPc,
   scaleName,
   title,
-  /** NEW: optional 0..1 progress for the center badge */
   centerProgress01,
+  /** NEW: when provided, this rel (0..11) becomes the current target */
+  targetRelOverride,
 }: {
   phrase?: MiniPhrase;
   liveHz: number | null;
@@ -78,8 +78,8 @@ export default function TuneView({
   tonicPc: number;
   scaleName: SolfegeScaleName;
   title?: string;
-  /** NEW: 0..1 progress to show as a ring on the badge */
   centerProgress01?: number;
+  targetRelOverride?: number;
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const [w, setW] = React.useState(0);
@@ -104,12 +104,25 @@ export default function TuneView({
     return () => ro.disconnect();
   }, []);
 
-  const activeRels = React.useMemo(
+  // Active rels (unique) for ring labels
+  const activeRelsBase = React.useMemo(
     () => deriveActiveRelsFromPhrase(phrase, tonicPc),
     [phrase, tonicPc]
   );
 
-  const targetRel = activeRels[0] ?? 0;
+  // Current target rel to use (override > first rel > 0)
+  const targetRel = React.useMemo<number>(() => {
+    const fallback = activeRelsBase[0] ?? 0;
+    const n = typeof targetRelOverride === "number" ? targetRelOverride : fallback;
+    return ((n % 12) + 12) % 12;
+  }, [activeRelsBase, targetRelOverride]);
+
+  // Put the current target first so PolarTuneView greens the right wedge
+  const activeRelsOrdered = React.useMemo(() => {
+    const rest = activeRelsBase.filter((r) => r !== targetRel);
+    return [targetRel, ...rest];
+  }, [activeRelsBase, targetRel]);
+
   const targetMidi = React.useMemo(
     () => firstTargetMidi(phrase, tonicPc, targetRel),
     [phrase, tonicPc, targetRel]
@@ -117,7 +130,7 @@ export default function TuneView({
 
   // Center labels
   const centerPrimary = React.useMemo(() => {
-    const absPc = (((tonicPc + (targetRel ?? 0)) % 12) + 12) % 12;
+    const absPc = (((tonicPc + targetRel) % 12) + 12) % 12;
     return pcToSolfege(absPc, tonicPc, scaleName, {
       chromaticStyle: 'auto',
       caseStyle: 'capital',
@@ -144,23 +157,11 @@ export default function TuneView({
 
   return (
     <div ref={hostRef} className="w-full h-full flex flex-col items-center justify-center">
-      {/* Chart */}
       <div style={{ position: "relative", width: w, height: h }}>
-        <PolarTuneView
-          tonicPc={tonicPc}
-          scaleName={scaleName}
-          activeRels={activeRels}
-          title={title}
-          liveRel={liveRel}
-          liveCents={liveCents}
-          confidence={confidence}
-          confThreshold={confThreshold}
-          centerPrimary={centerPrimary}
-          centerSecondary={centerSecondary}
-          centerProgress01={centerProgress01}  // NEW
-        />
-        {/* live capture overlay (bands only) */}
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        <div
+          style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0 }}
+          aria-hidden
+        >
           <PolarPitchTune
             width={w}
             height={h}
@@ -168,12 +169,27 @@ export default function TuneView({
             confidence={confidence}
             confThreshold={confThreshold}
             tonicPc={tonicPc}
-            targetRel={targetRel}
+            targetRel={targetRel}   // ← current expected note
+          />
+        </div>
+
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <PolarTuneView
+            tonicPc={tonicPc}
+            scaleName={scaleName}
+            activeRels={activeRelsOrdered}  // ← target first for wedge highlight
+            title={title}
+            liveRel={liveRel}
+            liveCents={liveCents}
+            confidence={confidence}
+            confThreshold={confThreshold}
+            centerPrimary={centerPrimary}
+            centerSecondary={centerSecondary}
+            centerProgress01={centerProgress01}
           />
         </div>
       </div>
 
-      {/* Indicator BELOW the chart */}
       <CentsIndicator
         liveRel={liveRel}
         liveCents={liveCents}

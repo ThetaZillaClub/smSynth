@@ -19,8 +19,8 @@ type PlayOptions = {
 
 /** Internal representation of a musical "voice" (a note tone) we can release gracefully. */
 type Voice = {
-  osc: OscillatorNode;
-  g: GainNode;
+  osc: OscillatorNode;  // main (warm) oscillator
+  g: GainNode;          // shared envelope gain
   cleanup: () => void;
   released?: boolean;
 };
@@ -30,10 +30,14 @@ const TIMBRE = {
   // Cosine-series amplitudes for harmonics 1..4 (very gentle)
   partials: [1.0, 0.08, 0.04, 0.02] as const,
   // Low-pass cutoff ~ k * fundamental, clamped to [min,max]
-  lpfMult: 2.6,   // try 2.4–3.2 to taste
-  lpfMin: 1200,
-  lpfMax: 3000,
-  lpfQ: 0.55,     // lower Q avoids perceptual pitch shift from resonant peaks
+  // ↓ slightly darker & less resonant to reduce perceived "sharpness"
+  lpfMult: 2.0,   // was 2.6
+  lpfMin: 900,    // was 1200
+  lpfMax: 2800,   // was 3000
+  lpfQ: 0.35,     // was 0.55
+  // Anchor & subharmonic helpers
+  anchorMs: 140,  // brief pure sine at onset to lock pitch
+  subGain: 0.05,  // ≈ -26 dB at f0/2
 };
 
 export default function usePhrasePlayer() {
@@ -285,7 +289,7 @@ export default function usePhrasePlayer() {
   };
 
   /**
-   * Graceful release for a voice: ramp gain down quickly and stop the osc after the tail.
+   * Graceful release for a voice: ramp gain down quickly and stop the main osc after the tail.
    */
   const releaseVoice = useCallback((voice: Voice, relSecOverride?: number) => {
     const ctx = ctxRef.current;
@@ -322,9 +326,11 @@ export default function usePhrasePlayer() {
   }, [releaseVoice]);
 
   /**
-   * Musical tone (warmer recipe):
+   * Musical tone (warmer recipe) with:
    * - Warm periodic wave (tiny upper partials)
    * - LPF cutoff key-tracked to fundamental (prevents "bright = sharp" illusion)
+   * - Brief sine anchor at onset
+   * - Very quiet subharmonic (f0/2) to stabilize perceived pitch
    * - Same soft envelope
    */
   const scheduleNote = useCallback((midi: number, start: number, dur: number, a4Hz: number) => {
@@ -332,9 +338,24 @@ export default function usePhrasePlayer() {
     const ctx = ctxRef.current;
     const hz = midiToHz(midi, a4Hz);
 
+    // Main warm oscillator
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(getWarmPeriodicWave(ctx));
     osc.frequency.value = hz;
+
+    // Pitch anchor: brief pure sine at f0
+    const anchor = ctx.createOscillator();
+    anchor.type = "sine";
+    anchor.frequency.value = hz;
+    const anchorGain = ctx.createGain();
+    anchorGain.gain.value = 0;
+
+    // Subharmonic anchor: f0/2 at very low level
+    const sub = ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.value = hz / 2;
+    const subGain = ctx.createGain();
+    subGain.gain.value = TIMBRE.subGain;
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
@@ -344,16 +365,31 @@ export default function usePhrasePlayer() {
 
     const g = ctx.createGain();
     osc.connect(filter);
+    anchor.connect(anchorGain);
+    anchorGain.connect(filter);
+    sub.connect(subGain);
+    subGain.connect(filter);
     filter.connect(g);
     g.connect(noteMasterGainRef.current);
 
     const { safeStart, stopAt, relSec } = applyEnvelope(g, start, dur);
 
+    // Crossfade: ~140ms sine → warm wave
+    const ANCHOR_SEC = TIMBRE.anchorMs / 1000;
+    anchorGain.gain.setValueAtTime(0.0, safeStart);
+    anchorGain.gain.linearRampToValueAtTime(0.9, safeStart + 0.02);         // up quickly
+    anchorGain.gain.linearRampToValueAtTime(0.0, safeStart + ANCHOR_SEC);    // down by ~140ms
+
     const voice: Voice = {
       osc,
       g,
       cleanup: () => {
-        try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
+        try {
+          osc.disconnect();
+          anchor.disconnect(); anchorGain.disconnect();
+          sub.disconnect(); subGain.disconnect();
+          filter.disconnect(); g.disconnect();
+        } catch {}
         activeVoicesRef.current.delete(voice);
       },
     };
@@ -361,10 +397,20 @@ export default function usePhrasePlayer() {
     osc.onended = () => voice.cleanup();
 
     osc.start(safeStart);
+    anchor.start(safeStart);
+    sub.start(safeStart);
+
+    anchor.stop(stopAt);
+    sub.stop(stopAt);
     osc.stop(stopAt);
 
     // If stop() happens mid-note, release gracefully using our envelope tail.
-    scheduledStopFns.current.push(() => releaseVoice(voice, relSec));
+    scheduledStopFns.current.push(() => {
+      releaseVoice(voice, relSec);
+      // ensure auxiliary oscillators don't linger
+      try { anchor.stop(ctx.currentTime + 0.01); } catch {}
+      try { sub.stop(ctx.currentTime + 0.01); } catch {}
+    });
   }, [releaseVoice]);
 
   const playPhrase = useCallback(
@@ -410,7 +456,7 @@ export default function usePhrasePlayer() {
   useEffect(() => () => stopAllScheduled(), [stopAllScheduled]);
 
   /**
-   * Standalone tone (e.g., A440) with the same timbre chain (warm).
+   * Standalone tone (e.g., A440) with the same timbre chain (warm + anchor + sub).
    */
   const playToneHz = useCallback(
     async (hz: number, durSec: number) => {
@@ -422,9 +468,24 @@ export default function usePhrasePlayer() {
       const ctx = ctxRef.current;
       const start = ctx.currentTime + 0.05;
 
+      // Main warm oscillator
       const osc = ctx.createOscillator();
       osc.setPeriodicWave(getWarmPeriodicWave(ctx));
       osc.frequency.value = hz;
+
+      // Pitch anchor: brief pure sine at f0
+      const anchor = ctx.createOscillator();
+      anchor.type = "sine";
+      anchor.frequency.value = hz;
+      const anchorGain = ctx.createGain();
+      anchorGain.gain.value = 0;
+
+      // Subharmonic f0/2
+      const sub = ctx.createOscillator();
+      sub.type = "sine";
+      sub.frequency.value = hz / 2;
+      const subGain = ctx.createGain();
+      subGain.gain.value = TIMBRE.subGain;
 
       const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
@@ -434,16 +495,31 @@ export default function usePhrasePlayer() {
 
       const g = ctx.createGain();
       osc.connect(filter);
+      anchor.connect(anchorGain);
+      anchorGain.connect(filter);
+      sub.connect(subGain);
+      subGain.connect(filter);
       filter.connect(g);
       g.connect(noteMasterGainRef.current);
 
       const { safeStart, stopAt, relSec } = applyEnvelope(g, start, durSec);
 
+      // Crossfade anchor
+      const ANCHOR_SEC = TIMBRE.anchorMs / 1000;
+      anchorGain.gain.setValueAtTime(0.0, safeStart);
+      anchorGain.gain.linearRampToValueAtTime(0.9, safeStart + 0.02);
+      anchorGain.gain.linearRampToValueAtTime(0.0, safeStart + ANCHOR_SEC);
+
       const voice: Voice = {
         osc,
         g,
         cleanup: () => {
-          try { osc.disconnect(); filter.disconnect(); g.disconnect(); } catch {}
+          try {
+            osc.disconnect();
+            anchor.disconnect(); anchorGain.disconnect();
+            sub.disconnect(); subGain.disconnect();
+            filter.disconnect(); g.disconnect();
+          } catch {}
           activeVoicesRef.current.delete(voice);
         },
       };
@@ -451,9 +527,18 @@ export default function usePhrasePlayer() {
       osc.onended = () => voice.cleanup();
 
       osc.start(safeStart);
+      anchor.start(safeStart);
+      sub.start(safeStart);
+
+      anchor.stop(stopAt);
+      sub.stop(stopAt);
       osc.stop(stopAt);
 
-      scheduledStopFns.current.push(() => releaseVoice(voice, relSec));
+      scheduledStopFns.current.push(() => {
+        releaseVoice(voice, relSec);
+        try { anchor.stop(ctx.currentTime + 0.01); } catch {}
+        try { sub.stop(ctx.currentTime + 0.01); } catch {}
+      });
     },
     [warm, stopAllScheduled, releaseVoice]
   );

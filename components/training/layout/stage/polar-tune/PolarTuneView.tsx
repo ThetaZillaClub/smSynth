@@ -32,7 +32,6 @@ type Props = {
 
 const TEXT_DARK = '#0f0f0f';
 const TEXT_OFF  = '#6b7280';
-const BORDER    = '#dcdcdc';
 
 const BLUE_LIVE  = 'rgba(132, 179, 246, VAR_A)';
 const GREEN_NEAR = 'rgba(90, 198, 152, VAR_A)';

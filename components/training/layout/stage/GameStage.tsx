@@ -23,10 +23,6 @@ import type { TakeScore } from "@/utils/scoring/score";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
 import TuneView from "./polar-tune/TuneView";
 
-/* ────────────────────────────────────────────────────────────── */
-/* Types                                                          */
-/* ────────────────────────────────────────────────────────────── */
-
 type AnalyticsSnapshot = {
   phrase: Phrase;
   rhythm: RhythmEvent[] | null;
@@ -65,37 +61,29 @@ type Props = {
   highHz?: number | null;
   clef?: "treble" | "bass" | null;
 
-  /** Visual toggles for piano-roll rectangles */
   showNoteBlocks?: boolean;
   showNoteBorders?: boolean;
   blocksWhenLyrics?: boolean;
 
-  /** Right-side vertical panel content (e.g., Pretest / TakeReview). */
   stageAside?: React.ReactNode;
 
-  /** accepted but unused (kept for compatibility with parent) */
   step?: "low" | "high" | "play";
   loopPhase?: unknown;
 
-  /** 🔑 NEW: mode-aware solfege for piano roll */
   tonicPc?: number;
   scaleName?: ScaleName | string;
 
-  /** NEW: analytics payload (used when view==="analytics") */
   analytics?: AnalyticsPayload;
 
-  /** NEW: 0..1 progress to render as a ring on the Polar view’s center badge */
   centerProgress01?: number;
+
+  /** NEW: tell Polar which relative pc is the current target */
+  targetRelOverride?: number;
 };
 
-/* Helper: narrow unknown/string → SolfegeScaleName | undefined */
-function toSolfegeName(x: unknown): SolfegeScaleName | undefined {
-  return typeof x === "string" ? (x as SolfegeScaleName) : undefined;
+function toSolfegeName(x: unknown) {
+  return typeof x === "string" ? (x as any as SolfegeScaleName) : undefined;
 }
-
-/* ────────────────────────────────────────────────────────────── */
-/* Wrapper: no hooks here → delegates to view-specific component  */
-/* ────────────────────────────────────────────────────────────── */
 
 export default function GameStage(props: Props) {
   const {
@@ -124,10 +112,6 @@ export default function GameStage(props: Props) {
   return <MainStageView {...props} />;
 }
 
-/* ────────────────────────────────────────────────────────────── */
-/* Analytics-only view (no hooks needed)                          */
-/* ────────────────────────────────────────────────────────────── */
-
 function AnalyticsStageView({
   analytics,
   stageAside,
@@ -146,7 +130,6 @@ function AnalyticsStageView({
   return (
     <div className="w-full h-full min-h-[260px]">
       <div className="w-full h-full flex gap-3">
-        {/* LEFT: Analytics */}
         <div className="flex-1 min-w-0 min-h-0 rounded-xl shadow-md">
           <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
             <SessionAnalytics
@@ -155,13 +138,10 @@ function AnalyticsStageView({
               bpm={analytics?.bpm ?? bpmFallback}
               den={analytics?.den ?? denFallback}
               tonicPc={analytics?.tonicPc ?? tonicPcFallback}
-              // SessionAnalytics accepts string | SolfegeScaleName; string is safe here.
               scaleName={(analytics?.scaleName ?? scaleNameFallback) as string}
             />
           </div>
         </div>
-
-        {/* RIGHT: Side panel */}
         <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
           <SidePanelLayout>{stageAside}</SidePanelLayout>
         </aside>
@@ -169,10 +149,6 @@ function AnalyticsStageView({
     </div>
   );
 }
-
-/* ────────────────────────────────────────────────────────────── */
-/* Main stage (piano/sheet/polar). Hooks live here only.          */
-/* ────────────────────────────────────────────────────────────── */
 
 function MainStageView({
   phrase,
@@ -206,10 +182,9 @@ function MainStageView({
   tonicPc,
   scaleName,
 
-  /** NEW: center progress ring fraction for Polar view */
   centerProgress01,
+  targetRelOverride,
 }: Omit<Props, "analytics">) {
-  // Keep timeline math identical across canvases
   const WINDOW_SEC = 4;
   const ANCHOR_RATIO = 0.1;
 
@@ -239,30 +214,25 @@ function MainStageView({
     };
   }, [height]);
 
-  // Sheet sizing + systems
   const sheetHostRef = useRef<HTMLDivElement | null>(null);
   const [sheetW, setSheetW] = useState<number>(0);
   const [systems, setSystems] = useState<SystemLayout[] | null>(null);
 
   useLayoutEffect(() => {
     if (view !== "sheet") return;
-
     const el = sheetHostRef.current;
     if (!el) return;
-
     let raf = 0;
     const read = () => {
       const w = el.clientWidth || Math.round(el.getBoundingClientRect().width);
       setSheetW((prev) => (w && w !== prev ? w : prev));
     };
-
     read();
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(read);
     });
     ro.observe(el);
-
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
@@ -278,16 +248,10 @@ function MainStageView({
     }
   }, []);
 
-  const hasPhrase =
-    !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
+  const hasPhrase = !!(phrase && Array.isArray(phrase.notes) && phrase.notes.length > 0);
   const showRhythm = !!(rhythm && rhythm.length);
   const wantRhythm = hasPhrase && showRhythm && view !== "sheet" && view !== "polar";
 
-  // Make the rhythm lane EXACTLY one piano-roll row high.
-  // Piano roll is 1 octave of rows → 13 cells (inclusive upper line).
-  // Solve for main + rhythm + gap = fillH:
-  //   main + (main/13) + GAP = fillH  =>  main = (fillH - GAP) * 13/14
-  //   rhythm = main/13                =>  rhythm = (fillH - GAP) / 14
   const GAP = 8;
   const ROWS = 13;
   let mainH: number;
@@ -297,7 +261,7 @@ function MainStageView({
     const avail = fillH - GAP;
     const mainTarget = Math.round((avail * ROWS) / (ROWS + 1));
     mainH = Math.max(200, mainTarget);
-    rhythmH = Math.max(0, avail - mainH); // ensures exact sum + exact single row height
+    rhythmH = Math.max(0, avail - mainH);
   } else {
     mainH = Math.max(200, fillH);
     rhythmH = 0;
@@ -323,7 +287,6 @@ function MainStageView({
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
       <div className="w-full h-full flex gap-3">
-        {/* LEFT: Main stage area */}
         <div className="flex-1 min-w-0 flex flex-col drop-shadow-sm rounded-xl shadow-md">
           <div className="w-full">
             {!hasPhrase ? (
@@ -380,9 +343,10 @@ function MainStageView({
                   confidence={confidence ?? 0}
                   confThreshold={confThreshold ?? 0.5}
                   tonicPc={typeof tonicPc === "number" ? tonicPc : 0}
-                  scaleName={(scaleName as SolfegeScaleName) ?? "major"}
-                  /** NEW: progress ring on center badge */
+                  scaleName={(scaleName as any as SolfegeScaleName) ?? "major"}
                   centerProgress01={centerProgress01}
+                  // NEW: steer target wedge to the current expected note
+                  targetRelOverride={targetRelOverride}
                 />
               </div>
             ) : (
@@ -398,14 +362,11 @@ function MainStageView({
                 startAtMs={startAtMs}
                 lyrics={lyrics}
                 keySig={keySig}
-                /** keep in lockstep with rhythm roll */
                 windowSec={WINDOW_SEC}
                 anchorRatio={ANCHOR_RATIO}
-                /** Visual toggles for rectangles */
                 showNoteBlocks={showNoteBlocks}
                 showNoteBorders={showNoteBorders}
                 blocksWhenLyrics={blocksWhenLyrics}
-                /** 🔑 NEW: rotate solfege labels with the mode */
                 solfegeTonicPc={tonicPc}
                 solfegeScaleName={toSolfegeName(scaleName)}
               />
@@ -429,7 +390,6 @@ function MainStageView({
           ) : null}
         </div>
 
-        {/* RIGHT: Vertical panel — ALWAYS visible */}
         <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
           {renderedPanel}
         </aside>
