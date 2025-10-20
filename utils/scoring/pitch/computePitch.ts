@@ -11,13 +11,12 @@ export function computePitchScore(
 ): PitchScore {
   const { confMin, centsOk, onsetGraceMs } = options;
 
-  const TAIL_GRACE_MS = 80;     // ignore last 80ms (release)
-  const TRIM_UPPER = 0.25;      // drop worst 25% for MAE calc
+  const TAIL_GRACE_MS = 80;
+  const TRIM_UPPER = 0.25;
 
   const voiced = filterVoiced(samples, confMin);
   const perNote: PerNotePitch[] = [];
   let sumOn = 0, sumDur = 0, allCentsAbs: number[] = [];
-  let sumEvalDur = 0;
 
   for (let i = 0; i < phrase.notes.length; i++) {
     const n = phrase.notes[i];
@@ -34,7 +33,7 @@ export function computePitchScore(
     for (const s of sw) {
       const a = Math.abs(centsBetweenHz(s.hz!, targetHz));
       centsAbs.push(a);
-      const credit = linearCredit50_100(a, centsOk, 100); // 100¢ => 0 credit
+      const credit = linearCredit50_100(a, centsOk, 100);
       goodSec += step * credit;
     }
 
@@ -42,17 +41,24 @@ export function computePitchScore(
     const ratio = evalDur > 0 ? Math.min(1, goodSec / evalDur) : 0;
     sumOn += goodSec;
     sumDur += evalDur;
-    sumEvalDur += evalDur;
 
     const mae = centsAbs.length ? trimmedMean(centsAbs, TRIM_UPPER) : 120;
-    perNote.push({ idx: i, timeOnPitch: goodSec, dur: evalDur, ratio, centsMae: mae });
+
+    // ⬇️ include integer MIDI for DB grouping/insert
+    perNote.push({
+      idx: i,
+      midi: Math.round(n.midi),
+      timeOnPitch: goodSec,
+      dur: evalDur,
+      ratio,
+      centsMae: mae,
+    });
+
     allCentsAbs.push(...centsAbs);
   }
 
   const timeOnPitchRatio = sumDur > 0 ? Math.min(1, sumOn / sumDur) : 0;
   const centsMaeAll = allCentsAbs.length ? trimmedMean(allCentsAbs, TRIM_UPPER) : 120;
-
-  // no top-end easing, no perfection snap
   const percent = 100 * timeOnPitchRatio;
 
   return {

@@ -1,5 +1,6 @@
 // hooks/gameplay/useScoringLifecycle.ts
 "use client";
+
 import { useEffect, useRef, useState } from "react";
 import type { Phrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
@@ -28,9 +29,7 @@ type ScoreTakeFn = (args: {
   melodyOnsetsSec: number[];
   rhythmOnsetsSec?: number[] | null;
   align: AlignFn;
-  /** Clamp alignment/scoring length (seconds) */
   phraseLengthOverrideSec?: number;
-  /** Adjust scoring tolerance per mode */
   optionsOverride?: {
     confMin?: number;
     centsOk?: number;
@@ -38,7 +37,6 @@ type ScoreTakeFn = (args: {
     maxAlignMs?: number;
     goodAlignMs?: number;
   };
-  /** NEW: required hold length (seconds) for a timing-free window to count */
   minHoldSec?: number;
 }) => TakeScore;
 
@@ -64,12 +62,13 @@ type ScoringLifecycleArgs = {
   calibratedLatencyMs: number | null;
   gestureLatencyMs: number;
 
-  exerciseLoops: number | null | undefined;
+  exerciseLoops: number | null | undefined; // when provided, triggers end-of-lesson post
   lessonSlug: string | null | undefined;
   sessionId: string | null | undefined;
 
   sessionScores: TakeScore[];
   scoreTake: ScoreTakeFn;
+
   alignForScoring: AlignFn;
 
   sampler: { snapshot: () => PitchSample[] };
@@ -77,11 +76,8 @@ type ScoringLifecycleArgs = {
 
   haveRhythm: boolean;
 
-  /** Timing-free: treat whole window as a single capture */
   timingFreeResponse?: boolean;
-  /** Effective capture window used (seconds) */
   freeCaptureSec?: number;
-  /** NEW: min confident hold required to accept a window */
   freeMinHoldSec?: number;
 };
 
@@ -113,7 +109,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
 
   const [takeSnapshots, setTakeSnapshots] = useState<TakeSnapshot[]>([]);
 
-  // Freeze content at lead-in
+  // Freeze inputs at lead-in for consistency
   const phraseForTakeRef = useRef<Phrase | null>(null);
   const rhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
   const melodyRhythmForTakeRef = useRef<RhythmEvent[] | null>(null);
@@ -127,7 +123,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     }
   }, [pretestActive, loopPhase, phrase, rhythmEffective, melodyRhythm]);
 
-  // Record → Rest transition → score, snapshot, maybe submit aggregate
+  // Record → Rest: score current take and snapshot it
   const prevPhaseRef = useRef(loopPhase);
   useEffect(() => {
     const prev = prevPhaseRef.current;
@@ -141,9 +137,6 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
       const pitchLagSec = 0.02;
       const gestureLagSec = ((calibratedLatencyMs ?? gestureLatencyMs) || 0) / 1000;
 
-      // ── Timing-free adjustments:
-      //  - ignore rhythmic alignment pressure (beats=[0], onsets=[0])
-      //  - make pitch scoring slightly more forgiving
       const snapshotBeats =
         timingFreeResponse ? () => [0] : () => (haveRhythm ? hand.snapshotEvents() : []);
 
@@ -154,11 +147,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
         timingFreeResponse ? undefined : makeOnsetsFromRhythm(usedRhythm, bpm, den);
 
       const optionsOverride = timingFreeResponse
-        ? {
-            confMin: 0.5,    // a bit more tolerant on low-volume voices
-            centsOk: 80,      // widen "OK" window for pitch stability
-            onsetGraceMs: 160 // just in case any onset math remains
-          }
+        ? { confMin: 0.5, centsOk: 80, onsetGraceMs: 160 }
         : undefined;
 
       const score = scoreTake({
@@ -178,46 +167,70 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
             ? freeCaptureSec
             : undefined,
         optionsOverride,
-        // ensure we only accept a window if it’s held long enough
         minHoldSec: typeof freeMinHoldSec === "number" ? freeMinHoldSec : undefined,
       });
 
-      // Aggregate submit at end of session
-      const totalTakesNow = sessionScores.length + 1;
-      const maxTakes = Math.max(1, Number(exerciseLoops ?? 10));
+      const phraseForSnapshots = ((score as any).__evalPhrase ?? usedPhrase)!;
 
-      if (lessonSlug && sessionId && totalTakesNow >= maxTakes && !sessionSubmittedRef.current) {
+      // analytics / right-panel snapshots
+      setTakeSnapshots((xs) => [
+        ...xs,
+        {
+          phrase: phraseForSnapshots,
+          rhythm: usedRhythm ?? null,
+          melodyRhythm: melodyRhythmForTakeRef.current ?? null,
+        },
+      ]);
+
+      // End-of-lesson submit (ONE push): only when loops are known and completed
+      const loops =
+        typeof exerciseLoops === "number" && Number.isFinite(exerciseLoops) && exerciseLoops > 0
+          ? exerciseLoops
+          : null;
+
+      const totalTakesNow = args.sessionScores.length + 1;
+
+      if (
+        lessonSlug &&
+        sessionId &&
+        loops != null &&
+        totalTakesNow >= loops &&
+        !sessionSubmittedRef.current
+      ) {
         sessionSubmittedRef.current = true;
-        const allScores = [...sessionScores, score];
+
+        const allScores = [...args.sessionScores, score];
         const aggScore = aggregateForSubmission(allScores);
 
-        const snapshots = {
-          perTakeFinals: allScores.map((s, i) => ({ i, final: s.final.percent })),
-          perTakePitch: allScores.map((s, i) => ({ i, pct: s.pitch.percent })),
+        // flatten for DB/route columns
+        const flat = {
+          final_percent: Math.round(aggScore.final.percent * 100) / 100,
+          pitch_percent: Math.round(aggScore.pitch.percent * 100) / 100,
+          rhythm_melody_percent: Math.round(aggScore.rhythm.melodyPercent * 100) / 100,
+          rhythm_line_percent: aggScore.rhythm.lineEvaluated
+            ? Math.round(aggScore.rhythm.linePercent * 100) / 100
+            : null,
+          intervals_correct_ratio: Math.round(aggScore.intervals.correctRatio * 10000) / 10000,
         };
 
-        void fetch(`/api/lessons/${lessonSlug}/results`, {
+        void fetch(`/api/lessons/${encodeURIComponent(lessonSlug)}/results`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({
             sessionId,
-            takeIndex: totalTakesNow - 1,
-            score: aggScore,
-            snapshots,
+            takeIndex: totalTakesNow - 1, // index of last take
+            scoreVersion: 2,
+            score: aggScore,              // rich object for UI/auditing
+            ...flat,                      // flattened columns for Home/DB
+            snapshots: {
+              perTakeFinals: allScores.map((s, i) => ({ i, final: s.final.percent })),
+              perTakePitch: allScores.map((s, i) => ({ i, pct: s.pitch.percent })),
+            },
+            isAggregate: true,
           }),
         }).catch(() => {});
       }
-
-      // Right-panel snapshots for analytics
-      setTakeSnapshots((xs) => [
-        ...xs,
-        {
-          phrase: usedPhrase,
-          rhythm: usedRhythm ?? null,
-          melodyRhythm: melodyRhythmForTakeRef.current ?? null,
-        },
-      ]);
     }
   }, [
     loopPhase,
@@ -229,7 +242,6 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     leadInSec,
     calibratedLatencyMs,
     gestureLatencyMs,
-    sessionScores,
     exerciseLoops,
     lessonSlug,
     sessionId,
@@ -241,6 +253,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     timingFreeResponse,
     freeCaptureSec,
     freeMinHoldSec,
+    args.sessionScores.length, // ensure effect sees latest length
   ]);
 
   return { takeSnapshots };

@@ -4,6 +4,7 @@ import { letterFromPercent } from "@/utils/scoring/grade";
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const r2 = (x: number) => Math.round(x * 100) / 100;
+const r5 = (x: number) => Math.round(x * 100000) / 100000; // for ratio(6,5)
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a,b)=>a+b,0) / xs.length : 0);
 
 export function shortIntervalLabel(semitones: number): string {
@@ -22,6 +23,34 @@ export function aggregateForSubmission(scores: TakeScore[]): TakeScore {
   const pitchMae = mean(scores.map((s) => s.pitch.centsMae));
   const melPct  = mean(scores.map((s) => s.rhythm.melodyPercent));
 
+  // ---- aggregate pitch per-MIDI for DB child table ----
+  type Acc = { n: number; ratio: number; mae: number };
+  const byMidi = new Map<number, Acc>();
+  for (const s of scores) {
+    for (const p of s.pitch.perNote ?? []) {
+      const midi = Math.round((p as any).midi ?? NaN);
+      if (!Number.isFinite(midi)) continue;
+      const g = byMidi.get(midi) ?? { n: 0, ratio: 0, mae: 0 };
+      g.n += 1;
+      g.ratio += (p.ratio - g.ratio) / g.n;
+      g.mae   += (p.centsMae - g.mae) / g.n;
+      byMidi.set(midi, g);
+    }
+  }
+  const pitchPerMidi = Array.from(byMidi.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([midi, g]) => ({
+      // keep the shape compatible with PerNotePitch so route can read it
+      idx: 0,
+      midi,
+      timeOnPitch: 0,
+      dur: 0,
+      n: g.n,                         // ⬅️ route reads this (defaults to 1 if absent)
+      ratio: r5(g.ratio),             // numeric(6,5)
+      centsMae: r2(g.mae),            // numeric(6,2)
+    }));
+
+  // ---- rhythm (existing) ----
   const melodyCoverages:number[] = [], melodyAbsErrs:number[] = [];
   const lineHits:number[] = [], lineAbsErrs:number[] = [];
   let anyLine = false;
@@ -48,6 +77,7 @@ export function aggregateForSubmission(scores: TakeScore[]): TakeScore {
   const linePercent     = anyLine ? r2(avgLinePct || 0) : 0;
   const combinedPercent = anyLine ? r2((melPct + linePercent)/2) : r2(melPct);
 
+  // ---- intervals (existing) ----
   const byClass = new Map<number, {attempts:number; correct:number}>();
   for (let i=0;i<=12;i++) byClass.set(i,{attempts:0,correct:0});
   scores.forEach(s => (s.intervals.classes ?? []).forEach(c => {
@@ -70,7 +100,13 @@ export function aggregateForSubmission(scores: TakeScore[]): TakeScore {
 
   return {
     final: { percent: r2(finalPct), letter: letterFromPercent(finalPct) },
-    pitch: { percent: r2(pitchPct), timeOnPitchRatio: r2(pitchOn), centsMae: r2(pitchMae), perNote: [] },
+    // ⬇️ keep aggregate summary AND provide per-MIDI rows for the route
+    pitch: {
+      percent: r2(pitchPct),
+      timeOnPitchRatio: r2(pitchOn),
+      centsMae: r2(pitchMae),
+      perNote: pitchPerMidi as any,  // { midi, n, ratio, centsMae } carried
+    },
     rhythm: {
       melodyPercent: r2(melPct), melodyHitRate, melodyMeanAbsMs,
       lineEvaluated: anyLine, linePercent, lineHitRate, lineMeanAbsMs,

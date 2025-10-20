@@ -11,12 +11,23 @@ import { PR_COLORS } from '@/utils/stage/theme';
 
 function isPassed(pct: number) {
   const l = letterFromPercent(pct);
-  return ['A', 'A-', 'B+', 'B', 'B-'].includes(l);
+  return ['A+', 'A', 'A-', 'B+', 'B', 'B-'].includes(l);
 }
 function isMastered(pct: number) {
   const l = letterFromPercent(pct);
   return ['A', 'A-'].includes(l);
 }
+
+// Precompute plain-slug uniqueness (appears in exactly one course?)
+const UNIQUE_SLUG = (() => {
+  const counts = new Map<string, number>();
+  for (const c of REGISTRY) for (const l of c.lessons) {
+    counts.set(l.slug, (counts.get(l.slug) ?? 0) + 1);
+  }
+  const uniq = new Map<string, boolean>();
+  for (const [slug, n] of counts) uniq.set(slug, n === 1);
+  return uniq;
+})();
 
 export default function AllCoursesCard({ courses }: { courses: Course[] }) {
   const router = useRouter();
@@ -29,14 +40,18 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
     return map;
   }, []);
 
-  const progressFor = (slug: string) => {
-    const lessons = lessonsByCourse.get(slug) ?? [];
+  const progressFor = (courseSlug: string) => {
+    const lessons = lessonsByCourse.get(courseSlug) ?? [];
     const total = lessons.length;
     if (!total) return { total: 0, started: 0, completed: 0, mastered: 0, pct: 0 };
 
     let started = 0, completed = 0, mastered = 0;
     for (const ls of lessons) {
-      const best = (bests ?? {})[ls];
+      const namespaced = `${courseSlug}/${ls}`;
+      const best =
+        (bests ?? {})[namespaced] ??
+        (UNIQUE_SLUG.get(ls) ? (bests as any)[ls] : undefined); // slug-only only if unique
+
       if (best != null) {
         started += 1;
         if (isPassed(best)) completed += 1;
@@ -76,7 +91,6 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
                 )}
               </div>
 
-              {/* Progress footer — piano-roll colors, larger type + thicker bar */}
               <div className="w-full">
                 <div className="flex items-center justify-between text-sm md:text-base text-[#0f0f0f] mb-2">
                   <span>{p.completed}/{p.total} completed</span>
@@ -88,17 +102,8 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
                     <span>{p.pct}%</span>
                   )}
                 </div>
-                <div
-                  className="h-3 rounded-full overflow-hidden"
-                  style={{ background: PR_COLORS.gridMinor }}
-                >
-                  <div
-                    className="h-full transition-[width] duration-500"
-                    style={{
-                      width: `${p.pct}%`,
-                      background: PR_COLORS.noteFill,
-                    }}
-                  />
+                <div className="h-3 rounded-full overflow-hidden" style={{ background: PR_COLORS.gridMinor }}>
+                  <div className="h-full transition-[width] duration-500" style={{ width: `${p.pct}%`, background: PR_COLORS.noteFill }} />
                 </div>
               </div>
             </button>

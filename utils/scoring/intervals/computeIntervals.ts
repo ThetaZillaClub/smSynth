@@ -1,3 +1,4 @@
+// utils/scoring/intervals/computeIntervals.ts
 import type { Phrase } from "@/utils/stage";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { IntervalScore, PitchSample } from "../types";
@@ -10,6 +11,8 @@ import { linearCredit50_100 } from "../helpers";
  * - Linear falloff to 0% by 100¢
  * - Median MIDI per note window (unchanged)
  * - Buckets 0..12 semitones (unison..octave)
+ *
+ * Direction-agnostic: compares |got| to |expected| so do→la and la→do both count.
  */
 export function computeIntervalScore(
   phrase: Phrase,
@@ -35,7 +38,9 @@ export function computeIntervalScore(
 
     const exp = phrase.notes[i].midi - phrase.notes[i - 1].midi; // semitones
     const got = mids[i] - mids[i - 1];                           // semitones
-    const errCents = Math.abs(100 * (got - exp));                // cents
+
+    // Direction-agnostic cents error: |100 * (|got| - |exp|)|
+    const errCents = Math.abs(100 * (Math.abs(got) - Math.abs(exp)));
 
     // same linear credit as pitch
     const credit = linearCredit50_100(errCents, centsOk, 100);

@@ -4,6 +4,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import type { LessonDef } from '@/lib/courses/registry';
+import { COURSES as REGISTRY } from '@/lib/courses/registry';
 import useLessonBests from '@/hooks/progress/useLessonBests';
 import { letterFromPercent } from '@/utils/scoring/grade';
 import { PR_COLORS } from '@/utils/stage/theme';
@@ -17,6 +18,17 @@ function statusFromBest(best: number | null | undefined): { key: StatusKey; labe
   if (['B+', 'B', 'B-'].includes(l)) return { key: 'completed', label: 'Completed' };
   return { key: 'started', label: 'Started' };
 }
+
+// Unique plain slug?
+const UNIQUE_SLUG = (() => {
+  const counts = new Map<string, number>();
+  for (const c of REGISTRY) for (const l of c.lessons) {
+    counts.set(l.slug, (counts.get(l.slug) ?? 0) + 1);
+  }
+  const uniq = new Map<string, boolean>();
+  for (const [slug, n] of counts) uniq.set(slug, n === 1);
+  return uniq;
+})();
 
 export default function LessonsCard({
   courseSlug,
@@ -37,25 +49,23 @@ export default function LessonsCard({
   return (
     <div className="grid grid-cols-1 gap-4 md:gap-5">
       {safeLessons.map((l) => {
-        const best = bestsSafe[l.slug] ?? null;
-        const { key, label } = statusFromBest(best);
+        const namespaced = `${courseSlug}/${l.slug}`;
+        const best =
+          bestsSafe[namespaced] ??
+          (UNIQUE_SLUG.get(l.slug) ? bestsSafe[l.slug] : undefined);
+
+        const { key, label } = statusFromBest(best ?? null);
         const letter = best != null ? letterFromPercent(best) : null;
 
-        // Chip visuals: light background, dark text, status-colored border + dot
         const chipBorder =
-          key === 'mastered'
-            ? PR_COLORS.noteFill
-            : key === 'completed'
-            ? PR_COLORS.dotFill
-            : PR_COLORS.gridMinor;
+          key === 'mastered' ? PR_COLORS.noteFill :
+          key === 'completed' ? PR_COLORS.dotFill :
+          PR_COLORS.gridMinor;
         const chipDot =
-          key === 'mastered'
-            ? PR_COLORS.noteFill
-            : key === 'completed'
-            ? PR_COLORS.dotFill
-            : key === 'started'
-            ? PR_COLORS.dotFill
-            : PR_COLORS.gridMinor;
+          key === 'mastered' ? PR_COLORS.noteFill :
+          key === 'completed' ? PR_COLORS.dotFill :
+          key === 'started' ? PR_COLORS.dotFill :
+          PR_COLORS.gridMinor;
 
         return (
           <button
@@ -72,23 +82,15 @@ export default function LessonsCard({
           >
             <div className="flex items-start justify-between gap-6">
               <div className="min-w-0">
-                <div className="text-2xl font-semibold text-[#0f0f0f] truncate">
-                  {l.title}
-                </div>
-                {!!l.summary && (
-                  <div className="mt-1 text-base text-[#0f0f0f] line-clamp-2">{l.summary}</div>
-                )}
+                <div className="text-2xl font-semibold text-[#0f0f0f] truncate">{l.title}</div>
+                {!!l.summary && <div className="mt-1 text-base text-[#0f0f0f] line-clamp-2">{l.summary}</div>}
               </div>
 
               <span
                 className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium bg-white"
                 style={{ borderColor: chipBorder, color: '#0f0f0f' }}
               >
-                <span
-                  className="inline-block w-2.5 h-2.5 rounded-full"
-                  style={{ background: chipDot }}
-                  aria-hidden
-                />
+                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: chipDot }} aria-hidden />
                 <span className="leading-none">{label}</span>
                 {best != null ? (
                   <span className="leading-none opacity-90">

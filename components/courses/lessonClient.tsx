@@ -19,7 +19,12 @@ export default function LessonClient({
   lessonConfig: Partial<SessionConfig>;
 }) {
   const params = useParams<{ course: string; lesson: string }>();
-  const lessonSlug = (params?.lesson ?? null) as string | null;
+  const courseSlug = (params?.course ?? null) as string | null;
+  const lessonSlugOnly = (params?.lesson ?? null) as string | null;
+
+  const lessonSlug = courseSlug && lessonSlugOnly
+    ? `${courseSlug}/${lessonSlugOnly}` // <-- namespaced key for storage
+    : lessonSlugOnly;
 
   const { studentRowId, rangeLowLabel, rangeHighLabel } =
     useStudentRow({ studentIdFromQuery: null });
@@ -35,7 +40,6 @@ export default function LessonClient({
     { autoSelectWindowIfMissing: true, clampKeyToRange: true }
   );
 
-  // Stable per-mount session id (browser only)
   const sessionIdRef = React.useRef<string | null>(null);
   if (!sessionIdRef.current) {
     sessionIdRef.current =
@@ -51,7 +55,7 @@ export default function LessonClient({
       studentRowId={studentRowId}
       rangeLowLabel={rangeLowLabel}
       rangeHighLabel={rangeHighLabel}
-      lessonSlug={lessonSlug}
+      lessonSlug={lessonSlug} 
       sessionId={sessionIdRef.current}
     />
   );

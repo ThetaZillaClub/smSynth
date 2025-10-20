@@ -13,11 +13,12 @@ const GRAY_PROGRESS = '#6b7280'; // dot when in progress (gray-500)
 
 function isPassed(pct: number) {
   const l = letterFromPercent(pct);
-  return ['A', 'A-', 'B+', 'B', 'B-'].includes(l);
+  return ['A+', 'A', 'A-', 'B+', 'B', 'B-'].includes(l);
 }
 function isMastered(pct: number) {
   const l = letterFromPercent(pct);
-  return ['A', 'A-'].includes(l);
+  // A+ and A = mastery; A- is not
+  return ['A+', 'A'].includes(l);
 }
 
 type Progress = {
@@ -27,6 +28,17 @@ type Progress = {
   mastered: number;
   pct: number;
 };
+
+// Precompute plain-slug uniqueness so we can safely fall back for legacy keys
+const UNIQUE_SLUG = (() => {
+  const counts = new Map<string, number>();
+  for (const c of COURSES) for (const l of c.lessons) {
+    counts.set(l.slug, (counts.get(l.slug) ?? 0) + 1);
+  }
+  const uniq = new Map<string, boolean>();
+  for (const [slug, n] of counts) uniq.set(slug, n === 1);
+  return uniq;
+})();
 
 export default function CoursesCard() {
   const router = useRouter();
@@ -38,14 +50,19 @@ export default function CoursesCard() {
     return map;
   }, []);
 
-  const progressFor = React.useCallback((slug: string): Progress => {
-    const lessons = lessonsByCourse.get(slug) ?? [];
+  const progressFor = React.useCallback((courseSlug: string): Progress => {
+    const lessons = lessonsByCourse.get(courseSlug) ?? [];
     const total = lessons.length;
     if (!total) return { total: 0, started: 0, completed: 0, mastered: 0, pct: 0 };
 
     let started = 0, completed = 0, mastered = 0;
     for (const ls of lessons) {
-      const best = (bests ?? {})[ls];
+      // Prefer namespaced key; fall back to plain slug only if unique
+      const namespaced = `${courseSlug}/${ls}`;
+      const best =
+        (bests ?? {})[namespaced] ??
+        (UNIQUE_SLUG.get(ls) ? (bests as any)[ls] : undefined);
+
       if (best != null) {
         started += 1;
         if (isPassed(best)) completed += 1;
@@ -81,12 +98,10 @@ export default function CoursesCard() {
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
-      {/* Header aligned with Session Performance (no divider line) */}
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-2xl font-semibold tracking-tight text-[#0f0f0f]">Courses</h3>
       </div>
 
-      {/* Body */}
       {loading ? (
         <div className="mt-2 flex-1 min-h-0">
           <div className="space-y-2">
@@ -105,13 +120,10 @@ export default function CoursesCard() {
             <div className="space-y-2">
               {COURSES.map((c) => {
                 const p = progressFor(c.slug);
-
-                // Left-side meta: never show “All complete”; only add a suffix when needed
                 const suffix =
                   p.mastered > 0 ? `${p.mastered} mastered`
                   : p.started > p.completed ? `${p.started - p.completed} in progress`
-                  : ''; // fully complete → no extra text
-
+                  : '';
                 const percentLabel = `${p.pct}%`;
 
                 return (
@@ -127,12 +139,10 @@ export default function CoursesCard() {
                       title={`${c.title} — ${p.completed}/${p.total} completed (${percentLabel})`}
                       aria-label={`${c.title}, ${p.completed} of ${p.total} completed, ${percentLabel}`}
                     >
-                      {/* Fixed-width tag pinned top-right */}
                       <div className="absolute top-2 right-4">
                         <ProgressTag p={p} />
                       </div>
 
-                      {/* Left: course title + meta (no % here) */}
                       <div className="min-w-0">
                         <div className="text-sm font-semibold text-[#0f0f0f] truncate">{c.title}</div>
                         <div className="text-xs text-[#0f0f0f]/65">

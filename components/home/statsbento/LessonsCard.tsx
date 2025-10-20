@@ -7,15 +7,23 @@ import { PR_COLORS } from '@/utils/stage';
 import { COURSES } from '@/lib/courses/registry';
 import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 
-const PASSED = new Set(['A','A-','B+','B','B-']);
-const MASTERED = new Set(['A','A+']); // A- is NOT mastery
+const PASSED = new Set(['A+', 'A', 'A-', 'B+', 'B', 'B-']);
+const MASTERED = new Set(['A', 'A', 'A+']);
 const BLUE_COMPLETED = '#3b82f6';
 
-const titleByLessonSlug: Record<string,string> = (() => {
-  const m: Record<string,string> = {};
-  for (const c of COURSES) for (const l of c.lessons) m[l.slug] = l.title;
+// namespaced title map: "course/lesson" → title
+const titleByCourseLesson: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const c of COURSES) for (const l of c.lessons) m[`${c.slug}/${l.slug}`] = l.title;
   return m;
 })();
+
+function titleForKey(key: string): string {
+  if (titleByCourseLesson[key]) return titleByCourseLesson[key];
+  // legacy fallback: show last segment
+  const last = key.includes('/') ? key.split('/').pop() || key : key;
+  return last;
+}
 
 export default function LessonsCard() {
   const { rows: baseRows, loading, error: baseErr } = useHomeResults();
@@ -23,29 +31,30 @@ export default function LessonsCard() {
   const recent = React.useMemo(() => {
     const rows = baseRows ?? [];
     const seen = new Set<string>();
-    const out: Array<{ slug: string; title: string; pct: number; letter: string; when: string }> = [];
+    const out: Array<{ key: string; title: string; pct: number; letter: string; when: string }> = [];
+
+    // walk newest → oldest; provider rows are ascending time
     for (let i = rows.length - 1; i >= 0 && out.length < 6; i--) {
       const r = rows[i];
-      const slug = String(r.lesson_slug ?? '');
-      if (!slug || seen.has(slug)) continue;
+      const key = String(r.lesson_key ?? r.lesson_slug ?? '');
+      if (!key || seen.has(key)) continue;
 
       const pct = Number(r.final_percent ?? 0);
       const letter = letterFromPercent(pct);
-      if (PASSED.has(letter)) {
-        seen.add(slug);
-        out.push({
-          slug,
-          title: titleByLessonSlug[slug] ?? slug,
-          pct: Math.round(pct),
-          letter,
-          when: new Date(r.created_at).toISOString().slice(0, 10),
-        });
-      }
+      if (!PASSED.has(letter)) continue;
+
+      seen.add(key);
+      out.push({
+        key,
+        title: titleForKey(key),
+        pct: Math.round(pct),
+        letter,
+        when: new Date(r.created_at).toISOString().slice(0, 10),
+      });
     }
     return out;
   }, [baseRows]);
 
-  /** Smaller fixed-size grade chip (top-right, out of flow) */
   const GradeChip = ({ pct, letter }: { pct: number; letter: string }) => {
     const dotColor = MASTERED.has(letter) ? PR_COLORS.noteFill : BLUE_COMPLETED;
     const label = `${pct}% ${letter}`;
@@ -64,14 +73,12 @@ export default function LessonsCard() {
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
-      {/* Header */}
       <div className="pb-3 border-b border-[#e5e7eb]">
         <h3 className="text-xl md:text-2xl font-semibold tracking-tight text-[#0f0f0f]">
           Completed Lessons
         </h3>
       </div>
 
-      {/* Body */}
       {loading ? (
         <div className="mt-3 flex-1 min-h-0">
           <div className="space-y-2">
@@ -90,7 +97,7 @@ export default function LessonsCard() {
             <div className="space-y-2">
               {recent.map((r) => (
                 <li
-                  key={r.slug}
+                  key={r.key}
                   role="listitem"
                   className="relative rounded-xl border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]
                              px-4 py-3 pr-28 shadow-sm transition
@@ -98,12 +105,9 @@ export default function LessonsCard() {
                   style={{ borderColor: '#e5e7eb' }}
                   title={`${r.title} — ${r.when}`}
                 >
-                  {/* Chip pinned top-right, doesn't affect text layout */}
                   <div className="absolute top-2 right-4">
                     <GradeChip pct={r.pct} letter={r.letter} />
                   </div>
-
-                  {/* Left column: ORIGINAL text styles preserved */}
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-[#0f0f0f] truncate">{r.title}</div>
                     <div className="text-xs text-[#0f0f0f]/65">{r.when}</div>

@@ -1,6 +1,8 @@
 // hooks/gameplay/useTakeScoring.ts
 "use client";
+
 import { useCallback, useState } from "react";
+import { hzToMidi } from "@/utils/pitch/pitchMath";
 import { computeTakeScore, type PitchSample, type TakeScore } from "@/utils/scoring/score";
 import type { Phrase } from "@/utils/stage";
 import type { ScoringAlignmentOptions } from "@/hooks/gameplay/useScoringAlignment";
@@ -12,13 +14,6 @@ type AlignFn = (
   opts?: ScoringAlignmentOptions
 ) => { samples: PitchSample[]; beats: number[] };
 
-type SubmitArgs = {
-  lessonSlug: string;
-  sessionId: string;
-  takeIndex: number;
-  snapshots?: unknown;
-};
-
 type ScoreOptions = {
   confMin: number;
   centsOk: number;
@@ -27,71 +22,122 @@ type ScoreOptions = {
   goodAlignMs: number;
 };
 
+// ───────────────────────────────── helpers ───────────────────────────────────
+const phraseWindowSec = (phrase: Phrase): number => {
+  if (!phrase?.notes?.length) return phrase?.durationSec ?? 0;
+  let end = 0;
+  for (const n of phrase.notes) end = Math.max(end, n.startSec + n.durSec);
+  return end;
+};
+
+const buildTimingFreePhrase = (src: Phrase, durSec: number): Phrase => {
+  const midi = src?.notes?.[0]?.midi ?? 60;
+  return { ...src, durationSec: durSec, notes: [{ midi, startSec: 0, durSec }] };
+};
+
+const buildTimingFreeMultiPhrase = (
+  src: Phrase,
+  runs: Array<{ startSec: number; endSec: number }>
+): Phrase => {
+  const want = Math.max(1, src?.notes?.length ?? 1);
+  const K = Math.min(runs.length, want);
+  let t = 0;
+  const notes = Array.from({ length: K }, (_, i) => {
+    const durSec = Math.max(0, runs[i].endSec - runs[i].startSec);
+    const midi = src?.notes?.[i]?.midi ?? src?.notes?.[0]?.midi ?? 60;
+    const out = { midi, startSec: t, durSec };
+    t += durSec;
+    return out;
+  });
+  const durationSec = notes.reduce((s, n) => s + n.durSec, 0);
+  return { ...src, durationSec, notes };
+};
+
+// Pitch-aware run splitter: splits on gaps *and* sustained pitch changes
+const findSuccessfulRuns = (
+  samples: PitchSample[],
+  confMin: number,
+  minHoldSec: number,
+  maxRuns: number,
+  maxGapSec = 0.12,
+  changeCents = 60,          // split when jump ≳ 60¢ and it sustains briefly
+  minChangeHoldSec = 0.06    // new pitch must persist ≥ 60ms
+): Array<{ startSec: number; endSec: number }> => {
+  const voiced = samples
+    .filter((s) => (s.hz ?? 0) > 0 && (s.conf ?? 0) >= confMin)
+    .sort((a, b) => a.tSec - b.tSec);
+  if (!voiced.length || maxRuns <= 0) return [];
+
+  const runs: Array<{ startIdx: number; endIdx: number }> = [];
+  let segStart = 0;
+  let changeStart: number | null = null;
+  let prevMidi = hzToMidi(voiced[0].hz!);
+
+  for (let i = 1; i < voiced.length; i++) {
+    const dt = voiced[i].tSec - voiced[i - 1].tSec;
+    const midi = hzToMidi(voiced[i].hz!);
+
+    // hard split on gaps
+    if (dt > maxGapSec) {
+      runs.push({ startIdx: segStart, endIdx: i - 1 });
+      segStart = i;
+      changeStart = null;
+      prevMidi = midi;
+      continue;
+    }
+
+    // watch for a sustained pitch jump
+    const diffSemi = Math.abs(midi - prevMidi);
+    if (diffSemi >= changeCents / 100) {
+      if (changeStart == null) changeStart = i;
+      const sustain = voiced[i].tSec - voiced[changeStart].tSec;
+      if (sustain >= minChangeHoldSec) {
+        // close previous segment right before the change region
+        const cut = Math.max(segStart, changeStart - 1);
+        if (cut >= segStart) runs.push({ startIdx: segStart, endIdx: cut });
+        segStart = changeStart;
+        changeStart = null;
+      }
+    } else {
+      changeStart = null;
+    }
+
+    prevMidi = midi;
+  }
+  // close last
+  runs.push({ startIdx: segStart, endIdx: voiced.length - 1 });
+
+  // map to times, filter by hold, limit to K longest (keep chronological order)
+  const segs = runs
+    .map(({ startIdx, endIdx }) => ({
+      startSec: voiced[startIdx].tSec,
+      endSec: voiced[endIdx].tSec,
+      dur: Math.max(0, voiced[endIdx].tSec - voiced[startIdx].tSec),
+    }))
+    .filter((s) => s.dur >= Math.max(0, minHoldSec));
+
+  if (segs.length <= maxRuns) return segs;
+
+  // take the longest K, but return in time order
+  const picked = segs
+    .slice()
+    .sort((a, b) => b.dur - a.dur)
+    .slice(0, maxRuns)
+    .sort((a, b) => a.startSec - b.startSec)
+    .map(({ startSec, endSec }) => ({ startSec, endSec }));
+
+  return picked;
+};
+
+// ───────────────────────────────── hook ──────────────────────────────────────
 export default function useTakeScoring() {
   const [lastScore, setLastScore] = useState<TakeScore | null>(null);
   const [sessionScores, setSessionScores] = useState<TakeScore[]>([]);
-  const [lastResultId, setLastResultId] = useState<string | null>(null);
-  const [postError, setPostError] = useState<string | null>(null);
 
-  const phraseWindowSec = (phrase: Phrase): number => {
-    if (!phrase?.notes?.length) return phrase?.durationSec ?? 0;
-    let end = 0;
-    for (const n of phrase.notes) end = Math.max(end, n.startSec + n.durSec);
-    return end;
-  };
-
-  /** Flatten to single sustained note for timing-free scoring (fallback). */
-  const buildTimingFreePhrase = (src: Phrase, durSec: number): Phrase => {
-    const midi = src?.notes?.[0]?.midi ?? 60;
-    return { ...src, durationSec: durSec, notes: [{ midi, startSec: 0, durSec }] };
-  };
-
-  /** Build a multi-note eval phrase from detected runs, using target MIDIs from the generated phrase. */
-  const buildTimingFreeMultiPhrase = (
-    src: Phrase,
-    runs: Array<{ startSec: number; endSec: number }>
-  ): Phrase => {
-    const want = Math.max(1, src?.notes?.length ?? 1);
-    const K = Math.min(runs.length, want);
-    let t = 0;
-    const notes = Array.from({ length: K }, (_, i) => {
-      const durSec = Math.max(0, runs[i].endSec - runs[i].startSec);
-      const midi = src?.notes?.[i]?.midi ?? src?.notes?.[0]?.midi ?? 60;
-      const out = { midi, startSec: t, durSec };
-      t += durSec;
-      return out;
-    });
-    const durationSec = notes.reduce((s, n) => s + n.durSec, 0);
-    return { ...src, durationSec, notes };
-  };
-
-  /**
-   * Find up to `maxRuns` contiguous confident runs (earliest-first),
-   * each at least `minHoldSec` long. Gaps > maxGapSec split runs.
-   */
-  const findSuccessfulRuns = (
-    samples: PitchSample[],
-    confMin: number,
-    minHoldSec: number,
-    maxRuns: number,
-    maxGapSec = 0.12
-  ): Array<{ startSec: number; endSec: number }> => {
-    const voiced = samples
-      .filter((s) => (s.hz ?? 0) > 0 && (s.conf ?? 0) >= confMin)
-      .sort((a, b) => a.tSec - b.tSec);
-    if (!voiced.length || maxRuns <= 0) return [];
-    const segs: Array<{ startSec: number; endSec: number }> = [];
-    let segStart = 0;
-    for (let i = 1; i < voiced.length; i++) {
-      if (voiced[i].tSec - voiced[i - 1].tSec > maxGapSec) {
-        segs.push({ startSec: voiced[segStart].tSec, endSec: voiced[i - 1].tSec });
-        segStart = i;
-      }
-    }
-    segs.push({ startSec: voiced[segStart].tSec, endSec: voiced[voiced.length - 1].tSec });
-    const ok = segs.filter((s) => s.endSec - s.startSec >= Math.max(0, minHoldSec));
-    return ok.slice(0, maxRuns); // earliest-first, up to the number of expected notes
-  };
+  const resetScores = useCallback(() => {
+    setLastScore(null);
+    setSessionScores([]);
+  }, []);
 
   const scoreTake = useCallback((args: {
     phrase: Phrase;
@@ -106,12 +152,9 @@ export default function useTakeScoring() {
     rhythmOnsetsSec?: number[] | null;
     align: AlignFn;
     phraseLengthOverrideSec?: number;
-    /** Relax/tighten scoring per mode */
     optionsOverride?: Partial<ScoreOptions>;
-    /** NEW: how long the run must be held to be considered “captured” */
     minHoldSec?: number;
   }) => {
-    // Defaults for pitch/rhythm scoring
     const defaults: ScoreOptions = {
       confMin: 0.5,
       centsOk: 60,
@@ -121,19 +164,15 @@ export default function useTakeScoring() {
     };
     const opts: ScoreOptions = { ...defaults, ...(args.optionsOverride ?? {}) };
 
-    // Detect timing-free intent
     const isTimingFree =
       ((args.melodyOnsetsSec?.length ?? 0) <= 1) &&
       (!args.rhythmOnsetsSec || args.rhythmOnsetsSec.length === 0);
 
-    // Snapshot BEFORE alignment
     const rawSamples = args.snapshotSamples();
 
-    // Choose evaluation phrase & window
     let phraseForEval: Phrase = args.phrase;
     let evalPhraseLenSec = args.phraseLengthOverrideSec ?? phraseWindowSec(args.phrase);
 
-    // In timing-free: detect per-note runs and build a multi-note window.
     let extraOffsetSec: number | undefined = undefined;
     let beatsRawForAlign: number[] = [];
     let gestureLagForAlign = args.gestureLagSec;
@@ -144,49 +183,38 @@ export default function useTakeScoring() {
       const runs = findSuccessfulRuns(rawSamples, opts.confMin, minHold, wantNotes);
 
       if (runs.length > 0) {
-        // Eval phrase mirrors generated targets (midi per note),
-        // with durations from detected runs and t=0 at first run start.
         phraseForEval = buildTimingFreeMultiPhrase(args.phrase, runs);
         evalPhraseLenSec = phraseForEval.durationSec;
-
         const firstStart = runs[0].startSec;
         extraOffsetSec = firstStart - args.leadInSec - args.pitchLagSec;
-
-        // Gesture beats at each run start so alignment lands each note window correctly.
         beatsRawForAlign = runs.map((r) => r.startSec);
-
-        // Make beat shifting identical to samples by using same lag for this align call.
         gestureLagForAlign = args.pitchLagSec;
       } else {
-        // No held run long enough → keep a tiny single window to avoid NaNs.
         const fallbackLen = Math.max(0.5, minHold);
         phraseForEval = buildTimingFreePhrase(args.phrase, fallbackLen);
         evalPhraseLenSec = fallbackLen;
         beatsRawForAlign = [0];
       }
     } else {
-      // Non timing-free: use the real gesture events
       beatsRawForAlign = args.snapshotBeats();
     }
 
-    // Align samples & beats to the evaluation window
     const { samples, beats } = args.align(
       rawSamples,
       beatsRawForAlign,
       args.leadInSec,
       {
-        keepPreRollSec: isTimingFree ? 0 : 0.5, // drop deep pre-voice negatives
+        keepPreRollSec: isTimingFree ? 0 : 0.5,
         phraseLengthSec: evalPhraseLenSec,
         tailGuardSec: 0.25,
         pitchLagSec: args.pitchLagSec,
         gestureLagSec: gestureLagForAlign,
-        extraOffsetSec, // only set in timing-free multi-run mode
+        extraOffsetSec,
         devAssert: process.env.NODE_ENV !== "production",
         consolePrefix: "score-align",
       }
     );
 
-    // Final scoring (timing-free passes [0] as the sole melody onset)
     const score = computeTakeScore({
       phrase: phraseForEval,
       bpm: args.bpm,
@@ -204,78 +232,17 @@ export default function useTakeScoring() {
       },
     });
 
-    // session state
+    (score as any).__evalPhrase = phraseForEval;
+
     setLastScore(score);
     setSessionScores((s) => [...s, score]);
     return score;
   }, []);
 
-  const scoreTakeAndSubmit = useCallback(async (args: {
-    phrase: Phrase;
-    bpm: number;
-    den: number;
-    leadInSec: number;
-    pitchLagSec: number;
-    gestureLagSec: number;
-    snapshotSamples: () => PitchSample[];
-    snapshotBeats: () => number[];
-    melodyOnsetsSec: number[];
-    rhythmOnsetsSec?: number[] | null;
-    align: AlignFn;
-    submit: SubmitArgs;
-    phraseLengthOverrideSec?: number;
-    optionsOverride?: Partial<ScoreOptions>;
-  }): Promise<{ score: TakeScore; resultId?: string }> => {
-    const {
-      phrase, bpm, den, leadInSec, pitchLagSec, gestureLagSec,
-      snapshotSamples, snapshotBeats, melodyOnsetsSec, rhythmOnsetsSec, align,
-      submit, phraseLengthOverrideSec, optionsOverride,
-    } = args;
-
-    const score = scoreTake({
-      phrase, bpm, den, leadInSec, pitchLagSec, gestureLagSec,
-      snapshotSamples, snapshotBeats, melodyOnsetsSec, rhythmOnsetsSec, align,
-      phraseLengthOverrideSec,
-      optionsOverride,
-    });
-
-    setPostError(null);
-    setLastResultId(null);
-    try {
-      const res = await fetch(`/api/lessons/${encodeURIComponent(submit.lessonSlug)}/results`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: submit.sessionId,
-          takeIndex: Math.max(0, Math.floor(submit.takeIndex)),
-          score,
-          snapshots: submit.snapshots,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = (err && err.error) ? String(err.error) : `HTTP ${res.status}`;
-        setPostError(msg);
-        return { score };
-      }
-
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; resultId?: string };
-      if (json?.resultId) setLastResultId(String(json.resultId));
-      return { score, resultId: json?.resultId };
-    } catch (e: any) {
-      setPostError(e?.message || String(e));
-      return { score };
-    }
-  }, [scoreTake]);
-
   return {
     lastScore,
     sessionScores,
     scoreTake,
-    scoreTakeAndSubmit,
-    lastResultId,
-    postError,
+    resetScores,
   };
 }

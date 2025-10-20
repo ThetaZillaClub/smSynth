@@ -20,15 +20,22 @@ const BLUE_HI  = '#84b3f6';
 const ORDER_EPS = 0.75; // px
 const TAU = Math.PI * 2;
 
+// Only scale up relative to the dataset max (no min-centering)
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
-  const vMin = Math.min(...vals);
-  const vMax = Math.max(...vals);
-  const spread = vMax - vMin;
-  if (!isFinite(vMin) || !isFinite(vMax) || spread <= 1e-6) {
-    return () => Math.pow(0.75, GAMMA);
+  const finite = vals.filter((x) => Number.isFinite(x));
+  const vMax = finite.length ? Math.max(...finite) : 0;
+
+  // If nothing usable, just apply gamma to the raw value (identity-ish)
+  if (!isFinite(vMax) || vMax <= 1e-6) {
+    return (v: number) => Math.pow(clamp01(v), GAMMA);
   }
-  return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
+
+  // Scale-up factor: if max < 1, lift everything by 1/max; else leave as-is.
+  const k = vMax < 1 ? 1 / vMax : 1;
+
+  return (v: number) => Math.pow(clamp01(v * k), GAMMA);
 };
+
 
 function fitFontPx(text: string, family: string, weight: string, maxWidth: number, minPx: number, maxPx: number) {
   if (typeof window === 'undefined') return Math.max(minPx, Math.min(maxPx, minPx));

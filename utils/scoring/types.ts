@@ -6,6 +6,7 @@ export type PitchSample = { tSec: number; hz: number | null; conf: number };
 // ---- Pitch ----
 export type PerNotePitch = {
   idx: number;
+  midi: number;
   timeOnPitch: number;
   dur: number;
   ratio: number;

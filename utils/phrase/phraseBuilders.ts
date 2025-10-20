@@ -49,15 +49,20 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     lowHz, highHz, bpm, den,
     tonicPc, scale, rhythm,
     a4Hz = 440,
-    maxPerDegree = 2,
+    // ⬇ caller's value, else default to 1 when degrees are limited, else 2
+    maxPerDegree: maxPerDegreeInput,
     seed = 0x9e3779b9,
     tonicMidis = null,
     includeUnder = false,
     includeOver = false,
     allowedDegreeIndices = null,
     allowedMidis = null,
-    dropUpperWindowDegrees, // may be undefined → see defaulting below
+    dropUpperWindowDegrees,
   } = params;
+
+  const maxPerDegree =
+    maxPerDegreeInput ??
+    ((allowedDegreeIndices && allowedDegreeIndices.length) ? 1 : 2);
 
   const lowM = Math.round(hzToMidi(lowHz, a4Hz));
   const highM = Math.round(hzToMidi(highHz, a4Hz));
@@ -100,23 +105,20 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     }
 
     // ✨ NEW: drop upper-octave duplicates of selected degree(s) inside each window
-    // Default behavior: if user specified allowedDegreeIndices, treat dropUpperWindowDegrees=true
     const shouldDropUpper =
       (dropUpperWindowDegrees !== undefined ? dropUpperWindowDegrees : !!(allowedDegreeIndices && allowedDegreeIndices.length)) &&
       sorted.length > 0;
 
     if (shouldDropUpper && inWinFiltered.length) {
       const offs = scaleSemitones(scale);
-      // If degrees specified → cull *those* degrees; otherwise be conservative and cull only tonic
       const degOffsets = new Set<number>(
         (allowedDegreeIndices && allowedDegreeIndices.length
           ? allowedDegreeIndices
               .map((i) => (i >= 0 && i < offs.length ? offs[i] : undefined))
               .filter((x): x is number => typeof x === "number")
-          : [offs[0] ?? 0]) // tonic only if not specified
+          : [offs[0] ?? 0])
       );
 
-      // Precompute the "upper" absolute MIDI numbers to remove per window
       const upperSet = new Set<number>();
       for (const T of sorted) {
         for (const off of degOffsets) {
@@ -126,10 +128,8 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
 
       const trimmed = inWinFiltered.filter((m) => !upperSet.has(m));
       if (trimmed.length) inWinFiltered = trimmed;
-      // If trimming removed everything (edge case), keep original pool.
     }
 
-    // Recombine (unique + sorted to keep stable behaviour)
     const combined = Array.from(new Set<number>([...inWinFiltered, ...under, ...over])).sort((a, b) => a - b);
     if (combined.length) allowed = combined;
   } else {
@@ -158,7 +158,7 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     return { durationSec: dur, notes: [{ midi: mid, startSec: 0, durSec: dur }] };
   }
 
-  // ---------------- existing random-walk note selection (unchanged) ----------------
+  // ---------------- selection with uniqueness + per-degree cap ----------------
   const degCounts = new Map<number, number>();
   const rnd = makeRng(seed);
   const toDegreeIndex = (m: number) => degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
@@ -188,8 +188,17 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     }
     let choices = rnd() < 0.75 ? near : leap;
     if (!choices.length) choices = allowed.slice();
+
+    // respect per-degree cap
     let filtered = choices.filter(fitsCap);
     if (!filtered.length) filtered = choices;
+
+    // prefer not to repeat the previous degree
+    const prevDeg = notes.length ? toDegreeIndex(notes[notes.length - 1].midi) : -999;
+    const nonRepeat = filtered.filter((m) => toDegreeIndex(m) !== prevDeg);
+    if (nonRepeat.length) filtered = nonRepeat;
+
+    // keep motion reasonable if possible
     const tight = filtered.filter((m) => Math.abs(m - cur) <= 6);
     const finalPool = tight.length ? tight : filtered;
 
@@ -202,9 +211,26 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     cur = next;
   }
 
+  // If this phrase is exactly TWO notes, enforce unique degrees as a hard rule
+  const noteSlots = rhythm.filter((r) => r.type === "note").length;
+  if (noteSlots === 2 && notes.length === 2) {
+    const d0 = toDegreeIndex(notes[0].midi);
+    const d1 = toDegreeIndex(notes[1].midi);
+    if (d0 === d1) {
+      const alts = allowed.filter((m) => toDegreeIndex(m) !== d0);
+      if (alts.length) {
+        const target = notes[1].midi;
+        const best = alts.reduce(
+          (best, m) => (Math.abs(m - target) < Math.abs(best - target) ? m : best),
+          alts[0]
+        );
+        notes[1].midi = best;
+      }
+    }
+  }
+
   return { durationSec: t, notes };
 }
-
 
 export type BuildSequenceParams = {
   lowHz: number;
