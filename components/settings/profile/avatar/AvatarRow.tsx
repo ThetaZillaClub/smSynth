@@ -1,4 +1,9 @@
-// components/settings/profile/avatar/AvatarRow.tsx
+// Always render the DropzoneFrame. Inside it:
+//   - if a file is selected and is an image, show its preview
+//   - else, show the saved avatarUrl
+//   - else, show the "?" empty state
+// Render the panel UNDER the frame and hide thumbnails there.
+
 'use client';
 
 import * as React from 'react';
@@ -39,6 +44,10 @@ export default function AvatarRow(props: Props) {
     cacheControl: 3600,
     upsert: true,
   });
+
+  // choose the selected image preview (if any)
+  const selectedPreview =
+    dz.files.find((f) => f.type.startsWith('image/'))?.preview ?? null;
 
   React.useEffect(() => {
     (async () => {
@@ -86,23 +95,16 @@ export default function AvatarRow(props: Props) {
     <DropzoneRoot {...dz}>
       <div className="flex flex-col gap-2">
         <div className="flex items-start gap-6">
-          {/* Avatar frame */}
-          <div className="relative w-28 h-28 rounded-xl overflow-hidden bg-white">
-            {avatarUrl ? (
-              <Image
-                src={avatarUrl}
-                alt={`${name} avatar`}
-                fill
-                unoptimized
-                className="object-cover"
-                priority
-              />
+          {/* Clickable avatar frame */}
+          <DropzoneFrame className="relative w-28 h-28 rounded-xl overflow-hidden bg-white border-none">
+            {selectedPreview ? (
+              <Image src={selectedPreview} alt={`${name} avatar preview`} fill unoptimized className="object-cover" />
+            ) : avatarUrl ? (
+              <Image src={avatarUrl} alt={`${name} avatar`} fill unoptimized className="object-cover" priority />
             ) : (
-              <DropzoneFrame className="absolute inset-0 bg-white border-none">
-                <DropzoneEmptyState className="w-full h-full" />
-              </DropzoneFrame>
+              <DropzoneEmptyState className="w-full h-full" />
             )}
-          </div>
+          </DropzoneFrame>
 
           <div className="min-w-0">
             <h3 className="text-2xl font-semibold text-[#0f0f0f] truncate">{name}</h3>
@@ -110,8 +112,8 @@ export default function AvatarRow(props: Props) {
           </div>
         </div>
 
-        {/* ⬇️ Now the file info + Upload button sits UNDER the frame */}
-        <DropzonePanel className="max-w-sm" />
+        {/* ⬇️ All text + Upload button live under the frame now; no thumbnails */}
+        <DropzonePanel className="max-w-sm" showThumbnails={false} />
       </div>
     </DropzoneRoot>
   )

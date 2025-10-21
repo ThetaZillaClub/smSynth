@@ -2,8 +2,6 @@
 'use client';
 
 import * as React from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { ensureSessionReady } from '@/lib/client-cache';
 import { COURSES } from '@/lib/courses/registry';
 
 export type LessonBests = Record<string, number>; // "<course>/<lesson>" -> best final_percent
@@ -30,35 +28,47 @@ function uniqueCourseForLesson(slug: string): string | null {
   return null;
 }
 
+type Row = { lesson_slug: string; final_percent: number };
+
 export default function useLessonBests() {
-  const supabase = React.useMemo(() => createClient(), []);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [bests, setBests] = React.useState<LessonBests>({});
 
   React.useEffect(() => {
-    let cancelled = false;
+    let alive = true;
+    const ac = new AbortController();
+
     (async () => {
       try {
-        setLoading(true); setError(null);
-        await ensureSessionReady(supabase, 2000);
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) { if (!cancelled) setBests({}); return; }
+        setLoading(true);
+        setError(null);
 
-        // Current schema: only lesson_slug (now namespaced) + final_percent
-        const q = await supabase
-          .from('lesson_bests')
-          .select('lesson_slug, final_percent')
-          .eq('uid', uid);
+        const res = await fetch('/api/progress/lesson-bests', {
+          method: 'GET',
+          credentials: 'include',
+          signal: ac.signal,
+        });
 
-        if (q.error) throw q.error;
+        if (res.status === 401) {
+          // Not signed in; treat as empty.
+          if (alive) setBests({});
+          return;
+        }
+        if (!res.ok) {
+          const msg = `HTTP ${res.status}`;
+          throw new Error(msg);
+        }
+
+        const rows: Row[] = await res.json();
+
+        if (!alive) return;
 
         const map: LessonBests = {};
-        for (const row of q.data ?? []) {
-          const raw = String((row as any).lesson_slug ?? '').trim();
+        for (const r of rows ?? []) {
+          const raw = String(r.lesson_slug ?? '').trim();
           if (!raw) continue;
-          const pct = Number((row as any).final_percent ?? 0);
+          const pct = Number(r.final_percent ?? 0);
 
           if (isNamespaced(raw)) {
             // New rows: already "course/lesson"
@@ -66,22 +76,26 @@ export default function useLessonBests() {
           } else {
             // Legacy rows: only map if the lesson slug belongs to exactly one course
             const onlyCourse = uniqueCourseForLesson(raw);
-            if (onlyCourse) {
-              map[`${onlyCourse}/${raw}`] = pct;
-            }
+            if (onlyCourse) map[`${onlyCourse}/${raw}`] = pct;
             // If ambiguous, skip to avoid cross-course credit
           }
         }
 
-        if (!cancelled) setBests(map);
+        if (alive) setBests(map);
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || String(e));
+        if (!alive || ac.signal.aborted) return;
+        setError(e?.message || String(e));
+        setBests({});
       } finally {
-        if (!cancelled) setLoading(false);
+        if (alive) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [supabase]);
+
+    return () => {
+      alive = false;
+      ac.abort();
+    };
+  }, []);
 
   return { loading, error, bests };
 }

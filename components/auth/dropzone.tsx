@@ -26,6 +26,7 @@ export const formatBytes = (
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
 }
 
+// Context holds all dropzone state/handlers from useSupabaseUpload + useDropzone
 type DropzoneCtx = UseSupabaseUploadReturn
 const DropzoneContext = createContext<DropzoneCtx | undefined>(undefined)
 
@@ -36,14 +37,11 @@ export const useDropzoneContext = () => {
 }
 
 /** Root: provide context so Frame (click area) and Panel (info) can live apart */
-export const DropzoneRoot = ({
-  children,
-  ...ctx
-}: PropsWithChildren<DropzoneCtx>) => {
+export const DropzoneRoot = ({ children, ...ctx }: PropsWithChildren<DropzoneCtx>) => {
   return <DropzoneContext.Provider value={ctx}>{children}</DropzoneContext.Provider>
 }
 
-/** Frame: the clickable area (your avatar square) */
+/** Frame: the clickable area (e.g. avatar square) */
 export const DropzoneFrame = ({
   className,
   children,
@@ -66,7 +64,10 @@ export const DropzoneFrame = ({
   const isInvalid = (isDragActive && isDragReject) || hasBlockingErrors
 
   const triggerFile = () => {
-    try { open?.() } catch {}
+    try {
+      // react-dropzone programmatic open
+      open?.()
+    } catch {}
   }
 
   return (
@@ -83,7 +84,10 @@ export const DropzoneFrame = ({
         tabIndex: 0,
         onClick: triggerFile,
         onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerFile() }
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            triggerFile();
+          }
         },
         'aria-label': 'Upload file',
       })}
@@ -95,9 +99,20 @@ export const DropzoneFrame = ({
 }
 
 /** Panel: renders under the frame (file list + Upload button) */
-export const DropzonePanel = ({ className }: { className?: string }) => {
+export const DropzonePanel = ({
+  className,
+  showThumbnails = true,
+}: { className?: string; showThumbnails?: boolean }) => {
   const {
-    files, setFiles, onUpload, loading, successes, errors, maxFileSize, maxFiles, isSuccess,
+    files,
+    setFiles,
+    onUpload,
+    loading,
+    successes,
+    errors,
+    maxFileSize,
+    maxFiles,
+    isSuccess,
   } = useDropzoneContext()
 
   const exceedMaxFiles = files.length > maxFiles
@@ -127,27 +142,31 @@ export const DropzonePanel = ({ className }: { className?: string }) => {
         return (
           <div
             key={`${file.name}-${idx}`}
-            className="flex items-center gap-x-4 border-b py-2"
+            className={cn('flex items-center border-b py-2', showThumbnails ? 'gap-x-4' : 'gap-x-2')}
           >
-            {file.type.startsWith('image/') ? (
-              <div className="h-10 w-10 rounded border overflow-hidden shrink-0 bg-muted grid place-items-center">
-                <Image src={file.preview} alt={file.name} width={40} height={40} unoptimized className="h-full w-full object-cover" />
-              </div>
-            ) : (
-              <div className="h-10 w-10 rounded border bg-muted grid place-items-center">
-                <File size={18} />
-              </div>
-            )}
+            {showThumbnails ? (
+              file.type.startsWith('image/') ? (
+                <div className="h-10 w-10 rounded border overflow-hidden shrink-0 bg-muted grid place-items-center">
+                  <Image src={file.preview} alt={file.name} width={40} height={40} unoptimized className="h-full w-full object-cover" />
+                </div>
+              ) : (
+                <div className="h-10 w-10 rounded border bg-muted grid place-items-center">
+                  <File size={18} />
+                </div>
+              )
+            ) : null}
 
             <div className="grow min-w-0">
               <p className="text-sm truncate" title={file.name}>{file.name}</p>
               {visibleErrors.length > 0 ? (
                 <p className="text-xs text-destructive">
-                  {visibleErrors.map((e) =>
-                    e.message.startsWith('File is larger than')
-                      ? `File is larger than ${formatBytes(maxFileSize, 2)} (Size: ${formatBytes(file.size, 2)})`
-                      : e.message
-                  ).join(', ')}
+                  {visibleErrors
+                    .map((e) =>
+                      e.message.startsWith('File is larger than')
+                        ? `File is larger than ${formatBytes(maxFileSize, 2)} (Size: ${formatBytes(file.size, 2)})`
+                        : e.message
+                    )
+                    .join(', ')}
                 </p>
               ) : loading && !ok ? (
                 <p className="text-xs text-muted-foreground">Uploading file...</p>
@@ -176,7 +195,8 @@ export const DropzonePanel = ({ className }: { className?: string }) => {
 
       {exceedMaxFiles && (
         <p className="text-sm mt-2 text-destructive">
-          You may upload only up to {maxFiles} files, please remove {files.length - maxFiles} file{files.length - maxFiles > 1 ? 's' : ''}.
+          You may upload only up to {maxFiles} files, please remove {files.length - maxFiles} file
+          {files.length - maxFiles > 1 ? 's' : ''}.
         </p>
       )}
 
@@ -185,9 +205,17 @@ export const DropzonePanel = ({ className }: { className?: string }) => {
           <Button
             variant="outline"
             onClick={onUpload}
-            disabled={loading || files.some((f) => f.errors.some((e) => e.code !== 'too-many-files'))}
+            disabled={
+              loading || files.some((f) => f.errors.some((e) => e.code !== 'too-many-files'))
+            }
           >
-            {loading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...</>) : (<>Upload files</>)}
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...
+              </>
+            ) : (
+              <>Upload files</>
+            )}
           </Button>
         </div>
       )}
@@ -206,6 +234,6 @@ export const DropzoneEmptyState = ({ className }: { className?: string }) => {
   )
 }
 
-/* --- Back-compat exports (optional): keep names some places might import --- */
+/* --- Back-compat exports: keep old names working --- */
 export const Dropzone = DropzoneFrame
 export const DropzoneContent = DropzonePanel
