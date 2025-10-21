@@ -29,6 +29,14 @@ type AnalyticsSnapshot = {
   melodyRhythm?: RhythmEvent[] | null;
 };
 
+// NEW: analytics visibility mask (synced with side-panel gating)
+type AnalyticsVisibility = {
+  showPitch: boolean;
+  showIntervals: boolean;
+  showMelodyRhythm: boolean;
+  showRhythmLine: boolean;
+};
+
 type AnalyticsPayload = {
   scores: TakeScore[];
   snapshots: AnalyticsSnapshot[];
@@ -36,6 +44,8 @@ type AnalyticsPayload = {
   den: number;
   tonicPc?: number;
   scaleName?: string | ScaleName;
+  /** NEW: gate SessionAnalytics UI */
+  visibility?: AnalyticsVisibility;
 };
 
 type Props = {
@@ -139,6 +149,8 @@ function AnalyticsStageView({
               den={analytics?.den ?? denFallback}
               tonicPc={analytics?.tonicPc ?? tonicPcFallback}
               scaleName={(analytics?.scaleName ?? scaleNameFallback) as string}
+              /** NEW: pass gating flags down */
+              visibility={analytics?.visibility}
             />
           </div>
         </div>

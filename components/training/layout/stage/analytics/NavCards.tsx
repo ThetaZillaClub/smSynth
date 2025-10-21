@@ -21,13 +21,10 @@ function PickerButton({
       aria-pressed={active}
       aria-label={title}
       className={[
-        // base
         "group text-left rounded-2xl border bg-gradient-to-b w-full",
-        // responsive height: 52px → 84px depending on viewport width
         "h-[clamp(52px,3vw,84px)] px-2.5 sm:px-3 md:px-4",
         "flex items-center justify-between gap-3 transition",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
-        // variants
         active
           ? "from-[#fafafa] to-[#f3f3f3] border-[#e6e6e6] shadow-md"
           : "from-[#f2f2f2] to-[#eeeeee] border-[#d2d2d2] shadow-sm hover:shadow-md",
@@ -69,9 +66,12 @@ function PickerButton({
 export default function NavCards({
   active,
   setActive,
+  /** NEW: restrict which views are shown */
+  available = ["performance", "pitch-acc", "pitch-prec", "melody", "intervals"],
 }: {
   active: ViewKey;
   setActive: (v: ViewKey) => void;
+  available?: ViewKey[];
 }) {
   const meta: Record<ViewKey, { title: string; subtitle: string }> = {
     performance: { title: "Performance over takes", subtitle: "Final score trend" },
@@ -80,9 +80,10 @@ export default function NavCards({
     melody: { title: "Melody coverage", subtitle: "By duration per take" },
     intervals: { title: "Intervals", subtitle: "Class accuracy per take" },
   };
+
   return (
     <div className="flex flex-col gap-2 min-h-0">
-      {(Object.keys(meta) as ViewKey[]).map((k) => (
+      {available.map((k) => (
         <PickerButton
           key={k}
           active={active === k}

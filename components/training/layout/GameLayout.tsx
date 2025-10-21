@@ -18,6 +18,14 @@ type AnalyticsSnapshot = {
   melodyRhythm?: RhythmEvent[] | null;
 };
 
+// NEW: analytics visibility mask (kept in sync with side-panel)
+type AnalyticsVisibility = {
+  showPitch: boolean;
+  showIntervals: boolean;
+  showMelodyRhythm: boolean;
+  showRhythmLine: boolean;
+};
+
 type AnalyticsPayload = {
   scores: TakeScore[];
   snapshots: AnalyticsSnapshot[];
@@ -25,6 +33,8 @@ type AnalyticsPayload = {
   den: number;
   tonicPc?: number;
   scaleName?: ScaleName | string;
+  /** NEW: gate SessionAnalytics UI */
+  visibility?: AnalyticsVisibility;
 };
 
 type LayoutProps = {

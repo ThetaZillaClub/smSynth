@@ -2,7 +2,7 @@
 'use client';
 
 import * as React from 'react';
-import { useParams, useSearchParams } from 'next/navigation'; // ⬅️ add useSearchParams
+import { useParams } from 'next/navigation';
 import TrainingGame from '@/components/training/TrainingGame';
 import useStudentRow from '@/hooks/students/useStudentRow';
 import useStudentRange from '@/hooks/students/useStudentRange';
@@ -19,14 +19,11 @@ export default function LessonClient({
   lessonConfig: Partial<SessionConfig>;
 }) {
   const params = useParams<{ course: string; lesson: string }>();
-  const search = useSearchParams(); // ⬅️ read search params
-  const repeatKey = search?.get('repeat') ?? ''; // ⬅️ derive remount key from ?repeat
-
   const courseSlug = (params?.course ?? null) as string | null;
   const lessonSlugOnly = (params?.lesson ?? null) as string | null;
 
   const lessonSlug = courseSlug && lessonSlugOnly
-    ? `${courseSlug}/${lessonSlugOnly}` // namespaced key for storage
+    ? `${courseSlug}/${lessonSlugOnly}` // <-- namespaced key for storage
     : lessonSlugOnly;
 
   const { studentRowId, rangeLowLabel, rangeHighLabel } =
@@ -53,13 +50,12 @@ export default function LessonClient({
 
   return (
     <TrainingGame
-      key={`${lessonSlug ?? ''}::${repeatKey}`}   // ⬅️ force remount on Repeat
       title={`${courseTitle} — ${lessonTitle}`}
       sessionConfig={sessionConfig}
       studentRowId={studentRowId}
       rangeLowLabel={rangeLowLabel}
       rangeHighLabel={rangeHighLabel}
-      lessonSlug={lessonSlug}
+      lessonSlug={lessonSlug} 
       sessionId={sessionIdRef.current}
     />
   );

@@ -1,6 +1,6 @@
 // components/training/TrainingGame.tsx
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams } from "next/navigation";
 import GameLayout from "./layout/GameLayout";
 import usePitchDetection from "@/hooks/pitch/usePitchDetection";
@@ -36,14 +36,22 @@ import CourseNavGate from "./layout/stage/side-panel/CourseNavGate";
 
 type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean };
 
+// NEW: visibility contract shared with side-panel
+type AnalyticsVisibility = {
+  showPitch: boolean;          // accuracy (+ precision)
+  showIntervals: boolean;
+  showMelodyRhythm: boolean;   // coverage/onset in note windows
+  showRhythmLine: boolean;     // hand taps vs. blue line
+};
+
 type Props = {
   title?: string;
   sessionConfig?: SessionConfig;
   studentRowId?: string | null;
   rangeLowLabel?: string | null;
   rangeHighLabel?: string | null;
-  lessonSlug?: string | null; // lesson slug within its course
-  sessionId?: string | null;
+  lessonSlug?: string | null; // lesson slug within its course (e.g., "minor-2nd-deg-1-2")
+  sessionId?: string | null;  // optional external UUID to use
 };
 
 const CONF_THRESHOLD = 0.5;
@@ -88,8 +96,8 @@ export default function TrainingGame({
     gestureLatencyMs = 90,
     // timing-free knobs
     timingFreeResponse,
-    timingFreeMaxSec,          // legacy overall cap (kept but we’ll not rely on it)
-    timingFreeMinCaptureSec,   // per-note capture
+    timingFreeMaxSec,
+    timingFreeMinCaptureSec,
   } = sessionEff;
 
   // Phrase + clef
@@ -185,6 +193,15 @@ export default function TrainingGame({
   const rhythmLineEnabled = rhythmCfg.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfg.detectEnabled !== false;
 
+  // --- Visibility policy ------------------------------------------------------
+  const visibility: AnalyticsVisibility = {
+    showPitch: true,
+    showIntervals: true,
+    showMelodyRhythm: !timingFreeResponse,
+    showRhythmLine: !timingFreeResponse && rhythmDetectEnabled && rhythmLineEnabled,
+  };
+  // ---------------------------------------------------------------------------
+
   // Vision gating
   const { enabled: visionEnabled } = useVisionEnabled();
   const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled && visionEnabled;
@@ -198,7 +215,6 @@ export default function TrainingGame({
     warm: warmRecorder,
   } = useWavRecorder({ sampleRateOut: 16000, persistentStream: true });
 
-  // Lead-in cue behavior:
   const metronomeEff = sessionEff.view === "polar" ? false : !!metronome;
 
   const loop = usePracticeLoop({
@@ -207,7 +223,7 @@ export default function TrainingGame({
     highHz: highHz ?? null,
     phrase,
     words: fabric.words,
-    windowOnSec: recordWindowSecEff, // ← per-note budget applied (5s * notes)
+    windowOnSec: recordWindowSecEff,
     windowOffSec: restSec,
     preRollSec: leadInSec,
     maxTakes: MAX_TAKES,
@@ -302,9 +318,39 @@ export default function TrainingGame({
   const rhythmEffective: RhythmEvent[] | null = fabric.syncRhythmFabric ?? null;
   const haveRhythm: boolean = rhythmLineEnabled && (rhythmEffective?.length ?? 0) > 0;
 
-  // Scoring
-  const { sessionScores, scoreTake } = useTakeScoring();
+  // Scoring (now with resetScores for soft repeat)
+  const { sessionScores, scoreTake, resetScores } = useTakeScoring();
   const alignForScoring = useScoringAlignment();
+
+  // ─────────────────────── Stable, real UUID for sessionId ───────────────────────
+  const genUUID = React.useCallback(() => {
+    if (typeof crypto !== "undefined" && (crypto as any).randomUUID) {
+      return (crypto as any).randomUUID() as string;
+    }
+    // Simple v4-ish fallback
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }, []);
+
+  // Keep a base UUID stable for the lifetime of this component (or use the provided one)
+  const sessionBaseIdRef = React.useRef<string>(sessionId ?? genUUID());
+  useEffect(() => {
+    if (sessionId && sessionId !== sessionBaseIdRef.current) {
+      sessionBaseIdRef.current = sessionId;
+    }
+  }, [sessionId]);
+
+  // Make sure we send a namespaced lesson slug "course/lesson" to the API
+  const namespacedLessonSlug = useMemo(() => {
+    const ls = (lessonSlug ?? "").trim();
+    if (!ls) return null;
+    if (ls.includes("/")) return ls; // already namespaced
+    const cs = (courseSlugParam ?? "").trim();
+    return cs ? `${cs}/${ls}` : ls; // fallback if course is missing (dev)
+  }, [lessonSlug, courseSlugParam]);
 
   // Centralized scoring/submission snapshots
   const { takeSnapshots } = useScoringLifecycle({
@@ -319,8 +365,8 @@ export default function TrainingGame({
     calibratedLatencyMs,
     gestureLatencyMs,
     exerciseLoops,
-    lessonSlug: lessonSlug?.split("/").pop() ?? lessonSlug,
-    sessionId,
+    lessonSlug: namespacedLessonSlug,         // <<< send "course/lesson"
+    sessionId: sessionBaseIdRef.current,      // <<< real UUID (persists to DB)
     sessionScores,
     scoreTake,
     alignForScoring,
@@ -367,7 +413,7 @@ export default function TrainingGame({
       | undefined) ?? undefined;
 
   // Side panel (memoized)
-  const sidePanel = useSidePanel({
+  const sidePanelBase = useSidePanel({
     pretestActive,
     pretestStatusText: statusText,
     pretestRunning: pretest.running,
@@ -397,6 +443,11 @@ export default function TrainingGame({
     player: { playPhrase, playRhythm, playMelodyAndRhythm, stop: stopPlayback },
   });
 
+  // NEW: augment side panel with visibility mask
+  const sidePanel = sidePanelBase
+    ? ({ ...sidePanelBase, visibility } as typeof sidePanelBase & { visibility: typeof visibility })
+    : undefined;
+
   const footerTonicAction = exerciseUnlocked
     ? { label: footerTonicLabel, onClick: playFooterTonic, disabled: false, title: "Play tonic" }
     : undefined;
@@ -419,25 +470,7 @@ export default function TrainingGame({
     endRecordEarly: loop.endRecordEarly,
   });
 
-  // Stage view routing: switch to analytics after the last take
-  const sessionComplete =
-    !pretestActive && (loop.takeCount ?? 0) >= MAX_TAKES && sessionScores.length >= MAX_TAKES;
-  const stageView: "piano" | "sheet" | "polar" | "analytics" = sessionComplete
-    ? "analytics"
-    : ((sessionEff.view as "piano" | "sheet" | "polar"));
-
-  const analyticsSidePanel = (
-    <CourseNavGate
-      courseSlugParam={courseSlugParam}
-      lessonSlug={lessonSlug}
-      sessionComplete={sessionComplete}
-    />
-  );
-
-  // ─────────────────────────────────────────────────────────────
-  // Lead-in → show the note currently being played (for Polar center text)
-  // Reuses the same targetRelOverride prop the record phase already uses.
-  // ─────────────────────────────────────────────────────────────
+  // Lead-in: current note for Polar center text
   const [leadInRel, setLeadInRel] = useState<number | null>(null);
   useEffect(() => {
     if (pretestActive || loop.loopPhase !== "lead-in" || !phrase || loop.anchorMs == null) {
@@ -464,11 +497,23 @@ export default function TrainingGame({
     return () => cancelAnimationFrame(raf);
   }, [pretestActive, loop.loopPhase, phrase, loop.anchorMs, sessionEff.scale?.tonicPc]);
 
-  // Choose override for Polar center badge text:
   const targetRelForPolar =
     loop.loopPhase === "lead-in"
       ? (typeof leadInRel === "number" ? leadInRel : undefined)
       : (typeof targetRel === "number" ? targetRel : undefined);
+
+  // ─────────── FIX: don’t flip to analytics until snapshots are in sync ───────────
+  const takesSynced = sessionScores.length === takeSnapshots.length;
+  const sessionComplete =
+    !pretestActive &&
+    (loop.takeCount ?? 0) >= MAX_TAKES &&
+    sessionScores.length >= MAX_TAKES &&
+    takesSynced;
+
+  // If somehow desynced, trim scores passed to analytics so charts always align
+  const analyticsScores = takesSynced
+    ? sessionScores
+    : sessionScores.slice(0, takeSnapshots.length);
 
   return (
     <GameLayout
@@ -493,7 +538,7 @@ export default function TrainingGame({
       den={ts.den}
       tsNum={ts.num}
       keySig={fabric.keySig}
-      view={stageView}
+      view={sessionComplete ? "analytics" : (sessionEff.view as "piano" | "sheet" | "polar")}
       clef={melodyClef}
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
@@ -506,20 +551,37 @@ export default function TrainingGame({
       tonicAction={footerTonicAction}
       arpAction={footerArpAction}
       analytics={{
-        scores: sessionScores,
+        scores: analyticsScores,
         snapshots: takeSnapshots,
         bpm,
         den: ts.den,
         tonicPc: sessionEff.scale?.tonicPc ?? 0,
         scaleName: sessionEff.scale?.name ?? "major",
+        visibility,
       }}
-      analyticsSidePanel={analyticsSidePanel}
+      analyticsSidePanel={
+        <CourseNavGate
+          courseSlugParam={courseSlugParam}
+          lessonSlug={lessonSlug}
+          sessionComplete={sessionComplete}
+          onRepeat={handleRepeat}
+        />
+      }
       centerProgress01={centerProgress01}
-      // During LEAD-IN: follow the played phrase (shows note/solfege text in Polar center).
-      // During RECORD: keep existing behavior from timing-free capture.
       targetRelOverride={targetRelForPolar}
     />
   );
+
+  function handleRepeat() {
+    stopPlayback();
+    loop.clearAll?.();
+    resetScores();
+    if (sessionEff.loopingMode) {
+      setTimeout(() => {
+        loop.toggle();
+      }, 0);
+    }
+  }
 
   function onToggleExercise() {
     if (!(!pretestRequired || pretest.status === "done")) return;

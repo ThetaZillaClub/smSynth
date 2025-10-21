@@ -22,6 +22,13 @@ const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 type TakeSnap = { phrase: Phrase; rhythm: RhythmEvent[] | null };
 
+type Visibility = {
+  showPitch: boolean;
+  showIntervals: boolean;
+  showMelodyRhythm: boolean;
+  showRhythmLine: boolean; // only affects performance tooltip (no separate chart)
+};
+
 export default function SessionAnalytics({
   scores,
   snapshots,
@@ -29,6 +36,8 @@ export default function SessionAnalytics({
   den,
   tonicPc,
   scaleName,
+  /** NEW: analytics visibility gating (defaults: all on) */
+  visibility = { showPitch: true, showIntervals: true, showMelodyRhythm: true, showRhythmLine: true },
 }: {
   scores: TakeScore[];
   snapshots: TakeSnap[];
@@ -36,22 +45,28 @@ export default function SessionAnalytics({
   den: number;
   tonicPc: number;
   scaleName: string | SolfegeScaleName;
+  visibility?: Visibility;
 }) {
-  const n = Math.max(1, scores.length);
+  // ─────────── FIX: keep arrays aligned defensively ───────────
+  const alignedCount = Math.max(0, Math.min(scores.length, snapshots.length));
+  const sScores = React.useMemo(() => scores.slice(0, alignedCount), [scores, alignedCount]);
+  const sSnaps  = React.useMemo(() => snapshots.slice(0, alignedCount), [snapshots, alignedCount]);
+
+  const n = Math.max(1, sScores.length);
   const avg = (sel: (s: TakeScore) => number, dp = 1) =>
-    Math.round((scores.reduce((a, s) => a + sel(s), 0) / n) * Math.pow(10, dp)) / Math.pow(10, dp);
+    Math.round((sScores.reduce((a, s) => a + sel(s), 0) / n) * Math.pow(10, dp)) / Math.pow(10, dp);
 
   const finalPct = avg((s) => s.final.percent);
   const finalLetter = letterFromPercent(finalPct);
 
   // top-level stats
   const pitchPct = avg((s) => s.pitch.percent);
-  const timeOnPitchPct = Math.round((scores.reduce((a, s) => a + s.pitch.timeOnPitchRatio, 0) / n) * 100);
-  const pitchMae = Math.round(scores.reduce((a, s) => a + s.pitch.centsMae, 0) / n);
+  const timeOnPitchPct = Math.round((sScores.reduce((a, s) => a + s.pitch.timeOnPitchRatio, 0) / n) * 100);
+  const pitchMae = Math.round(sScores.reduce((a, s) => a + s.pitch.centsMae, 0) / n);
 
   const melPct = avg((s) => s.rhythm.melodyPercent);
-  const melHit = Math.round((scores.reduce((a, s) => a + s.rhythm.melodyHitRate, 0) / n) * 100);
-  const melMeanAbs = Math.round(scores.reduce((a, s) => a + s.rhythm.melodyMeanAbsMs, 0) / n);
+  const melHit = Math.round((sScores.reduce((a, s) => a + s.rhythm.melodyHitRate, 0) / n) * 100);
+  const melMeanAbs = Math.round(sScores.reduce((a, s) => a + s.rhythm.melodyMeanAbsMs, 0) / n);
 
   const intervalsPct = avg((s) => clamp01(s.intervals.correctRatio) * 100);
 
@@ -60,15 +75,20 @@ export default function SessionAnalytics({
   const [introEpoch, setIntroEpoch] = React.useState(0);
   React.useEffect(() => { setIntroEpoch((e) => e + 1); }, [view]);
 
-  const rightCardTitle: Record<ViewKey, { title: string; subtitle: string }> = {
-    performance: { title: "Performance over takes", subtitle: "Final score trend" },
-    "pitch-acc": { title: "Pitch accuracy", subtitle: "On-pitch% per note" },
-    "pitch-prec": { title: "Pitch precision", subtitle: "MAE (¢) per note" },
-    melody: { title: "Melody coverage", subtitle: "By duration per take" },
-    intervals: { title: "Intervals", subtitle: "Class accuracy per take" },
-  };
+  // Allowed views based on visibility flags
+  const availableViews = React.useMemo<ViewKey[]>(() => {
+    const out: ViewKey[] = ["performance"];
+    if (visibility.showPitch) { out.push("pitch-acc", "pitch-prec"); }
+    if (visibility.showMelodyRhythm) { out.push("melody"); }
+    if (visibility.showIntervals) { out.push("intervals"); }
+    return out;
+  }, [visibility]);
 
-  // Typed custom property style object (no `any`)
+  // If current view is hidden by config, jump to the first available
+  React.useEffect(() => {
+    if (!availableViews.includes(view)) setView(availableViews[0] ?? "performance");
+  }, [availableViews, view]);
+
   const railStyle = React.useMemo(
     () =>
       ({
@@ -82,7 +102,7 @@ export default function SessionAnalytics({
       {/* Header */}
       <Header title="Lesson report" finalPct={finalPct} finalLetter={finalLetter} />
 
-      {/* Stat chips */}
+      {/* Stat chips (gated) */}
       <HeaderCards
         finalPct={finalPct}
         finalLetter={finalLetter}
@@ -93,6 +113,7 @@ export default function SessionAnalytics({
         melHit={melHit}
         melMeanAbs={melMeanAbs}
         intervalsPct={intervalsPct}
+        visibility={visibility}
       />
 
       {/* Two-column layout from md up: fixed picker rail + capped chart height */}
@@ -102,50 +123,66 @@ export default function SessionAnalytics({
       >
         {/* Left rail: vertical picker */}
         <div className="min-h-0">
-          <NavCards active={view} setActive={setView} />
+          <NavCards active={view} setActive={setView} available={availableViews} />
         </div>
 
         {/* Right: chart card — height capped to rail height from md↑ */}
         <div className="min-h-0 flex">
           <div className="rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-4 md:p-6 shadow-sm w-full min-h-0 overflow-hidden self-start md:h-[var(--ana-rail-h)]">
             <div className="flex items-baseline justify-between gap-3 mb-2">
-              <h3 className="text-lg md:text-xl font-semibold text-[#0f0f0f]">{rightCardTitle[view].title}</h3>
-              <div className="text-xs md:text-sm text-[#373737]">{rightCardTitle[view].subtitle}</div>
+              <h3 className="text-lg md:text-xl font-semibold text-[#0f0f0f]">{{
+                performance: "Performance over takes",
+                "pitch-acc": "Pitch accuracy",
+                "pitch-prec": "Pitch precision",
+                melody: "Melody coverage",
+                intervals: "Intervals",
+              }[view]}</h3>
+              <div className="text-xs md:text-sm text-[#373737]">{{
+                performance: "Final score trend",
+                "pitch-acc": "On-pitch% per note",
+                "pitch-prec": "MAE (¢) per note",
+                melody: "By duration per take",
+                intervals: "Class accuracy per take",
+              }[view]}</div>
             </div>
 
             <div className="h-[calc(100%-1.75rem)] min-h-0">
               {view === "performance" && (
-                <PerformanceOverTakesChart scores={scores} introEpoch={introEpoch} />
+                <PerformanceOverTakesChart
+                  scores={sScores}
+                  introEpoch={introEpoch}
+                  visibility={visibility}
+                />
               )}
-              {view === "pitch-acc" && (
+              {view === "pitch-acc" && visibility.showPitch && (
                 <PitchAccuracyChart
-                  scores={scores}
-                  snapshots={snapshots}
+                  scores={sScores}
+                  snapshots={sSnaps}
                   tonicPc={tonicPc}
                   scaleName={scaleName}
                   introEpoch={introEpoch}
                 />
               )}
-              {view === "pitch-prec" && (
+              {view === "pitch-prec" && visibility.showPitch && (
                 <PitchPrecisionChart
-                  scores={scores}
-                  snapshots={snapshots}
+                  scores={sScores}
+                  snapshots={sSnaps}
                   tonicPc={tonicPc}
                   scaleName={scaleName}
                   introEpoch={introEpoch}
                 />
               )}
-              {view === "melody" && (
+              {view === "melody" && visibility.showMelodyRhythm && (
                 <MelodyCoverageChart
-                  scores={scores}
-                  snapshots={snapshots}
+                  scores={sScores}
+                  snapshots={sSnaps}
                   bpm={bpm}
                   den={den}
                   introEpoch={introEpoch}
                 />
               )}
-              {view === "intervals" && (
-                <IntervalsChart scores={scores} introEpoch={introEpoch} />
+              {view === "intervals" && visibility.showIntervals && (
+                <IntervalsChart scores={sScores} introEpoch={introEpoch} />
               )}
             </div>
           </div>

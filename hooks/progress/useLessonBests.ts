@@ -44,27 +44,31 @@ export default function useLessonBests() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch('/api/progress/lesson-bests', {
+        const res = await fetch(`/api/progress/lesson-bests?t=${Date.now()}`, {
           method: 'GET',
           credentials: 'include',
+          cache: 'no-store', // ensure browser doesn’t serve a cached 200
           signal: ac.signal,
         });
 
         if (res.status === 401) {
-          // Not signed in; treat as empty.
           if (alive) setBests({});
           return;
         }
         if (!res.ok) {
-          const msg = `HTTP ${res.status}`;
-          throw new Error(msg);
+          throw new Error(`HTTP ${res.status}`);
         }
 
         const rows: Row[] = await res.json();
-
         if (!alive) return;
 
+        // Always keep the max for a given key (ordering can vary)
         const map: LessonBests = {};
+        const setMax = (key: string, value: number) => {
+          const prev = map[key];
+          map[key] = prev === undefined ? value : Math.max(prev, value);
+        };
+
         for (const r of rows ?? []) {
           const raw = String(r.lesson_slug ?? '').trim();
           if (!raw) continue;
@@ -72,11 +76,11 @@ export default function useLessonBests() {
 
           if (isNamespaced(raw)) {
             // New rows: already "course/lesson"
-            map[raw] = pct;
+            setMax(raw, pct);
           } else {
             // Legacy rows: only map if the lesson slug belongs to exactly one course
             const onlyCourse = uniqueCourseForLesson(raw);
-            if (onlyCourse) map[`${onlyCourse}/${raw}`] = pct;
+            if (onlyCourse) setMax(`${onlyCourse}/${raw}`, pct);
             // If ambiguous, skip to avoid cross-course credit
           }
         }

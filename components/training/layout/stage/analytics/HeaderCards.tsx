@@ -13,11 +13,10 @@ function StatCard({ title, main, sub, className = "" }: StatCardProps) {
     <div
       className={[
         "rounded-2xl border bg-gradient-to-b shadow-sm overflow-hidden",
-        "flex-1 min-w-0", // never wrap; shrink instead
+        "flex-1 min-w-0",
         className,
       ].join(" ")}
       style={{
-        // smaller clamp so cards can squeeze more on narrow viewports
         height: "clamp(52px, 7vw, 96px)",
         borderColor: "#d2d2d2",
         backgroundImage: "linear-gradient(to bottom, #f2f2f2, #eeeeee)",
@@ -37,7 +36,6 @@ function StatCard({ title, main, sub, className = "" }: StatCardProps) {
           {main}
         </div>
         {sub ? (
-          // Hide the third line on smaller screens to avoid clipping.
           <div
             className="hidden xl:block text-[#6b6b6b] mt-0.5 truncate leading-snug"
             style={{ fontSize: "clamp(10px, 0.95vw, 12px)" }}
@@ -51,6 +49,13 @@ function StatCard({ title, main, sub, className = "" }: StatCardProps) {
   );
 }
 
+type Visibility = {
+  showPitch: boolean;
+  showIntervals: boolean;
+  showMelodyRhythm: boolean;
+  showRhythmLine: boolean;
+};
+
 export default function HeaderCards({
   finalPct,
   finalLetter,
@@ -61,6 +66,8 @@ export default function HeaderCards({
   melHit,
   melMeanAbs,
   intervalsPct,
+  /** NEW: visibility gating */
+  visibility = { showPitch: true, showIntervals: true, showMelodyRhythm: true, showRhythmLine: true },
 }: {
   finalPct: number;
   finalLetter: string;
@@ -71,26 +78,35 @@ export default function HeaderCards({
   melHit: number;
   melMeanAbs: number;
   intervalsPct: number;
+  visibility?: Visibility;
 }) {
   return (
-    // Single, non-wrapping row at all sizes.
     <div className="w-full flex flex-nowrap gap-2 sm:gap-3">
       <StatCard title={`Final (${finalLetter})`} main={`${finalPct.toFixed(1)}%`} />
-      <StatCard
-        title="Pitch"
-        main={`${pitchPct.toFixed(1)}%`}
-        sub={`On-pitch ${timeOnPitchPct}% • MAE ${pitchMae}¢`}
-      />
-      <StatCard
-        title="Melody rhythm"
-        main={`${melPct.toFixed(1)}%`}
-        sub={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
-      />
-      <StatCard
-        title="Intervals"
-        main={`${intervalsPct.toFixed(1)}%`}
-        sub="Per-take breakdown below"
-      />
+
+      {visibility.showPitch && (
+        <StatCard
+          title="Pitch"
+          main={`${pitchPct.toFixed(1)}%`}
+          sub={`On-pitch ${timeOnPitchPct}% • MAE ${pitchMae}¢`}
+        />
+      )}
+
+      {visibility.showMelodyRhythm && (
+        <StatCard
+          title="Melody rhythm"
+          main={`${melPct.toFixed(1)}%`}
+          sub={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
+        />
+      )}
+
+      {visibility.showIntervals && (
+        <StatCard
+          title="Intervals"
+          main={`${intervalsPct.toFixed(1)}%`}
+          sub="Per-take breakdown below"
+        />
+      )}
     </div>
   );
 }

@@ -89,6 +89,14 @@ export type TrainingSidePanelProps = {
 
   /** For solfège displays, keep broader solfège scale names here */
   scaleName?: SolfegeScaleName | (string & {});
+
+  /** NEW: controls which analytics blocks are shown */
+  visibility?: {
+    showPitch: boolean;
+    showIntervals: boolean;
+    showMelodyRhythm: boolean;
+    showRhythmLine: boolean;
+  };
 };
 
 export default function TrainingSidePanel(props: TrainingSidePanelProps) {
@@ -112,6 +120,14 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
     tsNum,
     tonicPc,
     scaleName = "major",
+
+    // NEW: analytics/take-review visibility controls
+    visibility = {
+      showPitch: true,
+      showIntervals: true,
+      showMelodyRhythm: true,
+      showRhythmLine: true,
+    },
   } = props;
 
   // - null  -> list
@@ -183,8 +199,8 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
         bpm={bpm}
         den={den}
         tonicPc={tonicPc}
-        // For solfège displays, keep broader solfège scale names
         scaleName={scaleName as SolfegeScaleName}
+        visibility={visibility}   // ← NEW
       />
     );
   }
@@ -204,6 +220,7 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
         den={den}
         tonicPc={tonicPc}
         scaleName={scaleName as SolfegeScaleName}
+        visibility={visibility}    // ← NEW
       />
     );
   }

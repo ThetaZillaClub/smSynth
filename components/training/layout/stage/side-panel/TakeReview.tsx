@@ -25,6 +25,13 @@ export default function TakeReview({
   den,
   tonicPc = 0,
   scaleName = "major",
+  /** NEW: analytics visibility gating */
+  visibility = {
+    showPitch: true,
+    showIntervals: true,
+    showMelodyRhythm: true,
+    showRhythmLine: true,
+  },
 }: {
   haveRhythm: boolean;
   onPlayMelody: () => Promise<void> | void;
@@ -38,6 +45,13 @@ export default function TakeReview({
   den: number;
   tonicPc?: number;
   scaleName?: SolfegeScaleName;
+  /** NEW: analytics visibility gating */
+  visibility?: {
+    showPitch: boolean;
+    showIntervals: boolean;
+    showMelodyRhythm: boolean;
+    showRhythmLine: boolean;
+  };
 }) {
   const finalPct = score?.final?.percent ?? 0;
   const finalLetter = score?.final?.letter ?? "—";
@@ -49,6 +63,12 @@ export default function TakeReview({
 
   type View = "summary" | "pitch" | "melody" | "line" | "intervals";
   const [view, setView] = React.useState<View>("summary");
+
+  // If a hidden view is somehow selected (e.g., via back/forward), bounce to summary
+  React.useEffect(() => {
+    if (view === "melody" && !visibility.showMelodyRhythm) setView("summary");
+    if (view === "line" && !visibility.showRhythmLine) setView("summary");
+  }, [view, visibility]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -63,7 +83,7 @@ export default function TakeReview({
         </button>
       ) : null}
 
-      {/* Header / overall row */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="text-base md:text-lg font-semibold text-[#0f0f0f]">
           {view === "summary"
@@ -97,7 +117,7 @@ export default function TakeReview({
           </svg>
         </RoundIconButton>
 
-        {haveRhythm && (
+        {haveRhythm && visibility.showRhythmLine && (
           <RoundIconButton title="Play rhythm line" ariaLabel="Play rhythm line" onClick={onPlayRhythm}>
             <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
               <path d="M9 3h6l3 10H6L9 3Zm1.5 2L8.5 11h7L13.5 5H10.5Z" fill="currentColor" />
@@ -106,7 +126,7 @@ export default function TakeReview({
           </RoundIconButton>
         )}
 
-        {haveRhythm && (
+        {haveRhythm && visibility.showRhythmLine && (
           <RoundIconButton title="Play both" ariaLabel="Play both melody and rhythm" onClick={onPlayBoth}>
             <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
               <path d="M12 2l10 6-10 6L2 8l10-6Z" fill="currentColor" />
@@ -124,19 +144,26 @@ export default function TakeReview({
 
       {view === "summary" ? (
         <div className="grid grid-cols-1 gap-2">
+          {/* Pitch — always */}
           <ClickableStatTile
             label="Pitch"
             value={`${pitchPct.toFixed(1)}%`}
             detail={`Open detailed pitch table`}
             onClick={() => setView("pitch")}
           />
-          <ClickableStatTile
-            label="Melody rhythm"
-            value={`${melodyRhythmPct.toFixed(1)}%`}
-            detail="Open per-note rhythm coverage"
-            onClick={() => setView("melody")}
-          />
-          {haveRhythm && (
+
+          {/* Melody rhythm — gated */}
+          {visibility.showMelodyRhythm && (
+            <ClickableStatTile
+              label="Melody rhythm"
+              value={`${melodyRhythmPct.toFixed(1)}%`}
+              detail="Open per-note rhythm coverage"
+              onClick={() => setView("melody")}
+            />
+          )}
+
+          {/* Rhythm line — gated */}
+          {visibility.showRhythmLine && (
             <ClickableStatTile
               label="Rhythm line"
               value={lineRhythmPct != null ? `${lineRhythmPct.toFixed(1)}%` : "—"}
@@ -144,6 +171,8 @@ export default function TakeReview({
               onClick={() => setView("line")}
             />
           )}
+
+          {/* Intervals — always */}
           <ClickableStatTile
             label="Intervals"
             value={`${Math.round((score?.intervals?.correctRatio || 0) * 100)}%`}
@@ -154,9 +183,11 @@ export default function TakeReview({
       ) : view === "pitch" ? (
         <PitchReview score={score!} phrase={phrase ?? null} tonicPc={tonicPc} scaleName={scaleName} />
       ) : view === "melody" ? (
-        <MelodyRhythmReview score={score!} phrase={phrase ?? null} bpm={bpm} den={den} />
+        visibility.showMelodyRhythm ? (
+          <MelodyRhythmReview score={score!} phrase={phrase ?? null} bpm={bpm} den={den} />
+        ) : null
       ) : view === "line" ? (
-        <RhythmLineReview score={score!} />
+        visibility.showRhythmLine ? <RhythmLineReview score={score!} /> : null
       ) : (
         <IntervalReview score={score!} />
       )}

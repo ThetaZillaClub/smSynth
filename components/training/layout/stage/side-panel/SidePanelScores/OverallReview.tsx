@@ -23,6 +23,13 @@ export default function OverallReview({
   tonicPc = 0,
   scaleName = "major",
   onClose,
+  /** NEW: analytics visibility gating */
+  visibility = {
+    showPitch: true,
+    showIntervals: true,
+    showMelodyRhythm: true,
+    showRhythmLine: true,
+  },
 }: {
   scores: TakeScore[];
   snapshots?: TakeSnap[];
@@ -31,6 +38,13 @@ export default function OverallReview({
   tonicPc?: number;
   scaleName?: SolfegeScaleName;
   onClose?: () => void;
+  /** NEW: analytics visibility gating */
+  visibility?: {
+    showPitch: boolean;
+    showIntervals: boolean;
+    showMelodyRhythm: boolean;
+    showRhythmLine: boolean;
+  };
 }) {
   const n = scores.length || 1;
   const avg = (sel: (s: TakeScore) => number) =>
@@ -40,21 +54,45 @@ export default function OverallReview({
   const finalLetter = letterFromPercent(finalPct);
 
   const pitchPct = avg((s) => s.pitch.percent);
-  const timeOnPitchPct = Math.round((scores.reduce((a, s) => a + s.pitch.timeOnPitchRatio, 0) / n) * 100);
-  const pitchMae = Math.round(scores.reduce((a, s) => a + s.pitch.centsMae, 0) / n);
+  const timeOnPitchPct = Math.round(
+    (scores.reduce((a, s) => a + s.pitch.timeOnPitchRatio, 0) / n) * 100
+  );
+  const pitchMae = Math.round(
+    scores.reduce((a, s) => a + s.pitch.centsMae, 0) / n
+  );
 
   const melPct = avg((s) => s.rhythm.melodyPercent);
-  const melHit = Math.round((scores.reduce((a, s) => a + s.rhythm.melodyHitRate, 0) / n) * 100);
-  const melMeanAbs = Math.round(scores.reduce((a, s) => a + s.rhythm.melodyMeanAbsMs, 0) / n);
+  const melHit = Math.round(
+    (scores.reduce((a, s) => a + s.rhythm.melodyHitRate, 0) / n) * 100
+  );
+  const melMeanAbs = Math.round(
+    scores.reduce((a, s) => a + s.rhythm.melodyMeanAbsMs, 0) / n
+  );
 
   const lineSamples = scores.filter((s) => s.rhythm.lineEvaluated);
   const haveLine = lineSamples.length > 0;
   const lineN = lineSamples.length || 1;
-  const linePct = haveLine ? Math.round((lineSamples.reduce((a, s) => a + s.rhythm.linePercent, 0) / lineN) * 10) / 10 : 0;
-  const lineHit = haveLine ? Math.round((lineSamples.reduce((a, s) => a + s.rhythm.lineHitRate, 0) / lineN) * 100) : 0;
-  const lineMeanAbs = haveLine ? Math.round(lineSamples.reduce((a, s) => a + s.rhythm.lineMeanAbsMs, 0) / lineN) : 0;
+  const linePct = haveLine
+    ? Math.round(
+        (lineSamples.reduce((a, s) => a + s.rhythm.linePercent, 0) / lineN) * 10
+      ) / 10
+    : 0;
+  const lineHit = haveLine
+    ? Math.round(
+        (lineSamples.reduce((a, s) => a + s.rhythm.lineHitRate, 0) / lineN) *
+          100
+      )
+    : 0;
+  const lineMeanAbs = haveLine
+    ? Math.round(
+        lineSamples.reduce((a, s) => a + s.rhythm.lineMeanAbsMs, 0) / lineN
+      )
+    : 0;
 
-  const intervalsPct = Math.round((scores.reduce((a, s) => a + s.intervals.correctRatio * 100, 0) / n) * 10) / 10;
+  const intervalsPct =
+    Math.round(
+      (scores.reduce((a, s) => a + s.intervals.correctRatio * 100, 0) / n) * 10
+    ) / 10;
 
   const [view, setView] = React.useState<View>("summary");
 
@@ -105,9 +143,20 @@ export default function OverallReview({
         const midi = Math.round(notes[j]!.midi);
         const pcAbs = ((midi % 12) + 12) % 12;
         const label = midiLabelForKey(midi, tonicPc, scaleName).text;
-        const solf = pcToSolfege(pcAbs, tonicPc, scaleName, { caseStyle: "lower" });
+        const solf = pcToSolfege(pcAbs, tonicPc, scaleName, {
+          caseStyle: "lower",
+        });
         const key = `${label}|${solf}`;
-        if (!m.has(key)) m.set(key, { key, label, solf, order: j, n: 0, meanRatio: 0, meanMae: 0 });
+        if (!m.has(key))
+          m.set(key, {
+            key,
+            label,
+            solf,
+            order: j,
+            n: 0,
+            meanRatio: 0,
+            meanMae: 0,
+          });
         const g = m.get(key)!;
         g.n += 1;
         g.meanRatio += (p.ratio - g.meanRatio) / g.n;
@@ -137,7 +186,14 @@ export default function OverallReview({
         const r = per?.[j];
         if (!r) continue;
         const label = secondsToNoteName(notes[j]!.durSec, bpm, den);
-        if (!m.has(label)) m.set(label, { label, order: orderCounter++, n: 0, meanCoverage: 0, meanAbsOnset: 0 });
+        if (!m.has(label))
+          m.set(label, {
+            label,
+            order: orderCounter++,
+            n: 0,
+            meanCoverage: 0,
+            meanAbsOnset: 0,
+          });
         const g = m.get(label)!;
         g.n += 1;
         g.meanCoverage += (r.coverage - g.meanCoverage) / g.n;
@@ -172,7 +228,14 @@ export default function OverallReview({
         if (!ev) continue;
         const durSec = noteValueToSeconds(ev.value, bpm, den);
         const label = secondsToNoteName(durSec, bpm, den);
-        if (!m.has(label)) m.set(label, { label, order: orderCounter++, n: 0, meanHit: 0, meanAbsErr: 0 });
+        if (!m.has(label))
+          m.set(label, {
+            label,
+            order: orderCounter++,
+            n: 0,
+            meanHit: 0,
+            meanAbsErr: 0,
+          });
         const g = m.get(label)!;
         g.n += 1;
         const hit = (r.credit ?? 0) > 0 ? 1 : 0;
@@ -185,6 +248,12 @@ export default function OverallReview({
     }
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
   }, [scores, snapshots, bpm, den]);
+
+  // If hidden view is selected (e.g., via history), bounce back to summary
+  React.useEffect(() => {
+    if (view === "melody" && !visibility.showMelodyRhythm) setView("summary");
+    if (view === "line" && !visibility.showRhythmLine) setView("summary");
+  }, [view, visibility]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -214,29 +283,38 @@ export default function OverallReview({
 
       {view === "summary" ? (
         <div className="grid grid-cols-1 gap-2">
-          <StaticRow
-            label={`Final • ${finalLetter}`}
-            value={`${finalPct.toFixed(1)}%`}
-          />
+          <StaticRow label={`Final • ${finalLetter}`} value={`${finalPct.toFixed(1)}%`} />
+
+          {/* Pitch — always (visibility.showPitch left for parity with API; pitch is always true) */}
           <ClickableRow
             label="Pitch accuracy"
             value={`${pitchPct.toFixed(1)}%`}
             detail={`On pitch ${timeOnPitchPct}% • MAE ${pitchMae}¢`}
             onClick={() => setView("pitch")}
           />
-          <ClickableRow
-            label="Rhythm (melody)"
-            value={`${melPct.toFixed(1)}%`}
-            detail={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
-            onClick={() => setView("melody")}
-          />
-          <ClickableRow
-            label="Intervals"
-            value={`${intervalsPct.toFixed(1)}%`}
-            detail="Open aggregated breakdown"
-            onClick={() => setView("intervals")}
-          />
-          {haveLine ? (
+
+          {/* Melody rhythm — gated */}
+          {visibility.showMelodyRhythm && (
+            <ClickableRow
+              label="Rhythm (melody)"
+              value={`${melPct.toFixed(1)}%`}
+              detail={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
+              onClick={() => setView("melody")}
+            />
+          )}
+
+          {/* Intervals — always */}
+          {visibility.showIntervals && (
+            <ClickableRow
+              label="Intervals"
+              value={`${intervalsPct.toFixed(1)}%`}
+              detail="Open aggregated breakdown"
+              onClick={() => setView("intervals")}
+            />
+          )}
+
+          {/* Rhythm line — gated */}
+          {visibility.showRhythmLine && haveLine ? (
             <ClickableRow
               label="Rhythm (blue line)"
               value={`${linePct.toFixed(1)}%`}
@@ -264,15 +342,21 @@ export default function OverallReview({
               <tbody>
                 {intervalByClass.length === 0 ? (
                   <tr className="border-t border-[#eee]">
-                    <td className="px-2 py-1.5" colSpan={4}>No interval attempts yet.</td>
+                    <td className="px-2 py-1.5" colSpan={4}>
+                      No interval attempts yet.
+                    </td>
                   </tr>
                 ) : (
                   intervalByClass.map((r) => (
                     <tr key={r.semitones} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
+                      <td className="px-2 py-1.5 align-middle font-medium">
+                        {r.label}
+                      </td>
                       <td className="px-2 py-1.5 align-middle">{r.attempts}</td>
                       <td className="px-2 py-1.5 align-middle">{r.correct}</td>
-                      <td className="px-2 py-1.5 align-middle">{r.percent}%</td>
+                      <td className="px-2 py-1.5 align-middle">
+                        {r.percent}%
+                      </td>
                     </tr>
                   ))
                 )}
@@ -301,15 +385,23 @@ export default function OverallReview({
               <tbody>
                 {aggPitchRows.length === 0 ? (
                   <tr className="border-t border-[#eee]">
-                    <td className="px-2 py-1.5" colSpan={4}>No notes to evaluate.</td>
+                    <td className="px-2 py-1.5" colSpan={4}>
+                      No notes to evaluate.
+                    </td>
                   </tr>
                 ) : (
                   aggPitchRows.map((g) => (
                     <tr key={g.key} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">{g.label}</td>
+                      <td className="px-2 py-1.5 align-middle font-medium">
+                        {g.label}
+                      </td>
                       <td className="px-2 py-1.5 align-middle">{g.solf}</td>
-                      <td className="px-2 py-1.5 align-middle">{(g.meanRatio * 100).toFixed(1)}%</td>
-                      <td className="px-2 py-1.5 align-middle">{Math.round(g.meanMae)}</td>
+                      <td className="px-2 py-1.5 align-middle">
+                        {(g.meanRatio * 100).toFixed(1)}%
+                      </td>
+                      <td className="px-2 py-1.5 align-middle">
+                        {Math.round(g.meanMae)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -319,78 +411,96 @@ export default function OverallReview({
           <BackLink onClick={() => setView("summary")} />
         </div>
       ) : view === "melody" ? (
-        <div className="flex flex-col gap-2">
-          <SubHeader
-            title="Melody rhythm — aggregated across all takes"
-            main={`${melPct.toFixed(1)}%`}
-            sub={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
-          />
-          <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-                  <th className="px-2 py-2">Duration</th>
-                  <th className="px-2 py-2">Coverage %</th>
-                  <th className="px-2 py-2">First-voice μ|Δt|</th>
-                </tr>
-              </thead>
-              <tbody>
-                {aggMelodyRows.length === 0 ? (
-                  <tr className="border-t border-[#eee]">
-                    <td className="px-2 py-1.5" colSpan={3}>No notes to evaluate.</td>
+        visibility.showMelodyRhythm ? (
+          <div className="flex flex-col gap-2">
+            <SubHeader
+              title="Melody rhythm — aggregated across all takes"
+              main={`${melPct.toFixed(1)}%`}
+              sub={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
+            />
+            <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
+                    <th className="px-2 py-2">Duration</th>
+                    <th className="px-2 py-2">Coverage %</th>
+                    <th className="px-2 py-2">First-voice μ|Δt|</th>
                   </tr>
-                ) : (
-                  aggMelodyRows.map((r) => (
-                    <tr key={r.label} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
-                      <td className="px-2 py-1.5 align-middle">{(r.meanCoverage * 100).toFixed(1)}%</td>
-                      <td className="px-2 py-1.5 align-middle">{Math.round(r.meanAbsOnset)}ms</td>
+                </thead>
+                <tbody>
+                  {aggMelodyRows.length === 0 ? (
+                    <tr className="border-t border-[#eee]">
+                      <td className="px-2 py-1.5" colSpan={3}>
+                        No notes to evaluate.
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    aggMelodyRows.map((r) => (
+                      <tr key={r.label} className="border-t border-[#eee]">
+                        <td className="px-2 py-1.5 align-middle font-medium">
+                          {r.label}
+                        </td>
+                        <td className="px-2 py-1.5 align-middle">
+                          {(r.meanCoverage * 100).toFixed(1)}%
+                        </td>
+                        <td className="px-2 py-1.5 align-middle">
+                          {Math.round(r.meanAbsOnset)}ms
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <BackLink onClick={() => setView("summary")} />
           </div>
-          <BackLink onClick={() => setView("summary")} />
-        </div>
+        ) : null
       ) : (
         // view === "line"
-        <div className="flex flex-col gap-2">
-          <SubHeader
-            title="Rhythm line — aggregated across all takes"
-            main={`${linePct.toFixed(1)}%`}
-            sub={`Hit ${lineHit}% • μ|Δt| ${lineMeanAbs}ms`}
-          />
-          <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text[11px] uppercase tracking-wide text-[#6b6b6b]">
-                  <th className="px-2 py-2">Duration</th>
-                  <th className="px-2 py-2">Hit %</th>
-                  <th className="px-2 py-2">μ|Δt|</th>
-                </tr>
-              </thead>
-              <tbody>
-                {aggLineRows.length === 0 ? (
-                  <tr className="border-t border-[#eee]">
-                    <td className="px-2 py-1.5" colSpan={3}>
-                      Rhythm line was not evaluated across these takes.
-                    </td>
+        visibility.showRhythmLine ? (
+          <div className="flex flex-col gap-2">
+            <SubHeader
+              title="Rhythm line — aggregated across all takes"
+              main={`${linePct.toFixed(1)}%`}
+              sub={`Hit ${lineHit}% • μ|Δt| ${lineMeanAbs}ms`}
+            />
+            <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text[11px] uppercase tracking-wide text-[#6b6b6b]">
+                    <th className="px-2 py-2">Duration</th>
+                    <th className="px-2 py-2">Hit %</th>
+                    <th className="px-2 py-2">μ|Δt|</th>
                   </tr>
-                ) : (
-                  aggLineRows.map((r) => (
-                    <tr key={r.label} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
-                      <td className="px-2 py-1.5 align-middle">{(r.meanHit * 100).toFixed(0)}%</td>
-                      <td className="px-2 py-1.5 align-middle">{Math.round(r.meanAbsErr)}ms</td>
+                </thead>
+                <tbody>
+                  {aggLineRows.length === 0 ? (
+                    <tr className="border-t border-[#eee]">
+                      <td className="px-2 py-1.5" colSpan={3}>
+                        Rhythm line was not evaluated across these takes.
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    aggLineRows.map((r) => (
+                      <tr key={r.label} className="border-t border-[#eee]">
+                        <td className="px-2 py-1.5 align-middle font-medium">
+                          {r.label}
+                        </td>
+                        <td className="px-2 py-1.5 align-middle">
+                          {(r.meanHit * 100).toFixed(0)}%
+                        </td>
+                        <td className="px-2 py-1.5 align-middle">
+                          {Math.round(r.meanAbsErr)}ms
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <BackLink onClick={() => setView("summary")} />
           </div>
-          <BackLink onClick={() => setView("summary")} />
-        </div>
+        ) : null
       )}
     </div>
   );
@@ -399,8 +509,12 @@ export default function OverallReview({
 function StaticRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="text-left rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{label}</div>
-      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{value}</div>
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
+        {label}
+      </div>
+      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
+        {value}
+      </div>
     </div>
   );
 }
@@ -422,18 +536,36 @@ function ClickableRow({
       onClick={onClick}
       className="text-left rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2 hover:shadow-sm transition"
     >
-      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{label}</div>
-      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{value}</div>
-      {detail ? <div className="text-xs text-[#373737] mt-0.5">{detail}</div> : null}
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
+        {label}
+      </div>
+      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
+        {value}
+      </div>
+      {detail ? (
+        <div className="text-xs text-[#373737] mt-0.5">{detail}</div>
+      ) : null}
     </button>
   );
 }
 
-function SubHeader({ title, main, sub }: { title: string; main: string; sub?: string }) {
+function SubHeader({
+  title,
+  main,
+  sub,
+}: {
+  title: string;
+  main: string;
+  sub?: string;
+}) {
   return (
     <div className="rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{title}</div>
-      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{main}</div>
+      <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
+        {title}
+      </div>
+      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
+        {main}
+      </div>
       {sub ? <div className="text-xs text-[#373737] mt-0.5">{sub}</div> : null}
     </div>
   );

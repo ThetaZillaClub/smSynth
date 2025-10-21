@@ -10,10 +10,12 @@ export default function CourseNavGate({
   courseSlugParam,
   lessonSlug,         // may be "lesson" or "course/lesson"
   sessionComplete,
+  onRepeat,           // ← NEW (optional soft-reset trigger)
 }: {
   courseSlugParam?: string;
   lessonSlug?: string | null;
   sessionComplete: boolean;
+  onRepeat?: () => void;
 }) {
   const router = useRouter();
   if (!sessionComplete) return null;
@@ -63,8 +65,12 @@ export default function CourseNavGate({
 
   const onGoToPath = (slugPath: string) => router.push(`/courses/${slugPath}`);
 
-  // Force a remount by adding a cache-busting repeat param and replacing the url
-  const onRepeat = () => {
+  // Prefer in-app soft repeat if provided; otherwise fall back to old remount trick.
+  const handleRepeat = () => {
+    if (onRepeat) {
+      onRepeat();
+      return;
+    }
     const slugPath =
       currentCourse && currentLesson
         ? `${currentCourse.slug}/${currentLesson.slug}`
@@ -90,7 +96,7 @@ export default function CourseNavGate({
       prevLesson={prevLessonRef ?? undefined}
       nextLesson={nextLessonRef ?? undefined}
       onGoTo={onGoToPath}
-      onRepeat={onRepeat}
+      onRepeat={handleRepeat}
     />
   );
 }
