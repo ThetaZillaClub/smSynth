@@ -33,7 +33,7 @@ export function computePitchScore(
     for (const s of sw) {
       const a = Math.abs(centsBetweenHz(s.hz!, targetHz));
       centsAbs.push(a);
-      const credit = linearCredit50_100(a, centsOk, 100);
+      const credit = linearCredit50_100(a, centsOk, 200);
       goodSec += step * credit;
     }
 

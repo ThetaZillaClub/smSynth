@@ -319,7 +319,7 @@ export default function TrainingGame({
     calibratedLatencyMs,
     gestureLatencyMs,
     exerciseLoops,
-    lessonSlug,
+    lessonSlug: lessonSlug?.split("/").pop() ?? lessonSlug,
     sessionId,
     sessionScores,
     scoreTake,
@@ -327,10 +327,8 @@ export default function TrainingGame({
     sampler,
     hand,
     haveRhythm,
-    // timing-free
     timingFreeResponse: !!timingFreeResponse,
     freeCaptureSec: recordWindowSecEff,
-    // NEW: require a held window this long to be considered a successful capture
     freeMinHoldSec: minCaptureSecEff,
   });
 

@@ -129,8 +129,8 @@ function AnalyticsStageView({
 }) {
   return (
     <div className="w-full h-full min-h-[260px]">
-      <div className="w-full h-full flex gap-3">
-        <div className="flex-1 min-w-0 min-h-0 rounded-xl shadow-md">
+      <div className="w-full h-full flex gap-3 isolate">
+        <div className="flex-1 min-w-0 min-h-0 rounded-xl shadow-md relative z-0">
           <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4 overflow-hidden">
             <SessionAnalytics
               scores={analytics?.scores ?? []}
@@ -142,7 +142,7 @@ function AnalyticsStageView({
             />
           </div>
         </div>
-        <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
+        <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md relative z-10 pointer-events-auto">
           <SidePanelLayout>{stageAside}</SidePanelLayout>
         </aside>
       </div>
@@ -286,8 +286,8 @@ function MainStageView({
 
   return (
     <div ref={hostRef} className="w-full h-full min-h-[260px]">
-      <div className="w-full h-full flex gap-3">
-        <div className="flex-1 min-w-0 flex flex-col drop-shadow-sm rounded-xl shadow-md">
+      <div className="w-full h-full flex gap-3 isolate">
+        <div className="flex-1 min-w-0 flex flex-col drop-shadow-sm rounded-xl shadow-md relative z-0 overflow-hidden">
           <div className="w-full">
             {!hasPhrase ? (
               <div style={{ height: mainH }} />
@@ -390,7 +390,7 @@ function MainStageView({
           ) : null}
         </div>
 
-        <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md">
+        <aside className="shrink-0 w-[clamp(260px,20vw,380px)] rounded-xl shadow-md relative z-10 pointer-events-auto">
           {renderedPanel}
         </aside>
       </div>

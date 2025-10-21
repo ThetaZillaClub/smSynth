@@ -43,7 +43,7 @@ export function computeIntervalScore(
     const errCents = Math.abs(100 * (Math.abs(got) - Math.abs(exp)));
 
     // same linear credit as pitch
-    const credit = linearCredit50_100(errCents, centsOk, 100);
+    const credit = linearCredit50_100(errCents, centsOk, 200);
 
     const cls = Math.min(12, Math.abs(Math.round(exp)));
     const cell = by.get(cls)!;

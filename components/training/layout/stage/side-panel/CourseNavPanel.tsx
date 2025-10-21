@@ -6,7 +6,7 @@ import * as React from "react";
 export type LessonRef = { slug: string; title?: string; summary?: string };
 export type LessonSuggestion = LessonRef & { reason?: string };
 
-export default function CourseNavPanel(props: {
+export type CourseNavPanelProps = {
   currentLesson?: LessonRef | null;
   prevLesson?: LessonRef | null;
   nextLesson?: LessonRef | null;
@@ -14,7 +14,9 @@ export default function CourseNavPanel(props: {
   suggestions?: LessonSuggestion[];
   onRepeat?: () => void;
   onGoTo?: (slug: string) => void;
-}) {
+};
+
+export const CourseNavPanel: React.FC<CourseNavPanelProps> = (props) => {
   const {
     currentLesson,
     prevLesson,
@@ -33,7 +35,6 @@ export default function CourseNavPanel(props: {
         <div className="text-base md:text-lg font-semibold text-[#0f0f0f]">
           Course navigation
         </div>
-        {/* Removed "Current lesson" chip per request */}
       </header>
 
       {/* Cards */}
@@ -73,7 +74,7 @@ export default function CourseNavPanel(props: {
       </div>
     </div>
   );
-}
+};
 
 /* ────────────────────────────────────────────────────────────── */
 /* UI bits                                                        */
@@ -160,3 +161,6 @@ function Icon({ kind }: { kind?: "repeat" | "next" | "prev" }) {
     </span>
   );
 }
+
+// Keep default for any other imports that already used it.
+export default CourseNavPanel;

@@ -242,6 +242,13 @@ export async function getImageUrlCached(
       Math.min(86_400, opts?.signedTtlSec ?? DEFAULT_SIGNED_TTL_S)
     );
 
+    // Ensure we have a client session before attempting to sign (avoids transient empty results)
+    try {
+      await ensureSessionReady(supabase, 1500);
+    } catch {
+      /* non-fatal */
+    }
+
     // parse "bucket/key" or repair to default bucket if first segment looks like a UUID
     const slash = normalized.indexOf("/");
     let bucket: string;

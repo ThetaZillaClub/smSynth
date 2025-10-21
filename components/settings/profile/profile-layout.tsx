@@ -3,8 +3,9 @@
 
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { getImageUrlCached } from '@/lib/client-cache';
+import { getImageUrlCached, ensureSessionReady } from '@/lib/client-cache';
 import AvatarRow from './avatar/AvatarRow';
+import { STUDENT_IMAGE_HINT_KEY } from '@/components/sidebar/types';
 
 type Bootstrap = {
   uid: string;
@@ -20,14 +21,25 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
   const [avatarPath, setAvatarPath] = React.useState<string | null>(bootstrap.avatarPath);
   const [avatarUrl, setAvatarUrl] = React.useState<string | null>(null);
 
+  // Guard to avoid React 18 StrictMode double-run in development
+  const ranForUidRef = React.useRef<string | null>(null);
+
   // Resolve avatar URL from latest models.image_path (or from bootstrap.studentImagePath)
   React.useEffect(() => {
     let cancel = false;
     (async () => {
       try {
+        await ensureSessionReady(supabase); // ensure client session before signing/storage work
+
         const { data: { session } } = await supabase.auth.getSession();
         const user = session?.user;
         if (!user) return;
+
+        // Dev-only guard against StrictMode double-invocation
+        if (process.env.NODE_ENV === 'development') {
+          if (ranForUidRef.current === user.id) return;
+          ranForUidRef.current = user.id;
+        }
 
         const { data: latest } = await supabase
           .from('models')
@@ -41,11 +53,11 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
         const name = latest?.creator_display_name ?? bootstrap.displayName;
 
         if (imgPath) {
-          const url = await getImageUrlCached(supabase, imgPath);
+          const url = await getImageUrlCached(supabase, imgPath, { defaultBucket: 'model-images' });
           if (!cancel) {
             setAvatarPath(imgPath);
-            setAvatarUrl(url ?? null);
-            try { localStorage.setItem('ptp:studentImagePath', imgPath); } catch {}
+            setAvatarUrl(url && url.length > 0 ? url : null); // normalize '' → null
+            try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, imgPath); } catch {}
           }
         } else if (!cancel) {
           setAvatarUrl(null);
@@ -69,8 +81,9 @@ export default function ProfileLayout({ bootstrap }: { bootstrap: Bootstrap }) {
         uid={uid}
         initialAvatarPath={avatarPath}
         initialAvatarUrl={avatarUrl}
+        enableLocalHintFallback // allow child to rescue if parent doesn’t resolve in time
         onAvatarChanged={(url, path) => {
-          setAvatarUrl(url);
+          setAvatarUrl(url && url.length > 0 ? url : null);
           setAvatarPath(path);
         }}
       />

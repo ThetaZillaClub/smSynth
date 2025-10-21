@@ -23,7 +23,7 @@ export function computeTakeScore({
   options = {},
 }: ComputeTakeScoreArgs): TakeScore {
   const {
-    confMin = 0,
+    confMin = 0.5,
     centsOk = 50,
     onsetGraceMs = 120,
     maxAlignMs = 250,
