@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 type StudentRow = {
   id: string;
   creator_display_name: string;
-  // gender removed from DB
   range_low?: string | null;
   range_high?: string | null;
 };
@@ -14,7 +13,6 @@ type StudentRow = {
 type ReturnShape = {
   studentRowId: string | null;
   studentName: string | null;
-  genderLabel: "male" | "female" | null; // keep in API for UI compatibility, always null now
   rangeLowLabel: string | null;
   rangeHighLabel: string | null;
   loading: boolean;
@@ -28,7 +26,6 @@ export default function useStudentRow({
 }): ReturnShape {
   const [studentRowId, setStudentRowId] = useState<string | null>(null);
   const [studentName, setStudentName] = useState<string | null>(null);
-  const [genderLabel, setGenderLabel] = useState<"male" | "female" | null>(null);
   const [rangeLowLabel, setRangeLowLabel] = useState<string | null>(null);
   const [rangeHighLabel, setRangeHighLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,14 +69,11 @@ export default function useStudentRow({
         if (row) {
           setStudentRowId(row.id);
           setStudentName(row.creator_display_name || null);
-          // gender removed: always null
-          setGenderLabel(null);
           setRangeLowLabel(row.range_low ?? null);
           setRangeHighLabel(row.range_high ?? null);
         } else {
           setStudentRowId(null);
           setStudentName(null);
-          setGenderLabel(null);
           setRangeLowLabel(null);
           setRangeHighLabel(null);
         }
@@ -88,7 +82,6 @@ export default function useStudentRow({
         setErr(e?.message || String(e));
         setStudentRowId(null);
         setStudentName(null);
-        setGenderLabel(null);
         setRangeLowLabel(null);
         setRangeHighLabel(null);
       } finally {
@@ -105,7 +98,6 @@ export default function useStudentRow({
   return {
     studentRowId,
     studentName,
-    genderLabel,
     rangeLowLabel,
     rangeHighLabel,
     loading,

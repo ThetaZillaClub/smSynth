@@ -5,14 +5,19 @@ import * as React from 'react';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase/client';
 import { useSupabaseUpload } from '@/hooks/setup/use-supabase-upload';
-import { Dropzone, DropzoneContent, DropzoneEmptyState } from '@/components/auth/dropzone';
+import {
+  DropzoneRoot,
+  DropzoneFrame,
+  DropzoneEmptyState,
+  DropzonePanel,
+} from '@/components/auth/dropzone';
 import { STUDENT_IMAGE_HINT_KEY } from '@/components/sidebar/types';
 
 type Props = {
   name: string;
-  uid: string | null;                         // provided by parent; avoids another getSession() call
-  initialAvatarPath?: string | null;          // kept for compatibility (not used internally)
-  initialAvatarUrl?: string | null;           // already-signed (or public) URL ready to render
+  uid: string | null;
+  initialAvatarPath?: string | null;
+  initialAvatarUrl?: string | null;
   onAvatarChanged?: (url: string | null, path: string | null) => void;
 };
 
@@ -27,10 +32,10 @@ export default function AvatarRow(props: Props) {
 
   const dz = useSupabaseUpload({
     bucketName: 'model-images',
-    path: uid ? uid : undefined,              // store under user folder (uid/filename)
+    path: uid ? uid : undefined,
     allowedMimeTypes: ['image/*'],
     maxFiles: 1,
-    maxFileSize: 8 * 1000 * 1000,             // 8MB
+    maxFileSize: 8 * 1000 * 1000,
     cacheControl: 3600,
     upsert: true,
   });
@@ -42,13 +47,10 @@ export default function AvatarRow(props: Props) {
 
       try {
         setErr(null);
-        const filename = dz.successes[0];
+        const filename = dz.successes[dz.successes.length - 1];
+        const objectKey = `${uid}/${filename}`;
+        const dbPath = `model-images/${objectKey}`;
 
-        // Storage object key and full DB path (with bucket)
-        const objectKey = `${uid}/${filename}`;                  // storage object
-        const dbPath = `avatars/${objectKey}`;                   // what we persist & hint
-
-        // Find latest model id
         const { data: latest, error: findErr } = await supabase
           .from('models')
           .select('id')
@@ -56,28 +58,21 @@ export default function AvatarRow(props: Props) {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-
         if (findErr) throw findErr;
         if (!latest?.id) throw new Error('No model row to update.');
 
-        // Update models.image_path to include the BUCKET prefix
         const { error: updErr } = await supabase
           .from('models')
           .update({ image_path: dbPath })
           .eq('id', latest.id);
-
         if (updErr) throw updErr;
 
-        // Resolve a signed URL for immediate preview
         const { data, error } = await supabase.storage.from('model-images').createSignedUrl(objectKey, 600);
         if (error) throw error;
 
         const url = data?.signedUrl ?? null;
         setAvatarUrl(url);
-
-        // Persist hint (same value other readers expect)
         try { localStorage.setItem(STUDENT_IMAGE_HINT_KEY, dbPath); } catch {}
-
         onAvatarChanged?.(url, dbPath);
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : 'Failed to save new avatar.';
@@ -88,33 +83,36 @@ export default function AvatarRow(props: Props) {
   }, [dz.isSuccess, dz.successes, supabase, uid]);
 
   return (
-    <div className="flex items-start gap-6">
-      {/* Avatar box (square) — white bg, no border */}
-      <div className="relative w-28 h-28 rounded-xl overflow-hidden bg-white">
-        {avatarUrl ? (
-          <Image
-            src={avatarUrl}
-            alt={`${name} avatar`}
-            fill
-            unoptimized
-            className="object-cover"
-            priority
-          />
-        ) : (
-          <Dropzone
-            {...dz}
-            className="absolute inset-0 grid place-items-center bg-white border-none p-0"
-          >
-            <DropzoneEmptyState className="w-full h-full grid place-items-center" />
-            <DropzoneContent className="w-full" />
-          </Dropzone>
-        )}
-      </div>
+    <DropzoneRoot {...dz}>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-start gap-6">
+          {/* Avatar frame */}
+          <div className="relative w-28 h-28 rounded-xl overflow-hidden bg-white">
+            {avatarUrl ? (
+              <Image
+                src={avatarUrl}
+                alt={`${name} avatar`}
+                fill
+                unoptimized
+                className="object-cover"
+                priority
+              />
+            ) : (
+              <DropzoneFrame className="absolute inset-0 bg-white border-none">
+                <DropzoneEmptyState className="w-full h-full" />
+              </DropzoneFrame>
+            )}
+          </div>
 
-      <div className="min-w-0">
-        <h3 className="text-2xl font-semibold text-[#0f0f0f] truncate">{name}</h3>
-        {err && <p className="text-sm text-red-600 mt-1">{err}</p>}
+          <div className="min-w-0">
+            <h3 className="text-2xl font-semibold text-[#0f0f0f] truncate">{name}</h3>
+            {err && <p className="text-sm text-red-600 mt-1">{err}</p>}
+          </div>
+        </div>
+
+        {/* ⬇️ Now the file info + Upload button sits UNDER the frame */}
+        <DropzonePanel className="max-w-sm" />
       </div>
-    </div>
-  );
+    </DropzoneRoot>
+  )
 }

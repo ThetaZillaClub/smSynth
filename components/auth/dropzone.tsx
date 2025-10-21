@@ -5,7 +5,13 @@ import { type UseSupabaseUploadReturn } from '@/hooks/setup/use-supabase-upload'
 import { Button } from '@/components/auth/button'
 import { CheckCircle, File, Loader2, X } from 'lucide-react'
 import Image from 'next/image'
-import { createContext, type PropsWithChildren, useCallback, useContext, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import {
+  createContext,
+  type PropsWithChildren,
+  useCallback,
+  useContext,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 
 export const formatBytes = (
   bytes: number,
@@ -15,93 +21,94 @@ export const formatBytes = (
   const k = 1000
   const dm = decimals < 0 ? 0 : decimals
   const sizes = ['bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
-
-  if (bytes === 0 || bytes === undefined) return size !== undefined ? `0 ${size}` : '0 bytes'
+  if (bytes === 0 || bytes === undefined) return size ? `0 ${size}` : '0 bytes'
   const i = size !== undefined ? sizes.indexOf(size) : Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
 }
 
-type DropzoneContextType = Omit<UseSupabaseUploadReturn, 'getRootProps' | 'getInputProps'>
+type DropzoneCtx = UseSupabaseUploadReturn
+const DropzoneContext = createContext<DropzoneCtx | undefined>(undefined)
 
-const DropzoneContext = createContext<DropzoneContextType | undefined>(undefined)
-
-type DropzoneProps = UseSupabaseUploadReturn & {
-  className?: string
+export const useDropzoneContext = () => {
+  const ctx = useContext(DropzoneContext)
+  if (!ctx) throw new Error('useDropzoneContext must be used within <DropzoneRoot>')
+  return ctx
 }
 
-const Dropzone = ({
+/** Root: provide context so Frame (click area) and Panel (info) can live apart */
+export const DropzoneRoot = ({
+  children,
+  ...ctx
+}: PropsWithChildren<DropzoneCtx>) => {
+  return <DropzoneContext.Provider value={ctx}>{children}</DropzoneContext.Provider>
+}
+
+/** Frame: the clickable area (your avatar square) */
+export const DropzoneFrame = ({
   className,
   children,
-  getRootProps,
-  getInputProps,
-  ...restProps
-}: PropsWithChildren<DropzoneProps>) => {
-  const isSuccess = restProps.isSuccess
-  const isActive = restProps.isDragActive
-  const isInvalid =
-    (restProps.isDragActive && restProps.isDragReject) ||
-    (restProps.errors.length > 0 && !restProps.isSuccess) ||
-    restProps.files.some((file) => file.errors.length !== 0)
+}: PropsWithChildren<{ className?: string }>) => {
+  const {
+    getRootProps,
+    getInputProps,
+    isDragActive,
+    isDragReject,
+    isSuccess,
+    errors,
+    files,
+    open,
+  } = useDropzoneContext()
+
+  const hasBlockingErrors =
+    errors.length > 0 ||
+    files.some((f) => f.errors.some((e) => e.code !== 'too-many-files'))
+
+  const isInvalid = (isDragActive && isDragReject) || hasBlockingErrors
 
   const triggerFile = () => {
-    try { restProps.inputRef.current?.click() } catch {}
+    try { open?.() } catch {}
   }
 
   return (
-    <DropzoneContext.Provider value={{ ...restProps }}>
-      <div
-        {...getRootProps({
-          className: cn(
-            'border-2 border-gray-300 rounded-lg p-6 text-center bg-card transition-colors duration-300 text-foreground cursor-pointer select-none',
-            className,
-            isSuccess ? 'border-solid' : 'border-dashed',
-            isActive && 'border-primary bg-primary/10',
-            isInvalid && 'border-destructive bg-destructive/10'
-          ),
-          role: 'button',
-          tabIndex: 0,
-          onClick: triggerFile,
-          onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              triggerFile()
-            }
-          },
-          'aria-label': 'Upload file',
-        })}
-      >
-        <input {...getInputProps()} />
-        {children}
-      </div>
-    </DropzoneContext.Provider>
+    <div
+      {...getRootProps({
+        className: cn(
+          'border-2 border-gray-300 rounded-lg p-0 text-foreground cursor-pointer select-none',
+          className,
+          isSuccess ? 'border-solid' : 'border-dashed',
+          isDragActive && 'border-primary bg-primary/10',
+          isInvalid && 'border-destructive bg-destructive/10'
+        ),
+        role: 'button',
+        tabIndex: 0,
+        onClick: triggerFile,
+        onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerFile() }
+        },
+        'aria-label': 'Upload file',
+      })}
+    >
+      <input {...getInputProps()} />
+      {children}
+    </div>
   )
 }
 
-const DropzoneContent = ({ className }: { className?: string }) => {
+/** Panel: renders under the frame (file list + Upload button) */
+export const DropzonePanel = ({ className }: { className?: string }) => {
   const {
-    files,
-    setFiles,
-    onUpload,
-    loading,
-    successes,
-    errors,
-    maxFileSize,
-    maxFiles,
-    isSuccess,
+    files, setFiles, onUpload, loading, successes, errors, maxFileSize, maxFiles, isSuccess,
   } = useDropzoneContext()
 
   const exceedMaxFiles = files.length > maxFiles
-
-  const handleRemoveFile = useCallback(
-    (fileName: string) => {
-      setFiles(files.filter((file) => file.name !== fileName))
-    },
+  const handleRemove = useCallback(
+    (name: string) => setFiles(files.filter((f) => f.name !== name)),
     [files, setFiles]
   )
 
   if (isSuccess) {
     return (
-      <div className={cn('flex flex-row items-center gap-x-2 justify-center', className)}>
+      <div className={cn('flex items-center gap-2 justify-start', className)}>
         <CheckCircle size={16} className="text-primary" />
         <p className="text-primary text-sm">
           Successfully uploaded {files.length} file{files.length > 1 ? 's' : ''}
@@ -113,62 +120,52 @@ const DropzoneContent = ({ className }: { className?: string }) => {
   return (
     <div className={cn('flex flex-col', className)}>
       {files.map((file, idx) => {
-        const fileError = errors.find((e) => e.name === file.name)
-        const isSuccessfullyUploaded = !!successes.find((e) => e === file.name)
+        const rowErr = errors.find((e) => e.name === file.name)
+        const ok = !!successes.find((n) => n === file.name)
+        const visibleErrors = file.errors.filter((e) => e.code !== 'too-many-files')
 
         return (
           <div
             key={`${file.name}-${idx}`}
-            className="flex items-center gap-x-4 border-b py-2 first:mt-4 last:mb-4 "
+            className="flex items-center gap-x-4 border-b py-2"
           >
             {file.type.startsWith('image/') ? (
-              <div className="h-10 w-10 rounded border overflow-hidden shrink-0 bg-muted flex items-center justify-center">
-                <Image
-                  src={file.preview}
-                  alt={file.name}
-                  width={40}
-                  height={40}
-                  unoptimized
-                  className="h-full w-full object-cover"
-                />
+              <div className="h-10 w-10 rounded border overflow-hidden shrink-0 bg-muted grid place-items-center">
+                <Image src={file.preview} alt={file.name} width={40} height={40} unoptimized className="h-full w-full object-cover" />
               </div>
             ) : (
-              <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center">
+              <div className="h-10 w-10 rounded border bg-muted grid place-items-center">
                 <File size={18} />
               </div>
             )}
 
-            <div className="shrink grow flex flex-col items-start truncate">
-              <p title={file.name} className="text-sm truncate max-w-full">
-                {file.name}
-              </p>
-              {file.errors.length > 0 ? (
+            <div className="grow min-w-0">
+              <p className="text-sm truncate" title={file.name}>{file.name}</p>
+              {visibleErrors.length > 0 ? (
                 <p className="text-xs text-destructive">
-                  {file.errors
-                    .map((e) =>
-                      e.message.startsWith('File is larger than')
-                        ? `File is larger than ${formatBytes(maxFileSize, 2)} (Size: ${formatBytes(file.size, 2)})`
-                        : e.message
-                    )
-                    .join(', ')}
+                  {visibleErrors.map((e) =>
+                    e.message.startsWith('File is larger than')
+                      ? `File is larger than ${formatBytes(maxFileSize, 2)} (Size: ${formatBytes(file.size, 2)})`
+                      : e.message
+                  ).join(', ')}
                 </p>
-              ) : loading && !isSuccessfullyUploaded ? (
+              ) : loading && !ok ? (
                 <p className="text-xs text-muted-foreground">Uploading file...</p>
-              ) : !!fileError ? (
-                <p className="text-xs text-destructive">Failed to upload: {fileError.message}</p>
-              ) : isSuccessfullyUploaded ? (
+              ) : rowErr ? (
+                <p className="text-xs text-destructive">Failed to upload: {rowErr.message}</p>
+              ) : ok ? (
                 <p className="text-xs text-primary">Successfully uploaded file</p>
               ) : (
                 <p className="text-xs text-muted-foreground">{formatBytes(file.size, 2)}</p>
               )}
             </div>
 
-            {!loading && !isSuccessfullyUploaded && (
+            {!loading && !ok && (
               <Button
                 size="icon"
                 variant="link"
-                className="shrink-0 justify-self-end text-muted-foreground hover:text-foreground"
-                onClick={() => handleRemoveFile(file.name)}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => handleRemove(file.name)}
               >
                 <X />
               </Button>
@@ -176,27 +173,21 @@ const DropzoneContent = ({ className }: { className?: string }) => {
           </div>
         )
       })}
+
       {exceedMaxFiles && (
-        <p className="text-sm text-left mt-2 text-destructive">
-          You may upload only up to {maxFiles} files, please remove {files.length - maxFiles} file
-          {files.length - maxFiles > 1 ? 's' : ''}.
+        <p className="text-sm mt-2 text-destructive">
+          You may upload only up to {maxFiles} files, please remove {files.length - maxFiles} file{files.length - maxFiles > 1 ? 's' : ''}.
         </p>
       )}
+
       {files.length > 0 && !exceedMaxFiles && (
         <div className="mt-2">
           <Button
             variant="outline"
             onClick={onUpload}
-            disabled={files.some((file) => file.errors.length !== 0) || loading}
+            disabled={loading || files.some((f) => f.errors.some((e) => e.code !== 'too-many-files'))}
           >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              <>Upload files</>
-            )}
+            {loading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...</>) : (<>Upload files</>)}
           </Button>
         </div>
       )}
@@ -204,29 +195,17 @@ const DropzoneContent = ({ className }: { className?: string }) => {
   )
 }
 
-/** Simplified empty state for avatar: big “?” with full-square click */
-const DropzoneEmptyState = ({ className }: { className?: string }) => {
+/** Simple “?” center fill for avatar squares */
+export const DropzoneEmptyState = ({ className }: { className?: string }) => {
   const { isSuccess } = useDropzoneContext()
   if (isSuccess) return null
-
   return (
-    <div
-      className={cn(
-        'w-full h-full flex items-center justify-center',
-        className
-      )}
-    >
+    <div className={cn('w-full h-full grid place-items-center', className)}>
       <span className="text-4xl font-bold text-[#6b6b6b] leading-none select-none">?</span>
     </div>
   )
 }
 
-const useDropzoneContext = () => {
-  const context = useContext(DropzoneContext)
-  if (!context) {
-    throw new Error('useDropzoneContext must be used within a Dropzone')
-  }
-  return context
-}
-
-export { Dropzone, DropzoneContent, DropzoneEmptyState, useDropzoneContext }
+/* --- Back-compat exports (optional): keep names some places might import --- */
+export const Dropzone = DropzoneFrame
+export const DropzoneContent = DropzonePanel
