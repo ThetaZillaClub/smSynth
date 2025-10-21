@@ -31,6 +31,12 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
   const go = (slug: string) => router.push(`/courses/${slug}`);
   const { bests, loading } = useLessonBests();
 
+  // Strongly typed view of `bests` to avoid `any`
+  const bestsMap: Record<string, number> = React.useMemo(
+    () => (bests ?? {}) as Record<string, number>,
+    [bests]
+  );
+
   const lessonsByCourse = React.useMemo(() => {
     const map = new Map<string, string[]>();
     for (const c of REGISTRY) map.set(c.slug, c.lessons.map(l => l.slug));
@@ -45,8 +51,8 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
     for (const ls of lessons) {
       const namespaced = `${courseSlug}/${ls}`;
       const best =
-        (bests ?? {})[namespaced] ??
-        (UNIQUE_SLUG.get(ls) ? (bests as any)[ls] : undefined);
+        bestsMap[namespaced] ??
+        (UNIQUE_SLUG.get(ls) ? bestsMap[ls] : undefined);
 
       if (best != null) {
         started += 1;
@@ -56,7 +62,7 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
 
     const pct = total ? Math.round((completed / total) * 100) : 0;
     return { total, started, completed, pct, remaining: Math.max(0, total - completed) };
-  }, [bests, lessonsByCourse]);
+  }, [bestsMap, lessonsByCourse]);
 
   const items = React.useMemo(() => {
     const withProgress = courses.map(c => ({ c, p: progressFor(c.slug) }));

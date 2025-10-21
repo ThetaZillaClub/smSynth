@@ -101,7 +101,6 @@ export default function GameLayout({
   running,
   onToggle,
   phrase,
-  lyrics,
   livePitchHz,
   confidence,
   confThreshold = 0.5,

@@ -91,8 +91,8 @@ type Props = {
   targetRelOverride?: number;
 };
 
-function toSolfegeName(x: unknown) {
-  return typeof x === "string" ? (x as any as SolfegeScaleName) : undefined;
+function toSolfegeName(x: unknown): SolfegeScaleName | undefined {
+  return typeof x === "string" ? (x as SolfegeScaleName) : undefined;
 }
 
 export default function GameStage(props: Props) {
@@ -355,7 +355,7 @@ function MainStageView({
                   confidence={confidence ?? 0}
                   confThreshold={confThreshold ?? 0.5}
                   tonicPc={typeof tonicPc === "number" ? tonicPc : 0}
-                  scaleName={(scaleName as any as SolfegeScaleName) ?? "major"}
+                  scaleName={toSolfegeName(scaleName) ?? ("major" as SolfegeScaleName)}
                   centerProgress01={centerProgress01}
                   // NEW: steer target wedge to the current expected note
                   targetRelOverride={targetRelOverride}

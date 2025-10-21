@@ -1,6 +1,6 @@
 // lib/courses/intervals/index.ts
 import type { CourseDef } from "../types";
-import type { SessionConfig } from "@/components/training/session/types";
+import type { SessionConfig, RhythmConfig } from "@/components/training/session/types";
 
 /**
  * Intervals (new):
@@ -33,14 +33,14 @@ const BASE: Partial<SessionConfig> = {
     available: ["half"],
     lengthBars: 1,
 
-    // Blue-line UI + rest knobs (extras; keep `as any`)
+    // Blue-line UI + rest knobs (extras)
     lineEnabled: false,
     detectEnabled: false,
     allowRests: false,
     restProb: 0,
     contentAllowRests: false,
     contentRestProb: 0,
-  } as any,
+  } satisfies RhythmConfig,
 };
 
 // helper to keep lessons concise

@@ -4,7 +4,7 @@ import type { Phrase } from "@/utils/stage";
 import type { NoteValue } from "@/utils/time/tempo";
 import type { ScaleName } from "@/utils/phrase/scales";
 
-// ---- NEW: Call/Response modes configuration ----
+// ---- Call/Response modes ----
 export type CRMode =
   | { kind: "single_tonic" }
   | { kind: "derived_tonic" }
@@ -16,14 +16,12 @@ export type LyricStrategy = "solfege";
 export type ScaleConfig = {
   tonicPc: number;
   name: ScaleName;
-  /** Random-mode cap: maximum consecutive hits per scale degree. Default: 2. */
   maxPerDegree?: number;
   seed?: number;
-  /** If true, pick a random tonicPc from keys that fit saved range at session start. */
   randomTonic?: boolean;
 };
 
-/** Fields shared by all rhythm modes + UI/game toggles used by RhythmCard/TrainingGame */
+/** Fields shared by all rhythm modes + UI/game toggles */
 type RhythmCommon = {
   available?: NoteValue[];
   restProb?: number;
@@ -32,27 +30,14 @@ type RhythmCommon = {
   contentAllowRests?: boolean;
   lengthBars?: number;
   seed?: number;
-
-  /** Show the blue rhythm guide line under the view */
   lineEnabled?: boolean;
-
-  /** Enable camera-based rhythm detection */
   detectEnabled?: boolean;
 };
 
 export type RhythmConfig =
-  | ({
-      mode: "sequence";
-      pattern: "asc" | "desc" | "asc-desc" | "desc-asc";
-    } & RhythmCommon)
-  | ({
-      mode: "random";
-    } & RhythmCommon)
-  | ({
-      mode: "interval";
-      intervals: number[];
-      numIntervals: number;
-    } & RhythmCommon);
+  | ({ mode: "sequence"; pattern: "asc" | "desc" | "asc-desc" | "desc-asc" } & RhythmCommon)
+  | ({ mode: "random" } & RhythmCommon)
+  | ({ mode: "interval"; intervals: number[]; numIntervals: number } & RhythmCommon);
 
 export type ViewMode = "piano" | "sheet" | "polar";
 
@@ -83,61 +68,53 @@ export type SessionConfig = {
   exerciseLoops: number;
   regenerateBetweenTakes: boolean;
 
-  /** NEW: Looping mode (auto-continue after REST). */
+  /** Auto-continue after REST. */
   loopingMode: boolean;
 
   /**
-   * NEW: Treat the whole record window as a single free-timing response.
+   * Treat the whole record window as a single free-timing response.
    * Scoring ignores rhythmic alignment & bins; one score per take.
    */
   timingFreeResponse?: boolean;
 
-  /** (Timing-free) Max relaxed record window (seconds). Example: 10. */
+  /**
+   * OVERALL relaxed record-window cap (seconds).
+   * Kept for backwards compat; courses already set this.
+   */
   timingFreeMaxSec?: number;
 
   /**
-   * (Timing-free) Required consecutive detected/confident capture (seconds)
-   * before we end the take early. Example: 1.0.
+   * NEW: Per-note hard cap (seconds). Default 5s.
+   * Used by the capture controller to advance to the next expected note.
+   */
+  timingFreePerNoteMaxSec?: number;
+
+  /**
+   * Required consecutive detected/confident capture (seconds)
+   * before we advance/end early in timing-free mode.
    */
   timingFreeMinCaptureSec?: number;
 
   /** Absolute tonic(s) to anchor exercises (each T defines [T, T+12]). */
   tonicMidis?: number[] | null;
 
-  /**
-   * When multiple tonic windows fit the user's range (e.g., A2 and A3),
-   * include the upper-most window as well. Default: true.
-   * Set false to force only the lower tonic window.
-   */
+  /** Include upper-most tonic window too (when available). */
   includeUpperTonic?: boolean;
 
   /** Random mode — also allow notes below/above the selected windows. */
   randomIncludeUnder?: boolean;
   randomIncludeOver?: boolean;
 
-  /**
-   * NEW: Allowed scale-degree indices (0-based within the chosen scale).
-   * If null/empty, all degrees in the scale are permitted.
-   * Works across all octaves & keys.
-   */
+  /** Allowed scale-degree indices (0-based) within the chosen scale. */
   allowedDegrees?: number[] | null;
 
-  /**
-   * LEGACY (no longer surfaced in UI): hard whitelist of *exact* MIDI notes.
-   * If non-empty, still respected after degree/window filters.
-   */
+  /** Legacy whitelist of exact MIDI notes (still respected if present). */
   allowedMidis?: number[] | null;
 
-  /**
-   * NEW: In random-key mode, prefer these 0-based octave indices (Octave 1 = index 0).
-   * Multiple selections widen the usable range when the chosen key supports them.
-   */
+  /** Preferred 0-based octave indices in random-key mode. */
   preferredOctaveIndices?: number[] | null;
 
-  /**
-   * NEW: User-calibrated compute latency (ms) for hand-gesture → event timing.
-   * We subtract this from MediaPipe timestamps to align with the musical transport.
-   */
+  /** User-calibrated compute latency (ms) for hand-gesture → event timing. */
   gestureLatencyMs?: number;
 };
 
@@ -163,7 +140,6 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
     contentAllowRests: true,
     lengthBars: 2,
     seed: 0xA5F3D7,
-    // Optional UI defaults (explicit for clarity; card also defaults these)
     lineEnabled: true,
     detectEnabled: true,
   },
@@ -181,14 +157,12 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   exerciseLoops: 10,
   regenerateBetweenTakes: false,
 
-  /** NEW default: auto-continue like today unless user turns it off in curriculum */
   loopingMode: true,
 
-  /** NEW: default off; courses (e.g., Pitch Tune) can enable it */
+  // Timing-free defaults
   timingFreeResponse: false,
-
-  /** Only read when timingFreeResponse === true (safe defaults) */
-  timingFreeMaxSec: 10,
+  timingFreeMaxSec: 10,          // overall cap (kept)
+  timingFreePerNoteMaxSec: 5,    // per-note cap (new)
   timingFreeMinCaptureSec: 1,
 
   tonicMidis: null,
@@ -196,11 +170,10 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   randomIncludeUnder: false,
   randomIncludeOver: false,
 
-  allowedDegrees: null,   // ← all degrees allowed
-  allowedMidis: null,     // ← legacy (UI removed)
+  allowedDegrees: null,
+  allowedMidis: null,
 
-  preferredOctaveIndices: [1], // default “Octave 2”
+  preferredOctaveIndices: [1],
 
-  /** NEW: hand-gesture timing compensation */
   gestureLatencyMs: 90,
 };

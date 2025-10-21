@@ -93,7 +93,6 @@ export default function AvatarRow(props: Props) {
     })();
 
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, uid, enableLocalHintFallback, avatarUrl]);
 
   const dz = useSupabaseUpload({
@@ -161,12 +160,7 @@ export default function AvatarRow(props: Props) {
         setErr(message);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dz.isSuccess, dz.successes, supabase, uid]);
-
-  // Fade-in control — start invisible, show once the image has loaded
-  const [imgLoaded, setImgLoaded] = React.useState<boolean>(false);
-  React.useEffect(() => { setImgLoaded(false); }, [avatarUrl, selectedPreview]);
+  }, [dz.isSuccess, dz.successes, supabase, uid, onAvatarChanged]);
 
   const renderFrameContent = () => {
     // Prefer a selected preview if present (plain <img> like your StudentImage)
@@ -177,8 +171,6 @@ export default function AvatarRow(props: Props) {
           src={selectedPreview}
           alt={`${name} avatar preview`}
           className="w-full h-full object-cover"
-          onLoad={() => setImgLoaded(true)}
-          onError={() => setImgLoaded(true)}
           draggable={false}
         />
       );

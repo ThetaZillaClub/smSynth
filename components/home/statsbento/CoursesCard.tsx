@@ -44,6 +44,12 @@ export default function CoursesCard() {
   const router = useRouter();
   const { loading, error, bests } = useLessonBests();
 
+  // Strongly-typed view of bests to avoid any
+  const bestsMap: Record<string, number> = React.useMemo(
+    () => (bests ?? {}) as Record<string, number>,
+    [bests]
+  );
+
   const lessonsByCourse = React.useMemo(() => {
     const map = new Map<string, string[]>();
     for (const c of COURSES) map.set(c.slug, c.lessons.map(l => l.slug));
@@ -60,8 +66,8 @@ export default function CoursesCard() {
       // Prefer namespaced key; fall back to plain slug only if unique
       const namespaced = `${courseSlug}/${ls}`;
       const best =
-        (bests ?? {})[namespaced] ??
-        (UNIQUE_SLUG.get(ls) ? (bests as any)[ls] : undefined);
+        bestsMap[namespaced] ??
+        (UNIQUE_SLUG.get(ls) ? bestsMap[ls] : undefined);
 
       if (best != null) {
         started += 1;
@@ -71,7 +77,7 @@ export default function CoursesCard() {
     }
     const pct = Math.round((completed / total) * 100);
     return { total, started, completed, mastered, pct };
-  }, [bests, lessonsByCourse]);
+  }, [bestsMap, lessonsByCourse]);
 
   /** Neutral, fixed-width progress tag (consistent size at 0%–100%) */
   const ProgressTag = ({ p }: { p: Progress }) => {

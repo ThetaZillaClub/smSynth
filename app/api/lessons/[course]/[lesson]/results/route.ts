@@ -50,14 +50,14 @@ type LessonResultMin = { uid: string; final_percent: number };
 type PlayerRatingRow = { uid: string; rating: number; rd: number; vol: number };
 
 // ---------------- handler ----------------
+type RouteParams = { course: string; lesson: string };
+
 export async function POST(
   req: Request,
-  ctx:
-    | { params: Promise<{ course: string; lesson: string }> }
-    | { params: { course: string; lesson: string } }
+  ctx: { params: Promise<RouteParams> } // Next 15 typegen expects a Promise here
 ) {
-  // Next 15: params may be a Promise — always await.
-  const { course, lesson } = await (ctx as any).params;
+  const { course, lesson } = await ctx.params;
+
   const courseSlug = cleanSeg(course);
   const lessonSlug = cleanSeg(lesson);
 

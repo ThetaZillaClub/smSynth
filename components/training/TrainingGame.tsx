@@ -29,19 +29,18 @@ import { useVisionBeatRunner } from "@/hooks/vision/useVisionBeatRunner";
 import { useFooterActions } from "@/hooks/gameplay/useFooterActions";
 import { useScoringLifecycle } from "@/hooks/gameplay/useScoringLifecycle";
 
-// UPDATED: timing-free capture (per note)
+// timing-free capture (per note)
 import useTimingFreeCapture from "@/hooks/gameplay/useTimingFreeCapture";
 import useContentLeadInCue from "@/hooks/gameplay/useContentLeadInCue";
 import CourseNavGate from "./layout/stage/side-panel/CourseNavGate";
 
 type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean };
 
-// NEW: visibility contract shared with side-panel
 type AnalyticsVisibility = {
-  showPitch: boolean;          // accuracy (+ precision)
+  showPitch: boolean;
   showIntervals: boolean;
-  showMelodyRhythm: boolean;   // coverage/onset in note windows
-  showRhythmLine: boolean;     // hand taps vs. blue line
+  showMelodyRhythm: boolean;
+  showRhythmLine: boolean;
 };
 
 type Props = {
@@ -50,8 +49,8 @@ type Props = {
   studentRowId?: string | null;
   rangeLowLabel?: string | null;
   rangeHighLabel?: string | null;
-  lessonSlug?: string | null; // lesson slug within its course (e.g., "minor-2nd-deg-1-2")
-  sessionId?: string | null;  // optional external UUID to use
+  lessonSlug?: string | null;
+  sessionId?: string | null;
 };
 
 const CONF_THRESHOLD = 0.5;
@@ -96,7 +95,8 @@ export default function TrainingGame({
     gestureLatencyMs = 90,
     // timing-free knobs
     timingFreeResponse,
-    timingFreeMaxSec,
+    timingFreeMaxSec,            // OVERALL cap (keep existing field)
+    timingFreePerNoteMaxSec,     // NEW: per-note cap
     timingFreeMinCaptureSec,
   } = sessionEff;
 
@@ -132,15 +132,35 @@ export default function TrainingGame({
   });
   const leadBeats = barsToBeats(leadBars, ts.num);
 
-  // NEW: per-note response window length (5s per expected note)
+  // Split logic: per-note vs overall
   const expectedNotes = Math.max(1, phrase?.notes?.length ?? 1);
-  const perNoteMaxSec = 5;
+
+  // default per-note cap = 5s when timing-free
+  const perNoteMaxSec =
+    timingFreeResponse
+      ? (Number.isFinite(timingFreePerNoteMaxSec ?? NaN)
+          ? Math.max(0.5, Number(timingFreePerNoteMaxSec))
+          : 5)
+      : 0;
+
+  // derive total from notes × per-note, clamp by timingFreeMaxSec if provided
+  const derivedTotalSec = expectedNotes * (perNoteMaxSec || 5);
+  const totalCapSec =
+    Number.isFinite(timingFreeMaxSec ?? NaN)
+      ? Math.max(perNoteMaxSec || 0.5, Number(timingFreeMaxSec))
+      : null;
+
   const recordWindowSecEff: number = timingFreeResponse
-    ? expectedNotes * perNoteMaxSec
+    ? (totalCapSec != null ? Math.min(derivedTotalSec, totalCapSec) : derivedTotalSec)
     : recordWindowSec;
 
   const minCaptureSecEff: number = timingFreeResponse
-    ? Math.max(0.1, Number.isFinite(timingFreeMinCaptureSec ?? NaN) ? (timingFreeMinCaptureSec as number) : 1)
+    ? Math.max(
+        0.1,
+        Number.isFinite(timingFreeMinCaptureSec ?? NaN)
+          ? (timingFreeMinCaptureSec as number)
+          : 1
+      )
     : 0;
 
   const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 10));
@@ -193,14 +213,12 @@ export default function TrainingGame({
   const rhythmLineEnabled = rhythmCfg.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfg.detectEnabled !== false;
 
-  // --- Visibility policy ------------------------------------------------------
   const visibility: AnalyticsVisibility = {
     showPitch: true,
     showIntervals: true,
     showMelodyRhythm: !timingFreeResponse,
     showRhythmLine: !timingFreeResponse && rhythmDetectEnabled && rhythmLineEnabled,
   };
-  // ---------------------------------------------------------------------------
 
   // Vision gating
   const { enabled: visionEnabled } = useVisionEnabled();
@@ -318,16 +336,15 @@ export default function TrainingGame({
   const rhythmEffective: RhythmEvent[] | null = fabric.syncRhythmFabric ?? null;
   const haveRhythm: boolean = rhythmLineEnabled && (rhythmEffective?.length ?? 0) > 0;
 
-  // Scoring (now with resetScores for soft repeat)
+  // Scoring
   const { sessionScores, scoreTake, resetScores } = useTakeScoring();
   const alignForScoring = useScoringAlignment();
 
-  // ─────────────────────── Stable, real UUID for sessionId ───────────────────────
-  const genUUID = React.useCallback(() => {
-    if (typeof crypto !== "undefined" && (crypto as any).randomUUID) {
-      return (crypto as any).randomUUID() as string;
+  // Stable UUID
+  const genUUID = React.useCallback((): string => {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
     }
-    // Simple v4-ish fallback
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
       const v = c === "x" ? r : (r & 0x3) | 0x8;
@@ -335,7 +352,6 @@ export default function TrainingGame({
     });
   }, []);
 
-  // Keep a base UUID stable for the lifetime of this component (or use the provided one)
   const sessionBaseIdRef = React.useRef<string>(sessionId ?? genUUID());
   useEffect(() => {
     if (sessionId && sessionId !== sessionBaseIdRef.current) {
@@ -343,13 +359,13 @@ export default function TrainingGame({
     }
   }, [sessionId]);
 
-  // Make sure we send a namespaced lesson slug "course/lesson" to the API
+  // Namespaced lesson slug "course/lesson"
   const namespacedLessonSlug = useMemo(() => {
     const ls = (lessonSlug ?? "").trim();
     if (!ls) return null;
-    if (ls.includes("/")) return ls; // already namespaced
+    if (ls.includes("/")) return ls;
     const cs = (courseSlugParam ?? "").trim();
-    return cs ? `${cs}/${ls}` : ls; // fallback if course is missing (dev)
+    return cs ? `${cs}/${ls}` : ls;
   }, [lessonSlug, courseSlugParam]);
 
   // Centralized scoring/submission snapshots
@@ -365,8 +381,8 @@ export default function TrainingGame({
     calibratedLatencyMs,
     gestureLatencyMs,
     exerciseLoops,
-    lessonSlug: namespacedLessonSlug,         // <<< send "course/lesson"
-    sessionId: sessionBaseIdRef.current,      // <<< real UUID (persists to DB)
+    lessonSlug: namespacedLessonSlug,
+    sessionId: sessionBaseIdRef.current,
     sessionScores,
     scoreTake,
     alignForScoring,
@@ -443,7 +459,6 @@ export default function TrainingGame({
     player: { playPhrase, playRhythm, playMelodyAndRhythm, stop: stopPlayback },
   });
 
-  // NEW: augment side panel with visibility mask
   const sidePanel = sidePanelBase
     ? ({ ...sidePanelBase, visibility } as typeof sidePanelBase & { visibility: typeof visibility })
     : undefined;
@@ -456,14 +471,15 @@ export default function TrainingGame({
     ? { label: footerArpLabel, onClick: playFooterArp, disabled: false, title: "Play arpeggio" }
     : undefined;
 
-  // UPDATED: timing-free capture per note (progress + target for Polar)
+  // timing-free capture (per note)
+  const loopPhaseForFree: "idle" | "call" | "lead-in" | "record" | "rest" = loop.loopPhase;
   const { centerProgress01, targetRel } = useTimingFreeCapture({
     enabled: !!timingFreeResponse && !pretestActive,
-    loopPhase: loop.loopPhase as any,
+    loopPhase: loopPhaseForFree,
     liveHz,
     confidence,
-    minCaptureSec: minCaptureSecEff,  // 1s per note
-    perNoteMaxSec,                    // 5s per note
+    minCaptureSec: minCaptureSecEff,
+    perNoteMaxSec: perNoteMaxSec || 5,
     threshold: CONF_THRESHOLD,
     phrase,
     tonicPc: sessionEff.scale?.tonicPc ?? 0,
@@ -478,7 +494,7 @@ export default function TrainingGame({
       return;
     }
     let raf = 0;
-    const tonicPc = ((sessionEff.scale?.tonicPc ?? 0) % 12 + 12) % 12;
+    const tonicPcVal = ((sessionEff.scale?.tonicPc ?? 0) % 12 + 12) % 12;
     const tick = () => {
       const tSec = (performance.now() - (loop.anchorMs as number)) / 1000;
       let rel: number | null = null;
@@ -486,7 +502,7 @@ export default function TrainingGame({
         const s = n.startSec, e = s + n.durSec;
         if (tSec >= s && tSec < e) {
           const pcAbs = ((Math.round(n.midi) % 12) + 12) % 12;
-          rel = ((pcAbs - tonicPc) + 12) % 12;
+          rel = ((pcAbs - tonicPcVal) + 12) % 12;
           break;
         }
       }
@@ -502,7 +518,7 @@ export default function TrainingGame({
       ? (typeof leadInRel === "number" ? leadInRel : undefined)
       : (typeof targetRel === "number" ? targetRel : undefined);
 
-  // ─────────── FIX: don’t flip to analytics until snapshots are in sync ───────────
+  // Analytics sync guard
   const takesSynced = sessionScores.length === takeSnapshots.length;
   const sessionComplete =
     !pretestActive &&
@@ -510,7 +526,6 @@ export default function TrainingGame({
     sessionScores.length >= MAX_TAKES &&
     takesSynced;
 
-  // If somehow desynced, trim scores passed to analytics so charts always align
   const analyticsScores = takesSynced
     ? sessionScores
     : sessionScores.slice(0, takeSnapshots.length);

@@ -34,6 +34,12 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
   const go = (slug: string) => router.push(`/courses/${slug}`);
   const { bests } = useLessonBests();
 
+  // Normalize `bests` to a strongly typed map to avoid `any`
+  const bestsMap: Record<string, number> = React.useMemo(
+    () => (bests ?? {}) as Record<string, number>,
+    [bests]
+  );
+
   const lessonsByCourse = React.useMemo(() => {
     const map = new Map<string, string[]>();
     for (const c of REGISTRY) map.set(c.slug, c.lessons.map(l => l.slug));
@@ -49,8 +55,8 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
     for (const ls of lessons) {
       const namespaced = `${courseSlug}/${ls}`;
       const best =
-        (bests ?? {})[namespaced] ??
-        (UNIQUE_SLUG.get(ls) ? (bests as any)[ls] : undefined); // slug-only only if unique
+        bestsMap[namespaced] ??
+        (UNIQUE_SLUG.get(ls) ? bestsMap[ls] : undefined); // slug-only only if unique
 
       if (best != null) {
         started += 1;
