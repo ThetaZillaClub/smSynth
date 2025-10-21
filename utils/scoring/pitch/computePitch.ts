@@ -1,7 +1,7 @@
 // utils/scoring/pitch/computePitch.ts
 import type { Phrase } from "@/utils/stage";
 import { midiToHz, centsBetweenHz } from "@/utils/pitch/pitchMath";
-import { estimateAvgDt, mean, filterVoiced, linearCredit50_100 } from "../helpers";
+import { estimateAvgDt, mean, filterVoiced, softCreditCosine } from "../helpers";
 import type { Options, PitchSample, PitchScore, PerNotePitch } from "../types";
 
 export function computePitchScore(
@@ -33,7 +33,8 @@ export function computePitchScore(
     for (const s of sw) {
       const a = Math.abs(centsBetweenHz(s.hz!, targetHz));
       centsAbs.push(a);
-      const credit = linearCredit50_100(a, centsOk, 200);
+      // Gentler cosine falloff; wider zero at 240¢
+      const credit = softCreditCosine(a, centsOk, 100);
       goodSec += step * credit;
     }
 

@@ -60,3 +60,26 @@ export function linearCredit50_100(
   const credit = 1 - (a - fullCents) / (zeroCents - fullCents);
   return clamp01(credit);
 }
+
+/**
+ * Smooth precision credit between full and zero thresholds (Hann/cosine ease).
+ * - 1.0 credit at <= fullCents
+ * - Cosine-eased falloff to 0.0 by >= zeroCents
+ * - Gentler than linear near the center; feels less punitive.
+ *
+ * @param absCents Absolute cents error (|·|)
+ * @param fullCents Cents at/under which credit is 1.0 (default 50¢)
+ * @param zeroCents Cents at/over which credit is 0.0 (default 240¢)
+ */
+export function softCreditCosine(
+  absCents: number,
+  fullCents = 50,
+  zeroCents = 240
+): number {
+  if (!Number.isFinite(absCents)) return 0;
+  const a = Math.abs(absCents);
+  if (a <= fullCents) return 1;
+  if (a >= zeroCents) return 0;
+  const t = (a - fullCents) / (zeroCents - fullCents); // 0..1
+  return 0.5 * (1 + Math.cos(Math.PI * t));
+}

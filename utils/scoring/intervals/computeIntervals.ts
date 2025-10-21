@@ -3,12 +3,12 @@ import type { Phrase } from "@/utils/stage";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
 import type { IntervalScore, PitchSample } from "../types";
 import { intervalLabel } from "@/components/training/layout/stage/side-panel/SidePanelScores/format";
-import { linearCredit50_100 } from "../helpers";
+import { softCreditCosine } from "../helpers";
 
 /**
  * Interval accuracy with fractional credit:
  * - 100% credit ≤ centsOk (default 50¢)
- * - Linear falloff to 0% by 100¢
+ * - Smooth cosine falloff to 0% by a wider cutoff (default 240¢)
  * - Median MIDI per note window (unchanged)
  * - Buckets 0..12 semitones (unison..octave)
  *
@@ -42,8 +42,8 @@ export function computeIntervalScore(
     // Direction-agnostic cents error: |100 * (|got| - |exp|)|
     const errCents = Math.abs(100 * (Math.abs(got) - Math.abs(exp)));
 
-    // same linear credit as pitch
-    const credit = linearCredit50_100(errCents, centsOk, 200);
+    // Softer cosine credit (matches pitch scoring)
+    const credit = softCreditCosine(errCents, centsOk, 100);
 
     const cls = Math.min(12, Math.abs(Math.round(exp)));
     const cell = by.get(cls)!;

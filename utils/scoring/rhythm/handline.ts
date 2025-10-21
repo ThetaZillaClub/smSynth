@@ -6,7 +6,7 @@ import { mean } from "../helpers";
  * Robust one-to-one alignment between expected onsets and detected events.
  * - Monotonic (no reordering), unique matches
  * - Skips (gaps) allowed on either side with zero credit
- * - Match chosen only if |Δt| <= maxAlignMs; credit follows the original curve
+ * - Match chosen only if |Δt| <= maxAlignMs; credit uses a gentle cosine falloff
  * - Tie-breaker biases toward MATCH > skip-event > skip-expected to absorb extras early
  */
 export function evalHandLineRhythm({
@@ -32,11 +32,12 @@ export function evalHandLineRhythm({
   const safeGood = Math.max(0, goodAlignMs);
   const width = Math.max(1, maxAlignMs - safeGood); // avoid /0
 
+  // Gentle cosine credit inside [goodAlignMs, maxAlignMs]
   const creditOf = (errMs: number): number => {
     if (errMs <= safeGood) return 1;
     if (errMs <= maxAlignMs) {
-      const x = Math.min(1, (errMs - safeGood) / width);
-      return 1 - Math.pow(x, 1.5);
+      const t = Math.min(1, (errMs - safeGood) / width); // 0..1
+      return 0.5 * (1 + Math.cos(Math.PI * t)); // 1 → 0 smoothly
     }
     return -Infinity; // treat out-of-range as impossible match in DP
   };
@@ -57,13 +58,14 @@ export function evalHandLineRhythm({
       }
       const tap = bestK >= 0 ? ev[bestK] : null;
       const errMs = tap == null ? null : Math.abs((tap - tExp) * 1000);
+
       const c =
         errMs == null
           ? 0
           : errMs <= safeGood
           ? 1
           : errMs <= maxAlignMs
-          ? 1 - Math.pow(Math.min(1, (errMs - safeGood) / width), 1.5)
+          ? 0.5 * (1 + Math.cos(Math.PI * Math.min(1, (errMs - safeGood) / width)))
           : 0;
 
       const hit = errMs != null && errMs <= maxAlignMs;
@@ -160,8 +162,8 @@ export function evalHandLineRhythm({
     if (errMs == null) c = 0;
     else if (errMs <= safeGood) c = 1;
     else if (errMs <= maxAlignMs) {
-      const x = Math.min(1, (errMs - safeGood) / width);
-      c = 1 - Math.pow(x, 1.5);
+      const t = Math.min(1, (errMs - safeGood) / width);
+      c = 0.5 * (1 + Math.cos(Math.PI * t));
     } else c = 0;
 
     const hit = errMs != null && errMs <= maxAlignMs;
