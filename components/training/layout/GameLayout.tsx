@@ -10,6 +10,7 @@ import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import type { ScaleName } from "@/utils/phrase/scales";
 import type { TakeScore } from "@/utils/scoring/score";
 
+
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
 
 type AnalyticsSnapshot = {
@@ -101,6 +102,7 @@ export default function GameLayout({
   running,
   onToggle,
   phrase,
+  lyrics,
   livePitchHz,
   confidence,
   confThreshold = 0.5,
@@ -154,6 +156,7 @@ export default function GameLayout({
           <GameStage
             phrase={phrase ?? null}
             running={running}
+            lyrics={lyrics}
             livePitchHz={livePitchHz}
             confidence={confidence}
             confThreshold={confThreshold}
