@@ -10,7 +10,6 @@ import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import type { ScaleName } from "@/utils/phrase/scales";
 import type { TakeScore } from "@/utils/scoring/score";
 
-
 type FooterSession = NonNullable<React.ComponentProps<typeof GameFooter>["sessionPanel"]>;
 
 type AnalyticsSnapshot = {
@@ -19,7 +18,6 @@ type AnalyticsSnapshot = {
   melodyRhythm?: RhythmEvent[] | null;
 };
 
-// NEW: analytics visibility mask (kept in sync with side-panel)
 type AnalyticsVisibility = {
   showPitch: boolean;
   showIntervals: boolean;
@@ -34,7 +32,6 @@ type AnalyticsPayload = {
   den: number;
   tonicPc?: number;
   scaleName?: ScaleName | string;
-  /** NEW: gate SessionAnalytics UI */
   visibility?: AnalyticsVisibility;
 };
 
@@ -51,6 +48,7 @@ type LayoutProps = {
   livePitchHz?: number | null;
   confidence: number;
   confThreshold?: number;
+  rhythmPulse?: boolean;
 
   startAtMs?: number | null;
   leadInSec?: number;
@@ -92,8 +90,11 @@ type LayoutProps = {
 
   centerProgress01?: number;
 
-  /** NEW: tell the Polar view which relative pc (0..11) is currently expected */
+  /** tell Polar which relative pc (0..11) is currently expected */
   targetRelOverride?: number;
+
+  /** NEW: enable/disable rhythm indicator in footer */
+  rhythmEnabled?: boolean;
 };
 
 export default function GameLayout({
@@ -106,6 +107,7 @@ export default function GameLayout({
   livePitchHz,
   confidence,
   confThreshold = 0.5,
+  rhythmPulse,
   startAtMs = null,
   leadInSec = 1.5,
   uiRunning,
@@ -137,6 +139,7 @@ export default function GameLayout({
 
   centerProgress01,
   targetRelOverride,
+  rhythmEnabled = true,
 }: LayoutProps) {
   const showPlay = !!phrase;
 
@@ -179,7 +182,6 @@ export default function GameLayout({
             scaleName={scaleName ?? undefined}
             analytics={analytics}
             centerProgress01={centerProgress01}
-            // NEW: per-note target for Polar
             targetRelOverride={targetRelOverride}
           />
         </div>
@@ -209,6 +211,9 @@ export default function GameLayout({
         tonicPc={typeof tonicPc === "number" ? tonicPc : null}
         tonicAction={tonicAction}
         arpAction={arpAction}
+        rhythmPulse={!!rhythmPulse}
+        /** NEW */
+        rhythmEnabled={rhythmEnabled}
       />
     </main>
   );

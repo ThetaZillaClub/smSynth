@@ -37,7 +37,13 @@ export default function PitchReadout({
   return (
     <div className={`min-w-0 flex-none ${className ?? ""}`}>
       <div className="flex items-center justify-end flex-nowrap gap-x-4 md:gap-x-5">
-        <Readout className="w-[7rem] flex-none" label="Note" value={noteText} mono />
+        <Readout
+          className="w-[7rem] flex-none"
+          label="Note"
+          value={noteText}
+          mono
+          align="center"
+        />
       </div>
     </div>
   );

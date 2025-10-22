@@ -9,6 +9,7 @@ import PlayPauseButton from "./controls/PlayPauseButton";
 import KeyScaleSection from "./sections/KeyScaleSection";
 import TransportReadout from "./readouts/TransportReadout";
 import PitchReadout from "./readouts/PitchReadout";
+import RhythmIndicator from "./readouts/RhythmIndicator";
 
 type TransportProps = React.ComponentProps<typeof TransportReadout>;
 
@@ -17,32 +18,30 @@ type Props = {
   running: boolean;
   onToggle: () => void;
 
-  // live pitch + state
   livePitchHz?: number | null;
   isReady?: boolean;
   error?: string | null;
 
-  confidence: number;      // kept for prop compatibility; unused
-  confThreshold?: number;  // kept for prop compatibility; unused
+  confidence: number;
+  confThreshold?: number;
 
   keySig?: string | null;
   clef?: "treble" | "bass" | null;
   lowHz?: number | null;
   highHz?: number | null;
 
-  /** Preferred: Right-side transport readout (new prop) */
   transport?: TransportProps;
-
-  /** Back-compat: legacy prop name from old footer */
   sessionPanel?: TransportProps;
 
-  /** Left-side section */
   scaleName?: ScaleName | null;
-  tonicPc?: number | null; // intentionally unused but preserved
+  tonicPc?: number | null;
 
-  /** Actions */
-  tonicAction?: FooterAction; // “Key”
-  arpAction?: FooterAction;   // “Triad”
+  tonicAction?: FooterAction;
+  arpAction?: FooterAction;
+
+  rhythmPulse?: boolean;
+  /** if false, hide the indicator entirely */
+  rhythmEnabled?: boolean;
 };
 
 export default function GameFooter({
@@ -52,7 +51,6 @@ export default function GameFooter({
   livePitchHz,
   isReady = false,
   error,
-  // confidence, confThreshold intentionally unused
   keySig = null,
   clef = null,
   lowHz = null,
@@ -62,8 +60,9 @@ export default function GameFooter({
   scaleName = null,
   tonicAction,
   arpAction,
+  rhythmPulse = false,
+  rhythmEnabled = true,
 }: Props) {
-  // Support both new (`transport`) and old (`sessionPanel`) prop names.
   const transportProps = transport ?? sessionPanel;
 
   return (
@@ -90,7 +89,7 @@ export default function GameFooter({
               "gap-3 md:gap-4",
             ].join(" ")}
           >
-            {/* LEFT: Triad/Key actions + Scale readout */}
+            {/* LEFT: Key/Triad + scale */}
             <div className="justify-self-start w-full min-w-0 overflow-visible">
               <KeyScaleSection
                 scaleName={scaleName ?? null}
@@ -100,7 +99,7 @@ export default function GameFooter({
               />
             </div>
 
-            {/* CENTER: Pitch (left) + Play (center) + symmetric spacer (right) */}
+            {/* CENTER: Pitch (left) + Play (center) + symmetric spacer/indicator (right) */}
             <div className="justify-self-center overflow-visible">
               <div className="flex items-center">
                 {/* Pitch readout to the LEFT of the button */}
@@ -116,7 +115,7 @@ export default function GameFooter({
                   />
                 </div>
 
-                {/* Play/Pause stays perfectly centered within the center cell */}
+                {/* Play/Pause stays perfectly centered */}
                 <div className="relative overflow-visible">
                   {showPlay ? (
                     <PlayPauseButton running={running} onToggle={onToggle} />
@@ -128,12 +127,19 @@ export default function GameFooter({
                   )}
                 </div>
 
-                {/* Symmetry spacer: mirrors Pitch width so the button remains visually centered */}
-                <div className="ml-3 w-[7rem] flex-none" aria-hidden />
+                {/* RIGHT: indicator only if enabled; otherwise a spacer with the same width */}
+                {rhythmEnabled ? (
+                  <div className="ml-4 md:ml-5">
+                    <RhythmIndicator active={rhythmPulse} />
+                  </div>
+                ) : (
+                  // spacer keeps the play button perfectly centered when indicator is hidden
+                  <div className="ml-4 md:ml-5 w-[7rem] h-7 md:h-7 flex-none" aria-hidden />
+                )}
               </div>
             </div>
 
-            {/* RIGHT: Transport (BPM/Time/Take) tightly packed and right-aligned */}
+            {/* RIGHT: Transport */}
             <div className="justify-self-end w-full min-w-0 overflow-visible">
               <div className="w-full flex items-center justify-end flex-nowrap">
                 {transportProps ? <TransportReadout {...transportProps} /> : null}

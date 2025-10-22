@@ -95,8 +95,8 @@ export default function TrainingGame({
     gestureLatencyMs = 90,
     // timing-free knobs
     timingFreeResponse,
-    timingFreeMaxSec,            // OVERALL cap (keep existing field)
-    timingFreePerNoteMaxSec,     // NEW: per-note cap
+    timingFreeMaxSec,
+    timingFreePerNoteMaxSec,
     timingFreeMinCaptureSec,
   } = sessionEff;
 
@@ -135,23 +135,22 @@ export default function TrainingGame({
   // Split logic: per-note vs overall
   const expectedNotes = Math.max(1, phrase?.notes?.length ?? 1);
 
-  // default per-note cap = 5s when timing-free
   const perNoteMaxSec =
     timingFreeResponse
-      ? (Number.isFinite(timingFreePerNoteMaxSec ?? NaN)
-          ? Math.max(0.5, Number(timingFreePerNoteMaxSec))
-          : 5)
+      ? Number.isFinite(timingFreePerNoteMaxSec ?? NaN)
+        ? Math.max(0.5, Number(timingFreePerNoteMaxSec))
+        : 5
       : 0;
 
-  // derive total from notes × per-note, clamp by timingFreeMaxSec if provided
   const derivedTotalSec = expectedNotes * (perNoteMaxSec || 5);
-  const totalCapSec =
-    Number.isFinite(timingFreeMaxSec ?? NaN)
-      ? Math.max(perNoteMaxSec || 0.5, Number(timingFreeMaxSec))
-      : null;
+  const totalCapSec = Number.isFinite(timingFreeMaxSec ?? NaN)
+    ? Math.max(perNoteMaxSec || 0.5, Number(timingFreeMaxSec))
+    : null;
 
   const recordWindowSecEff: number = timingFreeResponse
-    ? (totalCapSec != null ? Math.min(derivedTotalSec, totalCapSec) : derivedTotalSec)
+    ? totalCapSec != null
+      ? Math.min(derivedTotalSec, totalCapSec)
+      : derivedTotalSec
     : recordWindowSec;
 
   const minCaptureSecEff: number = timingFreeResponse
@@ -220,9 +219,10 @@ export default function TrainingGame({
     showRhythmLine: !timingFreeResponse && rhythmDetectEnabled && rhythmLineEnabled,
   };
 
-  // Vision gating
+  // Vision gating (runner only starts when both rhythm+detect and vision are on)
   const { enabled: visionEnabled } = useVisionEnabled();
-  const needVision = exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled && visionEnabled;
+  const needVision =
+    exerciseUnlocked && rhythmLineEnabled && rhythmDetectEnabled && visionEnabled;
 
   // Recorder + loop
   const {
@@ -309,7 +309,10 @@ export default function TrainingGame({
     fps: 60,
   });
 
-  // Vision/tap runner
+  // Pulse state for rhythm indicator
+  const [rhythmPulse, setRhythmPulse] = useState(false);
+
+  // Start the vision/tap runner when allowed
   const hand = useVisionBeatRunner({
     enabled: needVision,
     latencyMs: (calibratedLatencyMs ?? gestureLatencyMs) || 90,
@@ -317,6 +320,10 @@ export default function TrainingGame({
     anchorMs: loop.anchorMs,
     pretestActive,
     samplerReset: () => sampler.reset(),
+    onBeat: () => {
+      setRhythmPulse(true);
+      window.setTimeout(() => setRhythmPulse(false), 220);
+    },
   });
 
   // warm audio I/O
@@ -331,6 +338,16 @@ export default function TrainingGame({
   useEffect(() => {
     if (loop.loopPhase === "idle") stopPlayback();
   }, [loop.loopPhase, stopPlayback]);
+
+  // Clear rhythm pulse when leaving record / not running
+  useEffect(() => {
+    if (loop.loopPhase !== "record") setRhythmPulse(false);
+  }, [loop.loopPhase]);
+  useEffect(() => {
+    const runningNow =
+      (!pretestActive && loop.running) || (pretestActive && pretest.running);
+    if (!runningNow) setRhythmPulse(false);
+  }, [loop.running, pretestActive, pretest.running]);
 
   // Rhythm data
   const rhythmEffective: RhythmEvent[] | null = fabric.syncRhythmFabric ?? null;
@@ -460,7 +477,9 @@ export default function TrainingGame({
   });
 
   const sidePanel = sidePanelBase
-    ? ({ ...sidePanelBase, visibility } as typeof sidePanelBase & { visibility: typeof visibility })
+    ? ({ ...sidePanelBase, visibility } as typeof sidePanelBase & {
+        visibility: typeof visibility;
+      })
     : undefined;
 
   const footerTonicAction = exerciseUnlocked
@@ -530,6 +549,9 @@ export default function TrainingGame({
     ? sessionScores
     : sessionScores.slice(0, takeSnapshots.length);
 
+  // NEW: indicator enable flag (independent of global vision toggle)
+  const rhythmIndicatorEnabled = rhythmLineEnabled && rhythmDetectEnabled;
+
   return (
     <GameLayout
       title={title}
@@ -542,6 +564,7 @@ export default function TrainingGame({
       livePitchHz={liveHz}
       confidence={confidence}
       confThreshold={CONF_THRESHOLD}
+      rhythmPulse={rhythmPulse}
       startAtMs={startAtMs}
       leadInSec={leadInSec}
       isReady={isReady && (!!phrase || pretestActive)}
@@ -558,7 +581,9 @@ export default function TrainingGame({
       lowHz={lowHz ?? null}
       highHz={highHz ?? null}
       sessionPanel={
-        (!!phrase && !pretestActive) ? { bpm, ts, roundCurrent: Math.min(MAX_TAKES, (loop.takeCount ?? 0) + 1), roundTotal: MAX_TAKES } : undefined
+        (!!phrase && !pretestActive)
+          ? { bpm, ts, roundCurrent: Math.min(MAX_TAKES, (loop.takeCount ?? 0) + 1), roundTotal: MAX_TAKES }
+          : undefined
       }
       sidePanel={sidePanel}
       tonicPc={exerciseUnlocked ? sessionEff.scale?.tonicPc ?? null : null}
@@ -584,6 +609,8 @@ export default function TrainingGame({
       }
       centerProgress01={centerProgress01}
       targetRelOverride={targetRelForPolar}
+      // NEW: tell footer whether indicator should be enabled at all
+      rhythmEnabled={rhythmIndicatorEnabled}
     />
   );
 

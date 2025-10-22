@@ -4,15 +4,16 @@ import type { LoopPhase } from "@/hooks/gameplay/usePracticeLoop";
 import useHandBeat from "@/hooks/vision/useHandBeat";
 
 export function useVisionBeatRunner({
-  enabled, latencyMs, loopPhase, anchorMs, pretestActive, samplerReset,
+  enabled, latencyMs, loopPhase, anchorMs, pretestActive, samplerReset, onBeat,
 }: {
   enabled: boolean; latencyMs: number; loopPhase: LoopPhase; anchorMs: number | null | undefined;
   pretestActive: boolean; samplerReset: () => void; // caller injects sampler.reset
+  onBeat?: (tMs: number) => void;
 }) {
   const hand = useHandBeat({
     latencyMs,
     fireUpEps: 0.004, confirmUpEps: 0.012, downRearmEps: 0.006,
-    refractoryMs: 90, noiseEps: 0.0015, minUpVel: 0.25,
+    refractoryMs: 90, noiseEps: 0.0015, minUpVel: 0.25, onBeat,
   });
 
   useEffect(() => {
