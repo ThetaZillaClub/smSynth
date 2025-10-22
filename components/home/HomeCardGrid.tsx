@@ -10,7 +10,7 @@ type Card = { key: string; title: string; subtitle?: string; href: string };
 const CARDS: Card[] = [
   { key: 'courses', title: 'Courses', subtitle: 'Start or continue lessons', href: '/courses' },
   { key: 'setup',   title: 'Setup',   subtitle: 'Range & vision calibration', href: '/setup' },
-  { key: 'premium', title: 'Premium', subtitle: 'Unlock all features',        href: '/premium' },
+  { key: 'premium', title: 'Pro', subtitle: 'Unlock all features',        href: '/premium' },
   { key: 'profile', title: 'Profile', subtitle: 'Name, students & models',    href: '/profile' },
 ];
 

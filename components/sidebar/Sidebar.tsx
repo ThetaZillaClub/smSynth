@@ -47,7 +47,7 @@ export default function Sidebar() {
   const items: NavItem[] = [
     { href: '/courses', label: 'Courses', icon: <CoursesIcon />, match: (p) => p === '/courses' || p.startsWith('/courses/'), requireAuth: true },
     { href: '/setup',   label: 'Setup',   icon: <SetupIcon />,   match: (p) => p === '/setup'   || p.startsWith('/setup/'),   requireAuth: true },
-    { href: '/premium', label: 'Premium', icon: <PremiumIcon />, match: (p) => p.startsWith('/premium'), requireAuth: false },
+    { href: '/premium', label: 'Pro', icon: <PremiumIcon />, match: (p) => p.startsWith('/premium'), requireAuth: false },
   ];
 
   if (isAuthRoute) return <aside style={{ display: 'none' }} aria-hidden />;
