@@ -24,7 +24,7 @@ export default function ReviewFooter({
     <div className="mt-2 flex items-center justify-between">
       <div className="flex gap-2">
         <button
-          className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-white text-sm hover:bg-[#f8f8f8]"
+          className="px-3 py-1.5 rounded-md border border-[#dcdcdc] bg-[#f2f2f2] text-sm hover:bg-[#f8f8f8]"
           onClick={onPlayMelody}
           title="Play the melody"
         >
@@ -33,14 +33,14 @@ export default function ReviewFooter({
         {haveRhythm && (
           <>
             <button
-              className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-white text-sm hover:bg-[#f8f8f8]"
+              className="px-3 py-1.5 rounded-md border border-[#dcdcdc] bg-[#f2f2f2] text-sm hover:bg-[#f8f8f8]"
               onClick={onPlayRhythm}
               title="Play the rhythm"
             >
               Play rhythm
             </button>
             <button
-              className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-white text-sm hover:bg-[#f8f8f8]"
+              className="px-3 py-1.5 rounded-md border border-[#dcdcdc] bg-[#f2f2f2] text-sm hover:bg-[#f8f8f8]"
               onClick={onPlayBoth}
               title="Play both together"
             >
@@ -49,7 +49,7 @@ export default function ReviewFooter({
           </>
         )}
         <button
-          className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-white text-sm hover:bg-[#f8f8f8]"
+          className="px-3 py-1.5 rounded-md border border-[#dcdcdc] bg-[#f2f2f2] text-sm hover:bg-[#f8f8f8]"
           onClick={onStop}
           title="Stop playback"
         >
@@ -61,7 +61,7 @@ export default function ReviewFooter({
         {!canProceed ? (
           <button
             onClick={onRetry ?? onNext}
-            className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#0f0f0f] text-[#f0f0f0] text-sm hover:opacity-90"
+            className="px-3 py-1.5 rounded-md border border-[#dcdcdc] bg-[#0f0f0f] text-[#f0f0f0] text-sm hover:opacity-90"
             title="Try again to pass"
           >
             Try again
@@ -69,7 +69,7 @@ export default function ReviewFooter({
         ) : (
           <button
             onClick={onNext}
-            className="px-3 py-1.5 rounded-md border border-[#d2d2d2] bg-[#0f0f0f] text-[#f0f0f0] text-sm hover:opacity-90"
+            className="px-3 py-1.5 rounded-md border border-[#dcdcdc] bg-[#0f0f0f] text-[#f0f0f0] text-sm hover:opacity-90"
             title="Proceed to the next round"
           >
             Next

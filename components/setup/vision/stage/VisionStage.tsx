@@ -96,9 +96,9 @@ export default function VisionStage() {
       fireUpEps: 0.004,
       confirmUpEps: 0.012,
       downRearmEps: 0.006,
-      refractoryMs: 90,
+      refractoryMs: 10,
       noiseEps: 0.0015,
-      minUpVel: 0.25,
+      minUpVel: 0.1,
     }),
     []
   );

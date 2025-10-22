@@ -6,9 +6,27 @@ import type { SessionConfig } from "@/components/training/session/types";
 // Base config for all Scales lessons.
 // NOTE: We intentionally do NOT set any rhythm.lengthBars here (nor in lessons)
 // because scale drills derive duration from the scale pattern itself.
+
+// Global "no rests" flags (blue-line + melody/content).
+const NO_RESTS = {
+  // Blue line UI extras:
+  allowRests: false,
+  restProb: 0,
+  // Melody content rest knobs:
+  contentAllowRests: false,
+  contentRestProb: 0,
+} as const;
+
 const BASE: Partial<SessionConfig> = {
-  bpm: 80,
-  exerciseLoops: 2,
+  bpm: 70,
+  exerciseLoops: 3,
+  // Keep in BASE; lessons also spread these into their rhythm configs.
+  rhythm: NO_RESTS as any,
+  // Pre-test call/response sequence for all Scales lessons:
+  callResponseSequence: [
+    { kind: "single_tonic" },
+    { kind: "guided_arpeggio" },
+  ],
 };
 
 export const SCALES_COURSE: CourseDef = {
@@ -29,8 +47,8 @@ export const SCALES_COURSE: CourseDef = {
           pattern: "asc-desc",
           available: ["quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
-        },
-        callResponse: false,
+          ...(NO_RESTS as any),
+        } as any,
         loopingMode: true,
       },
     },
@@ -45,10 +63,9 @@ export const SCALES_COURSE: CourseDef = {
         rhythm: {
           mode: "random",
           available: ["quarter"] as NoteValue[],
-          contentAllowRests: false,
           // lengthBars intentionally omitted — derived from scale length
-        },
-        callResponse: false,
+          ...(NO_RESTS as any),
+        } as any,
       },
     },
     {
@@ -64,7 +81,8 @@ export const SCALES_COURSE: CourseDef = {
           pattern: "asc-desc",
           available: ["quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
-        },
+          ...(NO_RESTS as any),
+        } as any,
       },
     },
     {
@@ -80,7 +98,8 @@ export const SCALES_COURSE: CourseDef = {
           mode: "random",
           available: ["quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
-        },
+          ...(NO_RESTS as any),
+        } as any,
       },
     },
     {
@@ -96,10 +115,10 @@ export const SCALES_COURSE: CourseDef = {
           available: ["eighth", "quarter"] as NoteValue[],
           lineEnabled: true,
           detectEnabled: true,
-          contentAllowRests: true,
-          contentRestProb: 0.15,
           // lengthBars intentionally omitted — derived from scale length
-        },
+          // Force no rests despite syncopation
+          ...(NO_RESTS as any),
+        } as any,
       },
     },
     {
@@ -115,8 +134,8 @@ export const SCALES_COURSE: CourseDef = {
           numIntervals: 8,
           available: ["quarter"] as NoteValue[],
           // interval mode ignores bar length
-        },
-        callResponse: false,
+          ...(NO_RESTS as any),
+        } as any,
       },
     },
   ],

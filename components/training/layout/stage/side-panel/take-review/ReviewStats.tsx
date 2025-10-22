@@ -75,7 +75,13 @@ export default function ReviewStats({
       )}
 
       {totals ? (
-        <div className="mt-3 rounded-md border border-[#d2d2d2] bg-white/70 p-2">
+        <div
+          className={[
+            "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+            "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+          ].join(" ")}
+        >
           <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">
             Session averages (based on {totals.takes} take{totals.takes === 1 ? "" : "s"})
           </div>
@@ -92,7 +98,13 @@ export default function ReviewStats({
 
 function Chip({ title, main, sub }: { title: string; main: string; sub?: string }) {
   return (
-    <div className="rounded-md border border-[#d2d2d2] bg-white/70 px-3 py-2">
+    <div
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
+    >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{title}</div>
       <div className="text-sm text-[#0f0f0f] font-semibold">{main}</div>
       {sub ? <div className="text-xs text-[#2d2d2d]">{sub}</div> : null}

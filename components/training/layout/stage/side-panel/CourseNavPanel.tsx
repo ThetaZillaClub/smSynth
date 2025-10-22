@@ -102,12 +102,11 @@ function ActionCard({
       onClick={onClick}
       disabled={disabled}
       className={[
-        "group relative text-left rounded-2xl border p-3 md:p-4 transition",
-        "bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] border-[#d2d2d2]",
-        disabled
-          ? "opacity-70 cursor-not-allowed"
-          : "shadow-sm hover:shadow-md hover:-translate-y-[1px] active:translate-y-0 hover:ring-1 hover:ring-[#d3d3d3]",
+        "group relative",
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        disabled ? "opacity-70 cursor-not-allowed" : "",
       ].join(" ")}
       aria-disabled={disabled || undefined}
       {...rest}
@@ -135,7 +134,7 @@ function ActionCard({
 function Icon({ kind }: { kind?: "repeat" | "next" | "prev" }) {
   return (
     <span
-      className="shrink-0 inline-grid place-items-center w-8 h-8 rounded-full bg-[#f4f4f4] border border-[#e6e6e6] text-[#0f0f0f] group-hover:bg-white"
+      className="shrink-0 inline-grid place-items-center w-8 h-8 rounded-full bg-[#f4f4f4] border border-[#e6e6e6] text-[#0f0f0f] group-hover:bg-[#f8f8f8]"
       aria-hidden
     >
       {kind === "repeat" ? (

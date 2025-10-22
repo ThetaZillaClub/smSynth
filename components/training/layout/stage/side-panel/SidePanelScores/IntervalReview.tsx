@@ -18,7 +18,13 @@ export default function IntervalReview({ score }: { score: TakeScore }) {
         main={`${Math.round((base.correctRatio || 0) * 100)}%`}
         sub={`${base.correct}/${base.total} correct`}
       />
-      <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+      <div
+        className={[
+          "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+          "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        ].join(" ")}
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
@@ -66,7 +72,13 @@ function Header({
   sub?: string;
 }) {
   return (
-    <div className="rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
+    <div
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
+    >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
         {title}
       </div>

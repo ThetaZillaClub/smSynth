@@ -97,7 +97,7 @@ export default function TakeReview({
             : "Interval review"}
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full bg-[#f8f8f8] shadow-sm px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
+          <span className="inline-flex items-center rounded-full bg-[#f2f2f2] border border-[#dcdcdc] shadow-sm px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
             {finalPct ? `${finalPct.toFixed(1)}%` : "—"}
           </span>
           <span className="text-xs text-[#373737]">
@@ -210,7 +210,11 @@ function ClickableStatTile({
     <button
       type="button"
       onClick={onClick}
-      className="text-left rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2 hover:shadow-sm transition"
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
     >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{label}</div>
       <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{value}</div>

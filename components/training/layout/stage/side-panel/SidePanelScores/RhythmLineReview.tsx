@@ -6,8 +6,14 @@ import type { TakeScore } from "@/utils/scoring/score";
 export default function RhythmLineReview({ score }: { score: TakeScore }) {
   if (!score.rhythm.lineEvaluated) {
     return (
-      <div className="rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2 text-sm">
-        Rhythm line was not evaluated for this take.
+      <div
+        className={[
+          "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+          "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        ].join(" ")}
+      >
+        <div className="text-sm">Rhythm line was not evaluated for this take.</div>
       </div>
     );
   }
@@ -24,7 +30,13 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
         )}ms`}
       />
 
-      <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+      <div
+        className={[
+          "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+          "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        ].join(" ")}
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
@@ -48,7 +60,9 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
                   <tr key={i} className="border-t border-[#eee]">
                     <td className="px-2 py-1.5 text-[#555]">{r.idx + 1}</td>
                     <td className="px-2 py-1.5">{r.expSec.toFixed(3)}s</td>
-                    <td className="px-2 py-1.5">{r.tapSec == null ? "—" : `${r.tapSec.toFixed(3)}s`}</td>
+                    <td className="px-2 py-1.5">
+                      {r.tapSec == null ? "—" : `${r.tapSec.toFixed(3)}s`}
+                    </td>
                     <td className="px-2 py-1.5">{dt}</td>
                     <td className="px-2 py-1.5">{creditPct}</td>
                   </tr>
@@ -69,7 +83,13 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
 
 function Header({ title, main, sub }: { title: string; main: string; sub?: string }) {
   return (
-    <div className="rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
+    <div
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
+    >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{title}</div>
       <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{main}</div>
       {sub ? <div className="text-xs text-[#373737] mt-0.5">{sub}</div> : null}

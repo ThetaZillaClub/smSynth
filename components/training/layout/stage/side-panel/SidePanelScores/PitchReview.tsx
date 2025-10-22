@@ -66,7 +66,13 @@ export default function PitchReview({
           score.pitch.centsMae
         )}¢`}
       />
-      <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+      <div
+        className={[
+          "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+          "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        ].join(" ")}
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
@@ -102,7 +108,13 @@ export default function PitchReview({
 
 function Header({ title, main, sub }: { title: string; main: string; sub?: string }) {
   return (
-    <div className="rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
+    <div
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
+    >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">{title}</div>
       <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{main}</div>
       {sub ? <div className="text-xs text-[#373737] mt-0.5">{sub}</div> : null}

@@ -62,11 +62,11 @@ type UseHandBeatReturn = {
 export default function useHandBeat({
   latencyMs = 50,
   noiseEps = 0.0015,
-  minUpVel = 0.25,
+  minUpVel = 0.1,
   fireUpEps = 0.004,
   confirmUpEps = 0.012,
   downRearmEps = 0.006,
-  refractoryMs = 90,
+  refractoryMs = 10,
   numHands = 1,
   onBeat,
 }: UseHandBeatOptions = {}): UseHandBeatReturn {

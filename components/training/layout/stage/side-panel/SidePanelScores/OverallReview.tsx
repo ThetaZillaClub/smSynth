@@ -23,7 +23,6 @@ export default function OverallReview({
   tonicPc = 0,
   scaleName = "major",
   onClose,
-  /** NEW: analytics visibility gating */
   visibility = {
     showPitch: true,
     showIntervals: true,
@@ -38,7 +37,6 @@ export default function OverallReview({
   tonicPc?: number;
   scaleName?: SolfegeScaleName;
   onClose?: () => void;
-  /** NEW: analytics visibility gating */
   visibility?: {
     showPitch: boolean;
     showIntervals: boolean;
@@ -57,9 +55,7 @@ export default function OverallReview({
   const timeOnPitchPct = Math.round(
     (scores.reduce((a, s) => a + s.pitch.timeOnPitchRatio, 0) / n) * 100
   );
-  const pitchMae = Math.round(
-    scores.reduce((a, s) => a + s.pitch.centsMae, 0) / n
-  );
+  const pitchMae = Math.round(scores.reduce((a, s) => a + s.pitch.centsMae, 0) / n);
 
   const melPct = avg((s) => s.rhythm.melodyPercent);
   const melHit = Math.round(
@@ -79,8 +75,7 @@ export default function OverallReview({
     : 0;
   const lineHit = haveLine
     ? Math.round(
-        (lineSamples.reduce((a, s) => a + s.rhythm.lineHitRate, 0) / lineN) *
-          100
+        (lineSamples.reduce((a, s) => a + s.rhythm.lineHitRate, 0) / lineN) * 100
       )
     : 0;
   const lineMeanAbs = haveLine
@@ -96,8 +91,7 @@ export default function OverallReview({
 
   const [view, setView] = React.useState<View>("summary");
 
-  // ───────────────────────────────── Aggregations (for detail views)
-  // Intervals table (sum attempts/correct per class across session)
+  // ───────────────────────────────── Aggregations
   type AccIC = { attempts: number; correct: number };
   const intervalByClass = React.useMemo(() => {
     const byClass = new Map<number, AccIC>();
@@ -120,16 +114,15 @@ export default function OverallReview({
       .filter((r) => r.attempts > 0);
   }, [scores]);
 
-  // Aggregated Pitch (group common notes across takes)
   const aggPitchRows = React.useMemo(() => {
     type Acc = {
-      key: string; // "E3|sol"
+      key: string;
       label: string;
       solf: string;
-      order: number; // first occurrence index for stable ordering
+      order: number;
       n: number;
-      meanRatio: number; // 0..1
-      meanMae: number; // cents
+      meanRatio: number;
+      meanMae: number;
     };
     const m = new Map<string, Acc>();
     for (let i = 0; i < scores.length; i++) {
@@ -143,20 +136,10 @@ export default function OverallReview({
         const midi = Math.round(notes[j]!.midi);
         const pcAbs = ((midi % 12) + 12) % 12;
         const label = midiLabelForKey(midi, tonicPc, scaleName).text;
-        const solf = pcToSolfege(pcAbs, tonicPc, scaleName, {
-          caseStyle: "lower",
-        });
+        const solf = pcToSolfege(pcAbs, tonicPc, scaleName, { caseStyle: "lower" });
         const key = `${label}|${solf}`;
         if (!m.has(key))
-          m.set(key, {
-            key,
-            label,
-            solf,
-            order: j,
-            n: 0,
-            meanRatio: 0,
-            meanMae: 0,
-          });
+          m.set(key, { key, label, solf, order: j, n: 0, meanRatio: 0, meanMae: 0 });
         const g = m.get(key)!;
         g.n += 1;
         g.meanRatio += (p.ratio - g.meanRatio) / g.n;
@@ -166,14 +149,13 @@ export default function OverallReview({
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
   }, [scores, snapshots, tonicPc, scaleName]);
 
-  // Aggregated Melody Rhythm (group by duration label across takes)
   const aggMelodyRows = React.useMemo(() => {
     type Acc = {
       label: string;
-      order: number; // first seen order for stability
+      order: number;
       n: number;
-      meanCoverage: number; // 0..1
-      meanAbsOnset: number; // ms
+      meanCoverage: number;
+      meanAbsOnset: number;
     };
     const m = new Map<string, Acc>();
     let orderCounter = 0;
@@ -187,13 +169,7 @@ export default function OverallReview({
         if (!r) continue;
         const label = secondsToNoteName(notes[j]!.durSec, bpm, den);
         if (!m.has(label))
-          m.set(label, {
-            label,
-            order: orderCounter++,
-            n: 0,
-            meanCoverage: 0,
-            meanAbsOnset: 0,
-          });
+          m.set(label, { label, order: orderCounter++, n: 0, meanCoverage: 0, meanAbsOnset: 0 });
         const g = m.get(label)!;
         g.n += 1;
         g.meanCoverage += (r.coverage - g.meanCoverage) / g.n;
@@ -206,15 +182,8 @@ export default function OverallReview({
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
   }, [scores, snapshots, bpm, den]);
 
-  // Aggregated Rhythm Line (group by duration label across takes)
   const aggLineRows = React.useMemo(() => {
-    type Acc = {
-      label: string;
-      order: number;
-      n: number;
-      meanHit: number; // 0..1 (credit>0 considered a hit)
-      meanAbsErr: number; // ms
-    };
+    type Acc = { label: string; order: number; n: number; meanHit: number; meanAbsErr: number };
     const m = new Map<string, Acc>();
     let orderCounter = 0;
     for (let i = 0; i < scores.length; i++) {
@@ -229,13 +198,7 @@ export default function OverallReview({
         const durSec = noteValueToSeconds(ev.value, bpm, den);
         const label = secondsToNoteName(durSec, bpm, den);
         if (!m.has(label))
-          m.set(label, {
-            label,
-            order: orderCounter++,
-            n: 0,
-            meanHit: 0,
-            meanAbsErr: 0,
-          });
+          m.set(label, { label, order: orderCounter++, n: 0, meanHit: 0, meanAbsErr: 0 });
         const g = m.get(label)!;
         g.n += 1;
         const hit = (r.credit ?? 0) > 0 ? 1 : 0;
@@ -249,7 +212,6 @@ export default function OverallReview({
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
   }, [scores, snapshots, bpm, den]);
 
-  // If hidden view is selected (e.g., via history), bounce back to summary
   React.useEffect(() => {
     if (view === "melody" && !visibility.showMelodyRhythm) setView("summary");
     if (view === "line" && !visibility.showRhythmLine) setView("summary");
@@ -274,7 +236,7 @@ export default function OverallReview({
           Overall session
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full bg-[#f8f8f8] shadow-sm px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
+          <span className="inline-flex items-center rounded-full bg-[#f2f2f2] border border-[#dcdcdc] shadow-sm px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
             {finalPct.toFixed(1)}%
           </span>
           <span className="text-xs text-[#373737]">{`(${finalLetter})`}</span>
@@ -285,7 +247,6 @@ export default function OverallReview({
         <div className="grid grid-cols-1 gap-2">
           <StaticRow label={`Final • ${finalLetter}`} value={`${finalPct.toFixed(1)}%`} />
 
-          {/* Pitch — always (visibility.showPitch left for parity with API; pitch is always true) */}
           <ClickableRow
             label="Pitch accuracy"
             value={`${pitchPct.toFixed(1)}%`}
@@ -293,7 +254,6 @@ export default function OverallReview({
             onClick={() => setView("pitch")}
           />
 
-          {/* Melody rhythm — gated */}
           {visibility.showMelodyRhythm && (
             <ClickableRow
               label="Rhythm (melody)"
@@ -303,7 +263,6 @@ export default function OverallReview({
             />
           )}
 
-          {/* Intervals — always */}
           {visibility.showIntervals && (
             <ClickableRow
               label="Intervals"
@@ -313,7 +272,6 @@ export default function OverallReview({
             />
           )}
 
-          {/* Rhythm line — gated */}
           {visibility.showRhythmLine && haveLine ? (
             <ClickableRow
               label="Rhythm (blue line)"
@@ -329,7 +287,13 @@ export default function OverallReview({
             title="Intervals — aggregated across all takes"
             main={`${intervalsPct.toFixed(1)}%`}
           />
-          <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+          <div
+            className={[
+              "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+              "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+            ].join(" ")}
+          >
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
@@ -349,14 +313,10 @@ export default function OverallReview({
                 ) : (
                   intervalByClass.map((r) => (
                     <tr key={r.semitones} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">
-                        {r.label}
-                      </td>
+                      <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
                       <td className="px-2 py-1.5 align-middle">{r.attempts}</td>
                       <td className="px-2 py-1.5 align-middle">{r.correct}</td>
-                      <td className="px-2 py-1.5 align-middle">
-                        {r.percent}%
-                      </td>
+                      <td className="px-2 py-1.5 align-middle">{r.percent}%</td>
                     </tr>
                   ))
                 )}
@@ -372,7 +332,13 @@ export default function OverallReview({
             main={`${pitchPct.toFixed(1)}%`}
             sub={`On pitch ${timeOnPitchPct}% • MAE ${pitchMae}¢`}
           />
-          <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+          <div
+            className={[
+              "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+              "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+            ].join(" ")}
+          >
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
@@ -392,16 +358,12 @@ export default function OverallReview({
                 ) : (
                   aggPitchRows.map((g) => (
                     <tr key={g.key} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">
-                        {g.label}
-                      </td>
+                      <td className="px-2 py-1.5 align-middle font-medium">{g.label}</td>
                       <td className="px-2 py-1.5 align-middle">{g.solf}</td>
                       <td className="px-2 py-1.5 align-middle">
                         {(g.meanRatio * 100).toFixed(1)}%
                       </td>
-                      <td className="px-2 py-1.5 align-middle">
-                        {Math.round(g.meanMae)}
-                      </td>
+                      <td className="px-2 py-1.5 align-middle">{Math.round(g.meanMae)}</td>
                     </tr>
                   ))
                 )}
@@ -418,7 +380,13 @@ export default function OverallReview({
               main={`${melPct.toFixed(1)}%`}
               sub={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
             />
-            <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+            <div
+              className={[
+                "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+                "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+                "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+              ].join(" ")}
+            >
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
@@ -437,9 +405,7 @@ export default function OverallReview({
                   ) : (
                     aggMelodyRows.map((r) => (
                       <tr key={r.label} className="border-t border-[#eee]">
-                        <td className="px-2 py-1.5 align-middle font-medium">
-                          {r.label}
-                        </td>
+                        <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
                         <td className="px-2 py-1.5 align-middle">
                           {(r.meanCoverage * 100).toFixed(1)}%
                         </td>
@@ -456,18 +422,23 @@ export default function OverallReview({
           </div>
         ) : null
       ) : (
-        // view === "line"
-        visibility.showRhythmLine ? (
+        visibility.showRhythmLine && (
           <div className="flex flex-col gap-2">
             <SubHeader
               title="Rhythm line — aggregated across all takes"
               main={`${linePct.toFixed(1)}%`}
               sub={`Hit ${lineHit}% • μ|Δt| ${lineMeanAbs}ms`}
             />
-            <div className="rounded-lg border border-[#dcdcdc] bg-white/70">
+            <div
+              className={[
+                "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+                "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+                "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+              ].join(" ")}
+            >
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text[11px] uppercase tracking-wide text-[#6b6b6b]">
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
                     <th className="px-2 py-2">Duration</th>
                     <th className="px-2 py-2">Hit %</th>
                     <th className="px-2 py-2">μ|Δt|</th>
@@ -483,9 +454,7 @@ export default function OverallReview({
                   ) : (
                     aggLineRows.map((r) => (
                       <tr key={r.label} className="border-t border-[#eee]">
-                        <td className="px-2 py-1.5 align-middle font-medium">
-                          {r.label}
-                        </td>
+                        <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
                         <td className="px-2 py-1.5 align-middle">
                           {(r.meanHit * 100).toFixed(0)}%
                         </td>
@@ -500,7 +469,7 @@ export default function OverallReview({
             </div>
             <BackLink onClick={() => setView("summary")} />
           </div>
-        ) : null
+        )
       )}
     </div>
   );
@@ -508,7 +477,13 @@ export default function OverallReview({
 
 function StaticRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="text-left rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
+    <div
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
+    >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
         {label}
       </div>
@@ -534,7 +509,11 @@ function ClickableRow({
     <button
       type="button"
       onClick={onClick}
-      className="text-left rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2 hover:shadow-sm transition"
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
     >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
         {label}
@@ -542,9 +521,7 @@ function ClickableRow({
       <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
         {value}
       </div>
-      {detail ? (
-        <div className="text-xs text-[#373737] mt-0.5">{detail}</div>
-      ) : null}
+      {detail ? <div className="text-xs text-[#373737] mt-0.5">{detail}</div> : null}
     </button>
   );
 }
@@ -559,7 +536,13 @@ function SubHeader({
   sub?: string;
 }) {
   return (
-    <div className="rounded-lg bg-[#f8f8f8] border border-[#dcdcdc] px-3 py-2">
+    <div
+      className={[
+        "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
+        "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+      ].join(" ")}
+    >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
         {title}
       </div>
