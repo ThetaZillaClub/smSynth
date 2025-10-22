@@ -4,6 +4,7 @@ import React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
 import type { Phrase } from "@/utils/stage";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
+import { finalizeVisible } from "@/utils/scoring/final/finalize";
 // ⬇️ Point explicitly at the barrel file inside the folder
 import {
   PitchReview,
@@ -53,8 +54,10 @@ export default function TakeReview({
     showRhythmLine: boolean;
   };
 }) {
-  const finalPct = score?.final?.percent ?? 0;
-  const finalLetter = score?.final?.letter ?? "—";
+  // Visibility-aware final (fixes 0% → "—" bug)
+  const masked = score ? finalizeVisible(score, visibility) : undefined;
+  const finalPct = masked?.percent ?? NaN;
+  const finalLetter = masked?.letter ?? "—";
 
   const pitchPct = score?.pitch?.percent ?? 0;
   const melodyRhythmPct = score?.rhythm?.melodyPercent ?? 0;
@@ -68,6 +71,7 @@ export default function TakeReview({
   React.useEffect(() => {
     if (view === "melody" && !visibility.showMelodyRhythm) setView("summary");
     if (view === "line" && !visibility.showRhythmLine) setView("summary");
+    if (view === "intervals" && !visibility.showIntervals) setView("summary");
   }, [view, visibility]);
 
   return (
@@ -98,7 +102,7 @@ export default function TakeReview({
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center rounded-full bg-[#f2f2f2] border border-[#dcdcdc] shadow-sm px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
-            {finalPct ? `${finalPct.toFixed(1)}%` : "—"}
+            {Number.isFinite(finalPct) ? `${finalPct.toFixed(1)}%` : "—"}
           </span>
           <span className="text-xs text-[#373737]">
             {finalLetter !== "—" ? `(${finalLetter})` : ""}
@@ -172,13 +176,14 @@ export default function TakeReview({
             />
           )}
 
-          {/* Intervals — always */}
-          <ClickableStatTile
-            label="Intervals"
-            value={`${Math.round((score?.intervals?.correctRatio || 0) * 100)}%`}
-            detail={`${score?.intervals?.correct || 0}/${score?.intervals?.total || 0} correct • Open breakdown`}
-            onClick={() => setView("intervals")}
-          />
+          {visibility.showIntervals && (
+            <ClickableStatTile
+              label="Intervals"
+              value={`${Math.round((score?.intervals?.correctRatio || 0) * 100)}%`}
+              detail={`${score?.intervals?.correct || 0}/${score?.intervals?.total || 0} correct • Open breakdown`}
+              onClick={() => setView("intervals")}
+            />
+          )}
         </div>
       ) : view === "pitch" ? (
         <PitchReview score={score!} phrase={phrase ?? null} tonicPc={tonicPc} scaleName={scaleName} />
@@ -188,9 +193,9 @@ export default function TakeReview({
         ) : null
       ) : view === "line" ? (
         visibility.showRhythmLine ? <RhythmLineReview score={score!} /> : null
-      ) : (
-        <IntervalReview score={score!} />
-      )}
+      ) : view === "intervals" ? (
+        visibility.showIntervals ? <IntervalReview score={score!} /> : null
+      ) : null}
     </div>
   );
 }

@@ -1,11 +1,12 @@
 // utils/scoring/aggregate.ts
 import type { TakeScore } from "@/utils/scoring/score";
 import { letterFromPercent } from "@/utils/scoring/grade";
+import { finalizeVisible, combinedRhythmPercentVisible } from "./final/finalize";
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const r5 = (x: number) => Math.round(x * 100000) / 100000; // for ratio(6,5)
-const mean = (xs: number[]) => (xs.length ? xs.reduce((a,b)=>a+b,0) / xs.length : 0);
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
 export function shortIntervalLabel(semitones: number): string {
   switch (semitones) {
@@ -16,12 +17,17 @@ export function shortIntervalLabel(semitones: number): string {
   }
 }
 
-export function aggregateForSubmission(scores: TakeScore[]): TakeScore {
-  const finalPct = mean(scores.map((s) => s.final.percent));
+export function aggregateForSubmission(
+  scores: TakeScore[],
+  visibility?: { showMelodyRhythm?: boolean; showRhythmLine?: boolean; showIntervals?: boolean }
+): TakeScore {
+  // Finals reflect what the user saw (visibility-aware per-take)
+  const finalPct = mean(scores.map((s) => finalizeVisible(s, visibility).percent));
+
   const pitchPct = mean(scores.map((s) => s.pitch.percent));
   const pitchOn = clamp01(mean(scores.map((s) => s.pitch.timeOnPitchRatio)));
   const pitchMae = mean(scores.map((s) => s.pitch.centsMae));
-  const melPct  = mean(scores.map((s) => s.rhythm.melodyPercent));
+  const melPct  = mean(scores.map((s) => s.rhythm.melodyPercent)); // UI will gate display
 
   // ---- aggregate pitch per-MIDI for DB child table ----
   type Acc = { n: number; ratio: number; mae: number };
@@ -40,19 +46,20 @@ export function aggregateForSubmission(scores: TakeScore[]): TakeScore {
   const pitchPerMidi = Array.from(byMidi.entries())
     .sort((a, b) => a[0] - b[0])
     .map(([midi, g]) => ({
-      // keep the shape compatible with PerNotePitch so route can read it
       idx: 0,
       midi,
       timeOnPitch: 0,
       dur: 0,
-      n: g.n,                         // ⬅️ route reads this (defaults to 1 if absent)
-      ratio: r5(g.ratio),             // numeric(6,5)
-      centsMae: r2(g.mae),            // numeric(6,2)
+      n: g.n,
+      ratio: r5(g.ratio),
+      centsMae: r2(g.mae),
     }));
 
-  // ---- rhythm (existing) ----
-  const melodyCoverages:number[] = [], melodyAbsErrs:number[] = [];
-  const lineHits:number[] = [], lineAbsErrs:number[] = [];
+  // ---- rhythm (existing + visibility-aware combined) ----
+  const melodyCoverages: number[] = [];
+  const melodyAbsErrs: number[] = [];
+  const lineHits: number[] = [];
+  const lineAbsErrs: number[] = [];
   let anyLine = false;
 
   for (const s of scores) {
@@ -69,49 +76,66 @@ export function aggregateForSubmission(scores: TakeScore[]): TakeScore {
     }
   }
 
-  const melodyHitRate   = melodyCoverages.length ? clamp01(mean(melodyCoverages)) : clamp01(melPct/100);
+  const melodyHitRate   = melodyCoverages.length ? clamp01(mean(melodyCoverages)) : clamp01(melPct / 100);
   const melodyMeanAbsMs = melodyAbsErrs.length ? Math.round(mean(melodyAbsErrs)) : 0;
-  const avgLinePct      = mean(scores.filter(s=>s.rhythm.lineEvaluated).map(s=>s.rhythm.linePercent));
-  const lineHitRate     = lineHits.length ? clamp01(mean(lineHits)) : clamp01((avgLinePct||0)/100);
-  const lineMeanAbsMs   = lineAbsErrs.length ? Math.round(mean(lineAbsErrs)) : 0;
-  const linePercent     = anyLine ? r2(avgLinePct || 0) : 0;
-  const combinedPercent = anyLine ? r2((melPct + linePercent)/2) : r2(melPct);
 
-  // ---- intervals (existing) ----
-  const byClass = new Map<number, {attempts:number; correct:number}>();
-  for (let i=0;i<=12;i++) byClass.set(i,{attempts:0,correct:0});
+  const avgLinePctRaw   = mean(scores.filter(s => s.rhythm.lineEvaluated).map(s => s.rhythm.linePercent));
+  const showLine        = visibility?.showRhythmLine !== false;
+  const linePercent     = showLine && anyLine ? r2(avgLinePctRaw || 0) : 0;
+
+  const lineHitRate     = lineHits.length ? clamp01(mean(lineHits)) : clamp01((avgLinePctRaw || 0) / 100);
+  const lineMeanAbsMs   = lineAbsErrs.length ? Math.round(mean(lineAbsErrs)) : 0;
+
+  // Combined rhythm mirrors visibility exactly (combine per-take, then average)
+  const combinedPercent = r2(mean(scores.map(s => combinedRhythmPercentVisible(s.rhythm, visibility))));
+
+  // ---- intervals (existing; zero out if hidden) ----
+  const byClass = new Map<number, { attempts: number; correct: number }>();
+  for (let i = 0; i <= 12; i++) byClass.set(i, { attempts: 0, correct: 0 });
+
   scores.forEach(s => (s.intervals.classes ?? []).forEach(c => {
     const cell = byClass.get(c.semitones)!;
     cell.attempts += c.attempts || 0;
     cell.correct  += c.correct  || 0;
   }));
-  const intervalsClasses: TakeScore["intervals"]["classes"] =
+
+  const intervalsClasses =
     Array.from(byClass.entries())
-      .filter(([,v]) => v.attempts > 0)
-      .map(([semitones,v]) => ({
-        semitones, attempts:v.attempts, correct:v.correct,
+      .filter(([, v]) => v.attempts > 0)
+      .map(([semitones, v]) => ({
+        semitones, attempts: v.attempts, correct: v.correct,
         label: shortIntervalLabel(semitones),
-        percent: v.attempts ? r2((v.correct/v.attempts)*100) : 0,
+        percent: v.attempts ? r2((v.correct / v.attempts) * 100) : 0,
       }));
 
-  const total = intervalsClasses.reduce((a,c)=>a+c.attempts,0);
-  const correct = intervalsClasses.reduce((a,c)=>a+c.correct,0);
-  const ratio = total ? clamp01(correct/total) : 0;
+  const total   = intervalsClasses.reduce((a, c) => a + c.attempts, 0);
+  const correct = intervalsClasses.reduce((a, c) => a + c.correct, 0);
+  const ratio   = total ? clamp01(correct / total) : 0;
+
+  const intervalsPayload = (visibility?.showIntervals === false)
+    ? { total: 0, correct: 0, correctRatio: 0, classes: [] as typeof intervalsClasses }
+    : { total, correct, correctRatio: r2(ratio), classes: intervalsClasses };
 
   return {
     final: { percent: r2(finalPct), letter: letterFromPercent(finalPct) },
-    // ⬇️ keep aggregate summary AND provide per-MIDI rows for the route
     pitch: {
       percent: r2(pitchPct),
       timeOnPitchRatio: r2(pitchOn),
       centsMae: r2(pitchMae),
-      perNote: pitchPerMidi as any,  // { midi, n, ratio, centsMae } carried
+      perNote: pitchPerMidi as any, // shape-compatible for route consumption
     },
     rhythm: {
-      melodyPercent: r2(melPct), melodyHitRate, melodyMeanAbsMs,
-      lineEvaluated: anyLine, linePercent, lineHitRate, lineMeanAbsMs,
-      combinedPercent, perNoteMelody: [], linePerEvent: [],
+      melodyPercent: r2(melPct),
+      melodyHitRate,
+      melodyMeanAbsMs,
+      lineEvaluated: anyLine,
+      linePercent,
+      lineHitRate,
+      lineMeanAbsMs,
+      combinedPercent,
+      perNoteMelody: [],
+      linePerEvent: [],
     },
-    intervals: { total, correct, correctRatio: r2(ratio), classes: intervalsClasses },
+    intervals: intervalsPayload,
   };
 }

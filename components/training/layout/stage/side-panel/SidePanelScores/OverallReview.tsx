@@ -10,6 +10,7 @@ import { intervalLabel, secondsToNoteName } from "./format";
 import { midiLabelForKey } from "@/utils/pitch/enharmonics";
 import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
 import { noteValueToSeconds } from "@/utils/time/tempo";
+import { finalizeVisible } from "@/utils/scoring/final/finalize";
 
 type TakeSnap = { phrase: Phrase; rhythm: RhythmEvent[] | null };
 
@@ -48,14 +49,26 @@ export default function OverallReview({
   const avg = (sel: (s: TakeScore) => number) =>
     Math.round((scores.reduce((a, s) => a + sel(s), 0) / n) * 10) / 10;
 
-  const finalPct = avg((s) => s.final.percent);
-  const finalLetter = letterFromPercent(finalPct);
+  // VISIBILITY-AWARE final percent/letter
+  const finalPct = React.useMemo(() => {
+    if (!scores.length) return NaN;
+    const sum = scores.reduce(
+      (a, s) => a + finalizeVisible(s, visibility).percent,
+      0
+    );
+    return Math.round(((sum / scores.length) * 10)) / 10;
+  }, [scores, visibility]);
 
+  const finalLetter = Number.isFinite(finalPct) ? letterFromPercent(finalPct) : "—";
+
+  // Other aggregates (unchanged — raw pitch/rhythm/interval stats)
   const pitchPct = avg((s) => s.pitch.percent);
   const timeOnPitchPct = Math.round(
     (scores.reduce((a, s) => a + s.pitch.timeOnPitchRatio, 0) / n) * 100
   );
-  const pitchMae = Math.round(scores.reduce((a, s) => a + s.pitch.centsMae, 0) / n);
+  const pitchMae = Math.round(
+    scores.reduce((a, s) => a + s.pitch.centsMae, 0) / n
+  );
 
   const melPct = avg((s) => s.rhythm.melodyPercent);
   const melHit = Math.round(
@@ -237,15 +250,20 @@ export default function OverallReview({
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center rounded-full bg-[#f2f2f2] border border-[#dcdcdc] shadow-sm px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
-            {finalPct.toFixed(1)}%
+            {Number.isFinite(finalPct) ? `${finalPct.toFixed(1)}%` : "—"}
           </span>
-          <span className="text-xs text-[#373737]">{`(${finalLetter})`}</span>
+          <span className="text-xs text-[#373737]">
+            {finalLetter !== "—" ? `(${finalLetter})` : ""}
+          </span>
         </div>
       </div>
 
       {view === "summary" ? (
         <div className="grid grid-cols-1 gap-2">
-          <StaticRow label={`Final • ${finalLetter}`} value={`${finalPct.toFixed(1)}%`} />
+          <StaticRow
+            label={`Final • ${finalLetter}`}
+            value={Number.isFinite(finalPct) ? `${finalPct.toFixed(1)}%` : "—"}
+          />
 
           <ClickableRow
             label="Pitch accuracy"
@@ -313,7 +331,9 @@ export default function OverallReview({
                 ) : (
                   intervalByClass.map((r) => (
                     <tr key={r.semitones} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
+                      <td className="px-2 py-1.5 align-middle font-medium">
+                        {r.label}
+                      </td>
                       <td className="px-2 py-1.5 align-middle">{r.attempts}</td>
                       <td className="px-2 py-1.5 align-middle">{r.correct}</td>
                       <td className="px-2 py-1.5 align-middle">{r.percent}%</td>
@@ -358,12 +378,16 @@ export default function OverallReview({
                 ) : (
                   aggPitchRows.map((g) => (
                     <tr key={g.key} className="border-t border-[#eee]">
-                      <td className="px-2 py-1.5 align-middle font-medium">{g.label}</td>
+                      <td className="px-2 py-1.5 align-middle font-medium">
+                        {g.label}
+                      </td>
                       <td className="px-2 py-1.5 align-middle">{g.solf}</td>
                       <td className="px-2 py-1.5 align-middle">
                         {(g.meanRatio * 100).toFixed(1)}%
                       </td>
-                      <td className="px-2 py-1.5 align-middle">{Math.round(g.meanMae)}</td>
+                      <td className="px-2 py-1.5 align-middle">
+                        {Math.round(g.meanMae)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -405,7 +429,9 @@ export default function OverallReview({
                   ) : (
                     aggMelodyRows.map((r) => (
                       <tr key={r.label} className="border-t border-[#eee]">
-                        <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
+                        <td className="px-2 py-1.5 align-middle font-medium">
+                          {r.label}
+                        </td>
                         <td className="px-2 py-1.5 align-middle">
                           {(r.meanCoverage * 100).toFixed(1)}%
                         </td>
@@ -454,7 +480,9 @@ export default function OverallReview({
                   ) : (
                     aggLineRows.map((r) => (
                       <tr key={r.label} className="border-t border-[#eee]">
-                        <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
+                        <td className="px-2 py-1.5 align-middle font-medium">
+                          {r.label}
+                        </td>
                         <td className="px-2 py-1.5 align-middle">
                           {(r.meanHit * 100).toFixed(0)}%
                         </td>
@@ -540,7 +568,7 @@ function SubHeader({
       className={[
         "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
         "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0f0f0f]",
       ].join(" ")}
     >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">

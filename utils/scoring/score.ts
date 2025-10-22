@@ -24,10 +24,10 @@ export function computeTakeScore({
 }: ComputeTakeScoreArgs): TakeScore {
   const {
     confMin = 0.5,
-    centsOk = 50,
+    centsOk = 60,
     onsetGraceMs = 120,
-    maxAlignMs = 250,
-    goodAlignMs = 120,
+    maxAlignMs = 300,
+    goodAlignMs = 150,
   } = options;
 
   // ---- Pitch ----

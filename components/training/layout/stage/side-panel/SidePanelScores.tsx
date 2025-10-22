@@ -3,33 +3,47 @@
 
 import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
+import { letterFromPercent } from "@/utils/scoring/grade";
+import { finalizeVisible } from "@/utils/scoring/final/finalize";
 
 /**
  * SidePanelScores
  *
  * Compact list showing:
- *  - Overall % + letter (averaged across takes)
- *  - One row per take with % + letter
- * Clicking a row calls onOpen(index) so the parent can render TakeReview.
- *
- * Visual language matches the Courses cards (rounded, soft gray, subtle borders).
+ *  - Overall % + letter (averaged across takes; visibility-aware)
+ *  - One row per take with % + letter (visibility-aware)
  */
 
 export default function SidePanelScores({
   scores,
   onOpen,
+  visibility = {
+    showPitch: true,
+    showIntervals: true,
+    showMelodyRhythm: true,
+    showRhythmLine: true,
+  },
 }: {
   scores: TakeScore[];
   /** onOpen(index): 0..N-1 = take detail, -1 = overall session detail */
   onOpen: (index: number) => void;
+  visibility?: {
+    showPitch: boolean;
+    showIntervals: boolean;
+    showMelodyRhythm: boolean;
+    showRhythmLine: boolean;
+  };
 }) {
   const overallPercent = React.useMemo(() => {
     if (!scores.length) return null;
-    const s = scores.reduce((a, b) => a + (b.final?.percent ?? 0), 0) / scores.length;
-    return s;
-  }, [scores]);
+    return (
+      scores.reduce((a, s) => a + finalizeVisible(s, visibility).percent, 0) /
+      scores.length
+    );
+  }, [scores, visibility]);
 
-  const overallLetter = overallPercent == null ? "—" : percentToLetter(overallPercent);
+  const overallLetter =
+    overallPercent == null ? "—" : letterFromPercent(overallPercent);
   const canOpenOverall = scores.length >= 2;
 
   return (
@@ -56,10 +70,14 @@ export default function SidePanelScores({
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <span className="inline-flex items-center rounded-full bg-[#ebebeb] px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
-            {overallPercent == null ? "—" : `${overallPercent.toFixed(1)}%`}
+            {overallPercent == null || !Number.isFinite(overallPercent)
+              ? "—"
+              : `${overallPercent.toFixed(1)}%`}
           </span>
           <span className="text-xs text-[#373737]">
-            {overallPercent == null ? "" : `(${overallLetter})`}
+            {overallPercent == null || !Number.isFinite(overallPercent)
+              ? ""
+              : `(${overallLetter})`}
           </span>
           {canOpenOverall && (
             <span className="ml-1 text-[11px] text-[#6b6b6b]">(click for details)</span>
@@ -69,7 +87,9 @@ export default function SidePanelScores({
 
       {/* Takes list */}
       <div>
-        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">Takes</div>
+        <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b] mb-1">
+          Takes
+        </div>
 
         {scores.length === 0 ? (
           <div className="rounded-xl bg-[#f2f2f2] border border-[#dcdcdc] p-3 shadow-sm text-sm text-[#373737]">
@@ -78,8 +98,10 @@ export default function SidePanelScores({
         ) : (
           <div className="flex flex-col gap-2">
             {scores.map((s, i) => {
-              const pct = s.final?.percent ?? null;
-              const letter = s.final?.letter ?? (pct == null ? "—" : percentToLetter(pct));
+              const masked = finalizeVisible(s, visibility);
+              const pct = masked.percent;
+              const letter = masked.letter;
+
               return (
                 <button
                   key={i}
@@ -97,7 +119,7 @@ export default function SidePanelScores({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center rounded-full bg-[#ebebeb] px-2.5 py-1 text-sm font-semibold text-[#0f0f0f]">
-                        {pct == null ? "—" : `${pct.toFixed(1)}%`}
+                        {Number.isFinite(pct) ? `${pct.toFixed(1)}%` : "—"}
                       </span>
                       <span className="text-xs text-[#373737]">
                         {letter ? `(${letter})` : ""}
@@ -112,14 +134,4 @@ export default function SidePanelScores({
       </div>
     </div>
   );
-}
-
-/** Simple default letter bands (tweak if you have a central mapping) */
-function percentToLetter(p: number): string {
-  if (!Number.isFinite(p)) return "—";
-  if (p >= 90) return "A";
-  if (p >= 80) return "B";
-  if (p >= 70) return "C";
-  if (p >= 60) return "D";
-  return "F";
 }

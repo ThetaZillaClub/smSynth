@@ -1,3 +1,4 @@
+// hooks/gameplay/useOnTakeComplete.ts
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { Phrase } from "@/utils/stage";
@@ -7,23 +8,64 @@ import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 import { aggregateForSubmission } from "@/utils/scoring/aggregate";
 import type { LoopPhase } from "@/hooks/gameplay/usePracticeLoop";
 
-export type TakeSnapshot = { phrase: Phrase; rhythm: RhythmEvent[] | null; melodyRhythm: RhythmEvent[] | null; };
+export type TakeSnapshot = {
+  phrase: Phrase;
+  rhythm: RhythmEvent[] | null;
+  melodyRhythm: RhythmEvent[] | null;
+};
 
 export function useOnTakeComplete({
-  active, loopPhase, phrase, rhythmEffective, melodyRhythm, bpm, den, leadInSec,
-  pitchLagSec, gestureLagSec, haveRhythm, samplerSnapshot, handSnapshot,
-  scoreTake, sessionScores, maxTakes, submitLesson, // submitLesson is optional
+  active,
+  loopPhase,
+  phrase,
+  rhythmEffective,
+  melodyRhythm,
+  bpm,
+  den,
+  leadInSec,
+  pitchLagSec,
+  gestureLagSec,
+  haveRhythm,
+  samplerSnapshot,
+  handSnapshot,
+  scoreTake,
+  sessionScores,
+  maxTakes,
+  submitLesson, // submitLesson is optional
+  visibility,   // ⬅️ NEW
 }: {
-  active: boolean; loopPhase: LoopPhase; phrase: Phrase | null; rhythmEffective: RhythmEvent[] | null; melodyRhythm: RhythmEvent[] | null;
-  bpm: number; den: number; leadInSec: number; pitchLagSec: number; gestureLagSec: number; haveRhythm: boolean;
-  samplerSnapshot: () => any[]; handSnapshot: () => number[];
-  scoreTake: (args: any) => TakeScore; sessionScores: TakeScore[]; maxTakes: number;
-  submitLesson?: (payload: { takeIndex: number; score: TakeScore; snapshots: any }) => Promise<void> | void;
+  active: boolean;
+  loopPhase: LoopPhase;
+  phrase: Phrase | null;
+  rhythmEffective: RhythmEvent[] | null;
+  melodyRhythm: RhythmEvent[] | null;
+  bpm: number;
+  den: number;
+  leadInSec: number;
+  pitchLagSec: number;
+  gestureLagSec: number;
+  haveRhythm: boolean;
+  samplerSnapshot: () => any[];
+  handSnapshot: () => number[];
+  scoreTake: (args: any) => TakeScore;
+  sessionScores: TakeScore[];
+  maxTakes: number;
+  submitLesson?: (payload: {
+    takeIndex: number;
+    score: TakeScore;
+    snapshots: any;
+  }) => Promise<void> | void;
+  visibility?: {
+    showMelodyRhythm?: boolean;
+    showRhythmLine?: boolean;
+    showIntervals?: boolean;
+    showPitch?: boolean;
+  };
 }) {
   const [snapshots, setSnapshots] = useState<TakeSnapshot[]>([]);
-  const phraseRef = useRef<Phrase|null>(null);
-  const rhythmRef = useRef<RhythmEvent[]|null>(null);
-  const melodyRhythmRef = useRef<RhythmEvent[]|null>(null);
+  const phraseRef = useRef<Phrase | null>(null);
+  const rhythmRef = useRef<RhythmEvent[] | null>(null);
+  const melodyRhythmRef = useRef<RhythmEvent[] | null>(null);
   const submittedRef = useRef(false);
 
   useEffect(() => {
@@ -47,11 +89,15 @@ export function useOnTakeComplete({
     if (!usedPhrase) return;
 
     const score = scoreTake({
-      phrase: usedPhrase, bpm, den, leadInSec,
-      pitchLagSec, gestureLagSec,
+      phrase: usedPhrase,
+      bpm,
+      den,
+      leadInSec,
+      pitchLagSec,
+      gestureLagSec,
       snapshotSamples: samplerSnapshot,
       snapshotBeats: () => (haveRhythm ? handSnapshot() : []),
-      melodyOnsetsSec: usedPhrase.notes.map(n => n.startSec),
+      melodyOnsetsSec: usedPhrase.notes.map((n) => n.startSec),
       rhythmOnsetsSec: makeOnsetsFromRhythm(usedRhythm, bpm, den),
       align: undefined, // caller passes align via scoreTake wrapper if needed
     });
@@ -60,20 +106,44 @@ export function useOnTakeComplete({
     if (totalTakesNow >= maxTakes && !submittedRef.current) {
       submittedRef.current = true;
       const all = [...sessionScores, score];
-      const agg = aggregateForSubmission(all);
+
+      // ⬇️ VISIBILITY-AWARE SUBMISSION AGGREGATE
+      const agg = aggregateForSubmission(all, visibility);
 
       const snap = {
         perTakeFinals: all.map((s, i) => ({ i, final: s.final.percent })),
-        perTakePitch:  all.map((s, i) => ({ i, pct: s.pitch.percent })),
+        perTakePitch: all.map((s, i) => ({ i, pct: s.pitch.percent })),
       };
       submitLesson?.({ takeIndex: totalTakesNow - 1, score: agg, snapshots: snap });
     }
 
-    setSnapshots(xs => [...xs, { phrase: usedPhrase, rhythm: usedRhythm ?? null, melodyRhythm: melodyRhythmRef.current ?? null }]);
+    setSnapshots((xs) => [
+      ...xs,
+      {
+        phrase: usedPhrase,
+        rhythm: usedRhythm ?? null,
+        melodyRhythm: melodyRhythmRef.current ?? null,
+      },
+    ]);
   }, [
-    active, loopPhase, phrase, rhythmEffective, melodyRhythm,
-    bpm, den, leadInSec, pitchLagSec, gestureLagSec, haveRhythm,
-    samplerSnapshot, handSnapshot, scoreTake, sessionScores, maxTakes, submitLesson
+    active,
+    loopPhase,
+    phrase,
+    rhythmEffective,
+    melodyRhythm,
+    bpm,
+    den,
+    leadInSec,
+    pitchLagSec,
+    gestureLagSec,
+    haveRhythm,
+    samplerSnapshot,
+    handSnapshot,
+    scoreTake,
+    sessionScores,
+    maxTakes,
+    submitLesson,
+    visibility, // ⬅️ include in deps so changes apply to the terminal aggregate
   ]);
 
   return { snapshots };

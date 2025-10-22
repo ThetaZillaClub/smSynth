@@ -212,9 +212,17 @@ export default function TrainingGame({
   const rhythmLineEnabled = rhythmCfg.lineEnabled !== false;
   const rhythmDetectEnabled = rhythmCfg.detectEnabled !== false;
 
+  // Avoid forward reference; compute locally from props/params
+  const isPitchTuneLesson = (() => {
+    const ls = (lessonSlug ?? "").trim();
+    const cs = (courseSlugParam ?? "").trim();
+    const namespaced = cs && ls ? `${cs}/${ls}` : ls;
+    return namespaced.startsWith("pitch-tune/");
+  })();
+
   const visibility: AnalyticsVisibility = {
     showPitch: true,
-    showIntervals: true,
+    showIntervals: !isPitchTuneLesson, // <-- hide intervals for Pitch-Tune
     showMelodyRhythm: !timingFreeResponse,
     showRhythmLine: !timingFreeResponse && rhythmDetectEnabled && rhythmLineEnabled,
   };
