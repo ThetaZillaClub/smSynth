@@ -68,8 +68,10 @@ export default function TuneView({
   scaleName,
   title,
   centerProgress01,
-  /** NEW: when provided, this rel (0..11) becomes the current target */
+  /** when provided, this rel (0..11) becomes the current target */
   targetRelOverride,
+  /** NEW: when provided, use this exact MIDI for the center secondary label (A2/A3) */
+  targetMidiOverride,
 }: {
   phrase?: MiniPhrase;
   liveHz: number | null;
@@ -80,6 +82,7 @@ export default function TuneView({
   title?: string;
   centerProgress01?: number;
   targetRelOverride?: number;
+  targetMidiOverride?: number;
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const [w, setW] = React.useState(0);
@@ -123,9 +126,13 @@ export default function TuneView({
     return [targetRel, ...rest];
   }, [activeRelsBase, targetRel]);
 
+  // Prefer exact override MIDI if provided; otherwise fall back to first matching note
   const targetMidi = React.useMemo(
-    () => firstTargetMidi(phrase, tonicPc, targetRel),
-    [phrase, tonicPc, targetRel]
+    () =>
+      typeof targetMidiOverride === "number"
+        ? targetMidiOverride
+        : firstTargetMidi(phrase, tonicPc, targetRel),
+    [targetMidiOverride, phrase, tonicPc, targetRel]
   );
 
   // Center labels

@@ -16,7 +16,7 @@ export default function useTimingFreeCapture(opts: {
   phrase: Phrase | null;          // to derive expected notes
   tonicPc: number | null;         // for target rel calc
   endRecordEarly: () => void;     // called after the LAST note is captured or budget exhausted
-}): { centerProgress01: number; targetRel: number | null } {
+}): { centerProgress01: number; targetRel: number | null; targetMidi: number | null } {
   const {
     enabled,
     loopPhase,
@@ -49,6 +49,7 @@ export default function useTimingFreeCapture(opts: {
 
   const [centerProgress01, setCenterProgress01] = useState<number>(0);
   const [targetRel, setTargetRel] = useState<number | null>(null);
+  const [targetMidi, setTargetMidi] = useState<number | null>(null);
 
   // Reset index when phrase/targets change or we enter RECORD
   useEffect(() => {
@@ -58,13 +59,16 @@ export default function useTimingFreeCapture(opts: {
     streakStartMsRef.current = null;
     setCenterProgress01(0);
     setTargetRel(targetsRel[0] ?? null);
-  }, [enabled, loopPhase, targetsRel]);
+    const m0 = phrase?.notes?.[0]?.midi;
+    setTargetMidi(typeof m0 === "number" ? Math.round(m0) : null);
+  }, [enabled, loopPhase, targetsRel, phrase?.notes]);
 
   // Clear on leave/disable
   useEffect(() => {
     if (!enabled || loopPhase !== "record") {
       setCenterProgress01(0);
       setTargetRel(null);
+      setTargetMidi(null);
       noteStartedAtMsRef.current = null;
       streakStartMsRef.current = null;
     }
@@ -82,6 +86,8 @@ export default function useTimingFreeCapture(opts: {
     }
     setCenterProgress01(0);
     setTargetRel(targetsRel[idx] ?? null);
+    const m = phrase?.notes?.[idx]?.midi;
+    setTargetMidi(typeof m === "number" ? Math.round(m) : null);
   };
 
   // 1) Early-advance controller (per-note) based on confidence streak OR time budget
@@ -154,5 +160,5 @@ export default function useTimingFreeCapture(opts: {
     };
   }, [enabled, loopPhase, minCaptureSec]);
 
-  return { centerProgress01, targetRel };
+  return { centerProgress01, targetRel, targetMidi };
 }

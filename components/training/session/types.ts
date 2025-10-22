@@ -105,6 +105,13 @@ export type SessionConfig = {
   randomIncludeUnder?: boolean;
   randomIncludeOver?: boolean;
 
+  /**
+   * When true (default), treat each tonic window [T, T+12) as half-open
+   * and drop the top-octave tonic (T+12) from random generation.
+   * Set to false to allow the octave.
+   */
+  dropUpperWindowDegrees?: boolean;
+
   /** Allowed scale-degree indices (0-based) within the chosen scale. */
   allowedDegrees?: number[] | null;
 
@@ -169,6 +176,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   includeUpperTonic: true,
   randomIncludeUnder: false,
   randomIncludeOver: false,
+  dropUpperWindowDegrees: true,
 
   allowedDegrees: null,
   allowedMidis: null,

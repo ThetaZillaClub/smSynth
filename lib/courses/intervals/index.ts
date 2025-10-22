@@ -1,38 +1,32 @@
 // lib/courses/intervals/index.ts
 import type { CourseDef } from "../types";
 import type { SessionConfig, RhythmConfig } from "@/components/training/session/types";
-
 /**
  * Intervals (new):
  * - Game/view like Pitch-Tune (polar view, free response, bpm 120)
  * - Random mode, 1 bar of HALF notes
  * - No rests, no rhythm line, no detection
  * - Chromatic scale; each lesson limits the pool to the two degrees that form the target interval.
- *   With 1 bar of half notes, you’ll sing two notes per take → an interval.
+ * With 1 bar of half notes, you’ll sing two notes per take → an interval.
  */
-
 const BASE: Partial<SessionConfig> = {
-  bpm: 120,                 // same as Pitch-Tune
-  view: "polar",            // Polar-Tune view
+  bpm: 120, // same as Pitch-Tune
+  view: "polar", // Polar-Tune view
   metronome: true,
-  callResponse: true,       // same interaction model as Pitch-Tune
+  callResponse: true, // same interaction model as Pitch-Tune
   exerciseLoops: 4,
   regenerateBetweenTakes: true,
-
   // Free-response like Pitch-Tune
   timingFreeResponse: true,
   timingFreeMaxSec: 10,
   timingFreeMinCaptureSec: 1,
-
   // Chromatic; limit consecutive hits of same degree (soft cap) to 1
   scale: { name: "chromatic", tonicPc: 0, maxPerDegree: 1 },
-
   // Random mode rhythm: exactly 1 bar, HALF notes only (→ two notes per take), no rests/line/detect
   rhythm: {
     mode: "random",
     available: ["half"],
     lengthBars: 1,
-
     // Blue-line UI + rest knobs (extras)
     lineEnabled: false,
     detectEnabled: false,
@@ -42,10 +36,9 @@ const BASE: Partial<SessionConfig> = {
     contentRestProb: 0,
   } satisfies RhythmConfig,
 };
-
 // helper to keep lessons concise
 // - `allowedDegrees` are chromatic semitone offsets from tonic: 0..11
-//   e.g., [0,2] = do & re (M2), [0,1] = do & ra/di (m2), [0] = do only (octave).
+// e.g., [0,2] = do & re (M2), [0,1] = do & ra/di (m2), [0] = do only (octave).
 const mk = (
   allowedDegrees: number[],
   title: string,
@@ -60,7 +53,6 @@ const mk = (
     allowedDegrees,
   } as Partial<SessionConfig>,
 });
-
 const INTERVALS_COURSE: CourseDef = {
   slug: "intervals",
   title: "Intervals",
@@ -91,7 +83,6 @@ const INTERVALS_COURSE: CourseDef = {
       "major-7th-deg-1-7",
       "Eleven semitones: leading-tone pull — do–ti. Tense, reaching color."
     ),
-
     // ===== THEN THE MINOR INTERVALS =====
     mk(
       [0, 1],
@@ -117,7 +108,6 @@ const INTERVALS_COURSE: CourseDef = {
       "minor-7th-deg-1-7",
       "Ten semitones: bluesy pull — do–te. Strong away-from-home feel."
     ),
-
     // ===== PERFECTS, TRITONE, OCTAVE =====
     mk(
       [0, 5],
@@ -137,13 +127,16 @@ const INTERVALS_COURSE: CourseDef = {
       "tritone-deg-1-sharp4",
       "Six semitones: restless & bright — do–fi (aug4) or fa–ti (dim5). Wants to resolve."
     ),
-    mk(
-      [0],
-      "Octave — do→do",
-      "octave-deg-1-8",
-      "Twelve semitones: same home, higher — do–do. Complete and calm."
-    ),
+    {
+      slug: "octave-deg-1-8",
+      title: "Octave — do→do",
+      summary: "Twelve semitones: same home, higher — do–do. Complete and calm.",
+      config: {
+        ...BASE,
+        allowedDegrees: [0],
+        dropUpperWindowDegrees: false,
+      } as Partial<SessionConfig>,
+    },
   ],
 };
-
 export default INTERVALS_COURSE;

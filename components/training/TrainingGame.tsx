@@ -492,7 +492,7 @@ export default function TrainingGame({
 
   // timing-free capture (per note)
   const loopPhaseForFree: "idle" | "call" | "lead-in" | "record" | "rest" = loop.loopPhase;
-  const { centerProgress01, targetRel } = useTimingFreeCapture({
+  const { centerProgress01, targetRel, targetMidi } = useTimingFreeCapture({
     enabled: !!timingFreeResponse && !pretestActive,
     loopPhase: loopPhaseForFree,
     liveHz,
@@ -506,10 +506,13 @@ export default function TrainingGame({
   });
 
   // Lead-in: current note for Polar center text
-  const [leadInRel, setLeadInRel] = useState<number | null>(null);
+   const [leadInRel, setLeadInRel] = useState<number | null>(null);
+   const [leadInMidi, setLeadInMidi] = useState<number | null>(null);
+
   useEffect(() => {
     if (pretestActive || loop.loopPhase !== "lead-in" || !phrase || loop.anchorMs == null) {
       setLeadInRel(null);
+      setLeadInMidi(null);
       return;
     }
     let raf = 0;
@@ -517,15 +520,18 @@ export default function TrainingGame({
     const tick = () => {
       const tSec = (performance.now() - (loop.anchorMs as number)) / 1000;
       let rel: number | null = null;
+      let curMidi: number | null = null;
       for (const n of phrase.notes) {
         const s = n.startSec, e = s + n.durSec;
         if (tSec >= s && tSec < e) {
           const pcAbs = ((Math.round(n.midi) % 12) + 12) % 12;
           rel = ((pcAbs - tonicPcVal) + 12) % 12;
+          curMidi = Math.round(n.midi);
           break;
         }
       }
       setLeadInRel(rel);
+      setLeadInMidi(curMidi);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -536,7 +542,10 @@ export default function TrainingGame({
     loop.loopPhase === "lead-in"
       ? (typeof leadInRel === "number" ? leadInRel : undefined)
       : (typeof targetRel === "number" ? targetRel : undefined);
-
+  const targetMidiForPolar =
+    loop.loopPhase === "lead-in"
+      ? (typeof leadInMidi === "number" ? leadInMidi : undefined)
+      : (typeof targetMidi === "number" ? targetMidi : undefined);
   // Analytics sync guard
   const takesSynced = sessionScores.length === takeSnapshots.length;
   const sessionComplete =
@@ -609,6 +618,7 @@ export default function TrainingGame({
       }
       centerProgress01={centerProgress01}
       targetRelOverride={targetRelForPolar}
+      targetMidiOverride={targetMidiForPolar}
       // NEW: tell footer whether indicator should be enabled at all
       rhythmEnabled={rhythmIndicatorEnabled}
     />

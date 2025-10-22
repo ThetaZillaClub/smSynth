@@ -89,6 +89,7 @@ type Props = {
 
   /** NEW: tell Polar which relative pc is the current target */
   targetRelOverride?: number;
+  targetMidiOverride?: number;
 };
 
 function toSolfegeName(x: unknown): SolfegeScaleName | undefined {
@@ -196,6 +197,7 @@ function MainStageView({
 
   centerProgress01,
   targetRelOverride,
+  targetMidiOverride,
 }: Omit<Props, "analytics">) {
   const WINDOW_SEC = 4;
   const ANCHOR_RATIO = 0.1;
@@ -359,6 +361,7 @@ function MainStageView({
                   centerProgress01={centerProgress01}
                   // NEW: steer target wedge to the current expected note
                   targetRelOverride={targetRelOverride}
+                  targetMidiOverride={targetMidiOverride}
                 />
               </div>
             ) : (

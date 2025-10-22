@@ -1,5 +1,5 @@
 // hooks/gameplay/useExerciseFabric.ts
-import { useMemo } from "react";
+import * as React from "react";
 import type { Phrase as StagePhrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import {
@@ -15,6 +15,7 @@ import { makeSolfegeLyrics } from "@/utils/lyrics/solfege";
 import { keyNameFromTonicPc } from "@/components/training/layout/stage/sheet/vexscore/builders";
 import type { SessionConfig } from "@/components/training/session/types";
 import { hzToMidi } from "@/utils/pitch/pitchMath";
+import { isInScale } from "@/utils/phrase/scales";
 
 const rand32 = () => (Math.floor(Math.random() * 0xffffffff) >>> 0);
 
@@ -73,18 +74,19 @@ export function useExerciseFabric(opts: {
     randomIncludeUnder, randomIncludeOver,
     customPhrase, customWords,
     allowedDegrees,
+    dropUpperWindowDegrees,
   } = sessionConfig;
 
   const haveRange = lowHz != null && highHz != null;
 
-  const rhythmSeed = useMemo(() => rand32(), [seedBump]);
-  const scaleSeed  = useMemo(() => rand32(), [seedBump]);
-  const syncSeed   = useMemo(() => rand32(), [seedBump]);
+  const rhythmSeed = React.useMemo(() => rand32(), [seedBump]);
+  const scaleSeed  = React.useMemo(() => rand32(), [seedBump]);
+  const syncSeed   = React.useMemo(() => rand32(), [seedBump]);
 
   const lengthBars = Math.max(1, Number((rhythm as any)?.lengthBars ?? exerciseBars ?? 2));
 
   // ---- derive a safe tonic window if none was provided ----
-  const tonicMidisSafe: number[] | null = useMemo(() => {
+  const tonicMidisSafe: number[] | null = React.useMemo(() => {
     if (tonicMidis && tonicMidis.length) return tonicMidis;
     if (!haveRange || !scale) return null;
 
@@ -101,7 +103,7 @@ export function useExerciseFabric(opts: {
     return chosen != null ? [chosen] : null;
   }, [tonicMidis, haveRange, scale, lowHz, highHz, sessionConfig.preferredOctaveIndices]);
 
-  // ---- rest policy calc (unchanged) ----
+  // ---- rest policy calc ----
   const lineAllowRests: boolean = (rhythm as any)?.allowRests !== false;
   const lineRestProbRaw: number = (rhythm as any)?.restProb ?? 0.3;
   const lineRestProb = lineAllowRests ? lineRestProbRaw : 0;
@@ -116,8 +118,8 @@ export function useExerciseFabric(opts: {
   })();
   const contentRestProb = contentAllowRests ? contentRestProbRaw : 0;
 
-  // ---- BLUE RHYTHM (unchanged) ----
-  const syncRhythmFabric: RhythmEvent[] | null = useMemo(() => {
+  // ---- BLUE RHYTHM ----
+  const syncRhythmFabric: RhythmEvent[] | null = React.useMemo(() => {
     if (!rhythm) return null;
     const lineEnabled = (rhythm as any).lineEnabled !== false;
     if (!lineEnabled) return null;
@@ -153,7 +155,7 @@ export function useExerciseFabric(opts: {
   }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed, lengthBars, lineAllowRests, lineRestProb]);
 
   // ---- MELODY FABRIC ----
-  const generated = useMemo((): { phrase: StagePhrase | null; melodyRhythm: RhythmEvent[] | null } => {
+  const generated = React.useMemo((): { phrase: StagePhrase | null; melodyRhythm: RhythmEvent[] | null } => {
     if (customPhrase) return { phrase: customPhrase, melodyRhythm: null };
     if (!haveRange || !scale || !rhythm) return { phrase: null, melodyRhythm: null };
 
@@ -162,7 +164,7 @@ export function useExerciseFabric(opts: {
       : ["quarter"];
 
     if ((rhythm as any).mode === "interval") {
-      // interval mode timing prep (unchanged)
+      // interval mode timing prep
       const beatNote = ((): NoteValue => {
         switch (ts.den) {
           case 1:  return "whole";
@@ -204,7 +206,7 @@ export function useExerciseFabric(opts: {
         gapRhythm: [],
         seed: scaleSeed,
         tonicMidis: tonicMidisSafe,
-        /** NEW: degree filter */
+        /** degree filter */
         allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
         /** Still respect absolute whitelists if present */
         allowedMidis,
@@ -240,14 +242,16 @@ export function useExerciseFabric(opts: {
         noteQuota: want,
         seed: scaleSeed,
         tonicMidis: tonicMidisSafe,
-        /** NEW */
+        /** degree filter */
         allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
         allowedMidis,
+        
       });
 
       return { phrase, melodyRhythm: fabric };
     }
 
+    // RANDOM (and other non-sequence/non-interval fallbacks)
     const fabric = buildTwoBarRhythm({
       bpm, den: ts.den, tsNum: ts.num,
       available,
@@ -256,6 +260,44 @@ export function useExerciseFabric(opts: {
       seed: rhythmSeed,
       bars: lengthBars,
     });
+
+    // Build an allowed MIDI whitelist for RANDOM mode that optionally drops the top-octave tonic(s)
+    const buildAllowedMidiWhitelist = (): number[] | null => {
+      if (!tonicMidisSafe?.length) return null;
+      const a4 = 440;
+      const loM = Math.round(hzToMidi(Math.min(lowHz as number, highHz as number), a4));
+      const hiM = Math.round(hzToMidi(Math.max(lowHz as number, highHz as number), a4));
+
+      const sortedT = Array.from(new Set(tonicMidisSafe.map((t) => Math.round(t)))).sort((a, b) => a - b);
+      const windows = sortedT.map((T) => [T, T + 12] as const);
+      const minStart = windows[0][0];
+      const maxEnd = windows[windows.length - 1][1];
+      const inAny = (m: number) => windows.some(([s, e]) => m >= s && m <= e);
+      const underOk = !!randomIncludeUnder ? (m: number) => m < minStart : () => false;
+      const overOk  = !!randomIncludeOver  ? (m: number) => m > maxEnd  : () => false;
+
+      let allowed: number[] = [];
+      for (let m = loM; m <= hiM; m++) {
+        const pc = ((m % 12) + 12) % 12;
+        if (!isInScale(pc, scale.tonicPc, scale.name as any)) continue;
+        if (inAny(m) || underOk(m) || overOk(m)) allowed.push(m);
+      }
+
+      // Treat [T, T+12) as half-open unless explicitly disabled
+      if (dropUpperWindowDegrees !== false) {
+        const upperTonics = new Set(sortedT.map((T) => T + 12));
+        allowed = allowed.filter((m) => !upperTonics.has(m));
+      }
+
+      // Respect legacy whitelist if present by intersecting
+      if (Array.isArray(allowedMidis) && allowedMidis.length) {
+        const allowSet = new Set(allowedMidis.map((x) => Math.round(x)));
+        allowed = allowed.filter((m) => allowSet.has(m));
+      }
+      return allowed.length ? allowed : null;
+    };
+
+    const allowedMidisForRandom = buildAllowedMidiWhitelist();
 
     const phrase = buildPhraseFromScaleWithRhythm({
       lowHz: lowHz as number,
@@ -270,9 +312,11 @@ export function useExerciseFabric(opts: {
       tonicMidis: tonicMidisSafe,
       includeUnder: !!randomIncludeUnder,
       includeOver: !!randomIncludeOver,
-      /** NEW */
+      /** degree filter */
       allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
-      allowedMidis,
+      // NEW: whitelist that enforces dropUpperWindowDegrees unless explicitly disabled
+      allowedMidis: allowedMidisForRandom ?? allowedMidis ?? null,
+      dropUpperWindowDegrees,
     });
 
     return { phrase, melodyRhythm: fabric };
@@ -281,12 +325,13 @@ export function useExerciseFabric(opts: {
     scale, rhythm, rhythmSeed, scaleSeed, lengthBars,
     tonicMidisSafe, allowedMidis, randomIncludeUnder, randomIncludeOver,
     contentAllowRests, contentRestProb, sessionConfig.allowedDegrees,
+    dropUpperWindowDegrees,
   ]);
 
   const phrase = generated.phrase;
 
-  // lyrics (unchanged)
-  const words: string[] | null = useMemo(() => {
+  // lyrics
+  const words: string[] | null = React.useMemo(() => {
     if (Array.isArray(customWords) && customWords.length) {
       if (phrase?.notes?.length) {
         const n = phrase.notes.length;
@@ -305,7 +350,7 @@ export function useExerciseFabric(opts: {
     return null;
   }, [customWords, phrase, lyricStrategy, scale]);
 
-  const keySig: string | null = useMemo(() => {
+  const keySig: string | null = React.useMemo(() => {
     if (!scale) return null;
     return keyNameFromTonicPc(scale.tonicPc, scale.name as any, false);
   }, [scale]);

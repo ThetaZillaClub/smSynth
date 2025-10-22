@@ -211,20 +211,40 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     cur = next;
   }
 
-  // If this phrase is exactly TWO notes, enforce unique degrees as a hard rule
+  // If this phrase is exactly TWO notes:
+  // - Normal case: prefer different degrees for clarity.
+  // - Special case (single allowed degree): keep the degree but prefer another OCTAVE.
   const noteSlots = rhythm.filter((r) => r.type === "note").length;
   if (noteSlots === 2 && notes.length === 2) {
+    const onlyOneDegree =
+      Array.isArray(allowedDegreeIndices) && allowedDegreeIndices.length === 1;
     const d0 = toDegreeIndex(notes[0].midi);
     const d1 = toDegreeIndex(notes[1].midi);
     if (d0 === d1) {
-      const alts = allowed.filter((m) => toDegreeIndex(m) !== d0);
-      if (alts.length) {
-        const target = notes[1].midi;
-        const best = alts.reduce(
-          (best, m) => (Math.abs(m - target) < Math.abs(best - target) ? m : best),
-          alts[0]
+      if (onlyOneDegree) {
+        // same degree allowed → try to pick same-degree, different OCTAVE for note 2
+        const sameDegOtherOct = allowed.filter(
+          (m) => toDegreeIndex(m) === d0 && Math.round(m) !== Math.round(notes[0].midi)
         );
-        notes[1].midi = best;
+        if (sameDegOtherOct.length) {
+          const target = notes[1].midi;
+          const best = sameDegOtherOct.reduce(
+            (best, m) => (Math.abs(m - target) < Math.abs(best - target) ? m : best),
+            sameDegOtherOct[0]
+          );
+          notes[1].midi = best;
+        }
+      } else {
+        // normal rule: force different degrees if possible
+        const alts = allowed.filter((m) => toDegreeIndex(m) !== d0);
+        if (alts.length) {
+          const target = notes[1].midi;
+          const best = alts.reduce(
+            (best, m) => (Math.abs(m - target) < Math.abs(best - target) ? m : best),
+            alts[0]
+          );
+          notes[1].midi = best;
+        }
       }
     }
   }

@@ -92,7 +92,7 @@ type LayoutProps = {
 
   /** tell Polar which relative pc (0..11) is currently expected */
   targetRelOverride?: number;
-
+  targetMidiOverride?: number;
   /** NEW: enable/disable rhythm indicator in footer */
   rhythmEnabled?: boolean;
 };
@@ -139,6 +139,7 @@ export default function GameLayout({
 
   centerProgress01,
   targetRelOverride,
+  targetMidiOverride,
   rhythmEnabled = true,
 }: LayoutProps) {
   const showPlay = !!phrase;
@@ -183,6 +184,7 @@ export default function GameLayout({
             analytics={analytics}
             centerProgress01={centerProgress01}
             targetRelOverride={targetRelOverride}
+            targetMidiOverride={targetMidiOverride}
           />
         </div>
 
