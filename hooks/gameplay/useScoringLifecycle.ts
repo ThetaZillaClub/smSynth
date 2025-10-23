@@ -1,3 +1,4 @@
+// hooks/gameplay/useScoringLifecycle.ts
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -46,65 +47,53 @@ export type TakeSnapshot = {
 
 type HandLike = { snapshotEvents: () => number[] };
 
-type ScoringLifecycleArgs = {
+export function useScoringLifecycle({
+  loopPhase,
+  pretestActive,
+  phrase,
+  rhythmEffective,
+  melodyRhythm,
+  bpm,
+  den,
+  leadInSec,
+  calibratedLatencyMs,
+  gestureLatencyMs,
+  exerciseLoops,
+  lessonSlug,
+  sessionId,
+  sessionScores,
+  scoreTake,
+  alignForScoring,
+  sampler,
+  hand,
+  haveRhythm,
+  timingFreeResponse = false,
+  freeCaptureSec,
+  freeMinHoldSec,
+}: {
   loopPhase: string;
   pretestActive: boolean;
-
   phrase: Phrase | null;
   rhythmEffective: RhythmEvent[] | null;
   melodyRhythm: RhythmEvent[] | null;
-
   bpm: number;
   den: number;
   leadInSec: number;
   calibratedLatencyMs: number | null;
   gestureLatencyMs: number;
-
   exerciseLoops: number | null | undefined;
-  lessonSlug: string | null | undefined;      // EXPECT "course/lesson"
+  lessonSlug: string | null | undefined;
   sessionId: string | null | undefined;
-
   sessionScores: TakeScore[];
   scoreTake: ScoreTakeFn;
-
   alignForScoring: AlignFn;
-
   sampler: { snapshot: () => PitchSample[] };
   hand: HandLike;
-
   haveRhythm: boolean;
-
   timingFreeResponse?: boolean;
   freeCaptureSec?: number;
   freeMinHoldSec?: number;
-};
-
-export function useScoringLifecycle(args: ScoringLifecycleArgs) {
-  const {
-    loopPhase,
-    pretestActive,
-    phrase,
-    rhythmEffective,
-    melodyRhythm,
-    bpm,
-    den,
-    leadInSec,
-    calibratedLatencyMs,
-    gestureLatencyMs,
-    exerciseLoops,
-    lessonSlug,
-    sessionId,
-    sessionScores,
-    scoreTake,
-    alignForScoring,
-    sampler,
-    hand,
-    haveRhythm,
-    timingFreeResponse = false,
-    freeCaptureSec,
-    freeMinHoldSec,
-  } = args;
-
+}) {
   const [takeSnapshots, setTakeSnapshots] = useState<TakeSnapshot[]>([]);
 
   const phraseForTakeRef = useRef<Phrase | null>(null);
@@ -120,11 +109,9 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     }
   }, [pretestActive, loopPhase, phrase, rhythmEffective, melodyRhythm]);
 
-  // ONE aggregate submit at session completion
   const postAggregate = async (score: TakeScore) => {
     if (!lessonSlug) return;
     try {
-      // NOTE: do NOT encode the whole slug; let the catch-all route see 2 segments.
       await fetch(`/api/lessons/${lessonSlug}/results`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -149,7 +136,6 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     }
   };
 
-  // Record → Rest: compute score, snapshot for analytics, maybe end-of-lesson aggregate submit
   const prevPhaseRef = useRef(loopPhase);
   useEffect(() => {
     const prev = prevPhaseRef.current;
@@ -193,8 +179,8 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
         minHoldSec: typeof freeMinHoldSec === "number" ? freeMinHoldSec : undefined,
       });
 
+      // snapshot the *evaluation* phrase we actually scored
       const phraseForSnapshots = ((score as any).__evalPhrase ?? usedPhrase)!;
-
       setTakeSnapshots((xs) => [
         ...xs,
         { phrase: phraseForSnapshots, rhythm: usedRhythm ?? null, melodyRhythm: melodyRhythmForTakeRef.current ?? null },
@@ -205,16 +191,14 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
           ? exerciseLoops
           : null;
 
-      const totalTakesNow = args.sessionScores.length + 1;
-
+      const totalTakesNow = sessionScores.length + 1;
       if (lessonSlug && loops != null && totalTakesNow >= loops && !sessionSubmittedRef.current) {
         sessionSubmittedRef.current = true;
-        const allScores = [...args.sessionScores, score];
+        const allScores = [...sessionScores, score];
         const aggScore = aggregateForSubmission(allScores);
         void postAggregate(aggScore);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     loopPhase,
     pretestActive,
@@ -228,6 +212,7 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     exerciseLoops,
     lessonSlug,
     sessionId,
+    sessionScores,
     scoreTake,
     alignForScoring,
     sampler,
@@ -236,7 +221,6 @@ export function useScoringLifecycle(args: ScoringLifecycleArgs) {
     timingFreeResponse,
     freeCaptureSec,
     freeMinHoldSec,
-    args.sessionScores.length,
   ]);
 
   return { takeSnapshots };

@@ -65,7 +65,11 @@ export function computePitchScore(
 
     // All frames (voiced or not) within the window
     const frames = samples.filter((s) => s.tSec >= start && s.tSec <= end);
-    const denomSec = Math.min(evalDur, frames.length * GLOBAL_DT); // cap at evalDur
+
+    // ❗ Use the window duration as the denominator so sparse frames
+    //    (or temporary deserts) don't zero out evaluation.
+    const denomSec = evalDur;
+
     if (denomSec <= 0) {
       perNote.push({
         idx: i,
@@ -121,9 +125,9 @@ export function computePitchScore(
     const finalRatio = Math.max(shapedRatio, landingCredit);
 
     // Accumulate totals
-    sumGoodBase += baseRatio * denomSec;
+    sumGoodBase  += baseRatio  * denomSec;
     sumGoodFinal += finalRatio * denomSec;
-    sumDur += denomSec;
+    sumDur       += denomSec;
 
     // Robust MAE over voiced frames only (truthful stability metric)
     const mae = centsAbsVoiced.length ? trimmedMean(centsAbsVoiced, TRIM_UPPER) : 120;
@@ -133,7 +137,7 @@ export function computePitchScore(
     perNote.push({
       idx: i,
       midi: Math.round(n.midi),
-      timeOnPitch: finalRatio * denomSec, // shaped+landing seconds
+      timeOnPitch: finalRatio * denomSec, // shaped+landing seconds, within the captured window
       dur: denomSec,
       ratio: finalRatio,
       centsMae: mae,

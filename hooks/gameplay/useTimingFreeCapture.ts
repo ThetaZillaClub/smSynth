@@ -23,7 +23,7 @@ export default function useTimingFreeCapture(opts: {
     liveHz,
     confidence,
     minCaptureSec,
-    perNoteMaxSec = 10,
+    perNoteMaxSec = 15,
     threshold = 0.5,
     phrase,
     tonicPc,

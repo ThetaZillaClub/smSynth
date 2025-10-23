@@ -35,32 +35,42 @@ const buildTimingFreePhrase = (src: Phrase, durSec: number): Phrase => {
   return { ...src, durationSec: durSec, notes: [{ midi, startSec: 0, durSec }] };
 };
 
+/**
+ * Build an evaluation phrase from captured runs while PRESERVING real gaps
+ * between runs. This is used ONLY in timing-free mode.
+ *
+ * We time-normalize so that the FIRST run begins at t=0, and keep each run’s
+ * true offset relative to that start. Phrase.durationSec spans from the first
+ * run’s start to the last run’s end (thus includes inter-run silence).
+ */
 const buildTimingFreeMultiPhrase = (
   src: Phrase,
   runs: Array<{ startSec: number; endSec: number }>
 ): Phrase => {
   const want = Math.max(1, src?.notes?.length ?? 1);
   const K = Math.min(runs.length, want);
-  let t = 0;
+  if (K === 0) return { ...src, durationSec: 0, notes: [] };
+
+  const firstStart = runs[0].startSec;
+
   const notes = Array.from({ length: K }, (_, i) => {
-    const durSec = Math.max(0, runs[i].endSec - runs[i].startSec);
+    const r = runs[i]!;
+    const startSec = Math.max(0, r.startSec - firstStart); // preserve inter-run gaps
+    const durSec = Math.max(0, r.endSec - r.startSec);
     const midi = src?.notes?.[i]?.midi ?? src?.notes?.[0]?.midi ?? 60;
-    const out = { midi, startSec: t, durSec };
-    t += durSec;
-    return out;
+    return { midi, startSec, durSec };
   });
-  const durationSec = notes.reduce((s, n) => s + n.durSec, 0);
+
+  const lastEnd = runs[K - 1]!.endSec;
+  const durationSec = Math.max(0, lastEnd - firstStart);
+
   return { ...src, durationSec, notes };
 };
 
 /**
- * Split voiced audio into sustained “runs” suitable for timing-free scoring.
- * Changes vs. previous behavior:
- *  - We can "reset" on a pause: if a gap >= resetOnPauseSec occurs, we drop everything
- *    before the *last* such gap.
- *  - Each run can be capped to a fixed duration (e.g., minHoldSec), so long holds
- *    do not inflate the score.
- *  - When we have enough runs, we pick the *earliest* K in time order (not the longest).
+ * Split voiced audio into sustained “runs” for timing-free scoring.
+ *  - Never resets on pauses (we keep earlier audio)
+ *  - Caps each run to `capPerRunSec` (keeps long holds from dominating)
  */
 const findSuccessfulRuns = (
   samples: PitchSample[],
@@ -71,10 +81,8 @@ const findSuccessfulRuns = (
     maxGapSec?: number;
     changeCents?: number;
     minChangeHoldSec?: number;
-    /** if a gap >= this, drop everything before the last such gap */
-    resetOnPauseSec?: number; // e.g., 0.35–0.50
-    /** hard cap per-note duration to be *scored* */
-    capPerRunSec?: number; // e.g., minHoldSec
+    resetOnPauseSec?: number;
+    capPerRunSec?: number;
   }
 ): Array<{ startSec: number; endSec: number }> => {
   const maxGapSec = opts?.maxGapSec ?? 0.12;
@@ -83,19 +91,17 @@ const findSuccessfulRuns = (
   const resetOnPauseSec = opts?.resetOnPauseSec ?? 0;
   const capPerRunSec = Math.max(0, opts?.capPerRunSec ?? 0);
 
-  // 0) Keep only confident voiced, sorted
+  // 0) confident voiced, sorted
   const voiced = samples
     .filter((s) => (s.hz ?? 0) > 0 && (s.conf ?? 0) >= confMin)
     .sort((a, b) => a.tSec - b.tSec);
   if (!voiced.length || wantNotes <= 0) return [];
 
-  // 0.5) "Clear on pause": drop everything before the *last* big gap
+  // 0.5) clear on last big pause (disabled when resetOnPauseSec === 0)
   if (resetOnPauseSec > 0) {
     let lastResetT: number | null = null;
     for (let i = 1; i < voiced.length; i++) {
-      if (voiced[i].tSec - voiced[i - 1].tSec >= resetOnPauseSec) {
-        lastResetT = voiced[i].tSec;
-      }
+      if (voiced[i].tSec - voiced[i - 1].tSec >= resetOnPauseSec) lastResetT = voiced[i].tSec;
     }
     if (lastResetT != null) {
       const cut = voiced.findIndex((s) => s.tSec >= lastResetT!);
@@ -104,7 +110,7 @@ const findSuccessfulRuns = (
   }
   if (!voiced.length) return [];
 
-  // 1) Split on natural gaps + sustained pitch change
+  // 1) segment by gaps + sustained pitch change
   type RawSeg = { startIdx: number; endIdx: number };
   const rawRuns: RawSeg[] = [];
   let segStart = 0;
@@ -140,27 +146,25 @@ const findSuccessfulRuns = (
   }
   rawRuns.push({ startIdx: segStart, endIdx: voiced.length - 1 });
 
-  type Seg = { startIdx: number; endIdx: number; startSec: number; endSec: number; dur: number };
+  type Seg = { startSec: number; endSec: number; dur: number };
   let segs: Seg[] = rawRuns.map(({ startIdx, endIdx }) => {
     const startSec = voiced[startIdx].tSec;
     const endSec = voiced[endIdx].tSec;
-    return { startIdx, endIdx, startSec, endSec, dur: Math.max(0, endSec - startSec) };
+    return { startSec, endSec, dur: Math.max(0, endSec - startSec) };
   });
 
-  // 2) Filter by minimum captured hold
+  // 2) enforce min hold and cap per-run
   segs = segs.filter((s) => s.dur >= Math.max(0, minHoldSec));
-
-  // 2.5) Cap each run to the captured window (so long holds don't inflate score)
   if (capPerRunSec > 0) {
     segs = segs
       .map((s) => {
-        const cappedEnd = Math.min(s.endSec, s.startSec + capPerRunSec);
-        return { ...s, endSec: cappedEnd, dur: Math.max(0, cappedEnd - s.startSec) };
+        const end = Math.min(s.endSec, s.startSec + capPerRunSec);
+        return { ...s, endSec: end, dur: Math.max(0, end - s.startSec) };
       })
       .filter((s) => s.dur >= Math.max(0, minHoldSec));
   }
 
-  // 3) If enough, take the earliest K in time order (not the longest)
+  // 3) earliest K runs
   if (segs.length >= wantNotes) {
     return segs
       .slice()
@@ -169,99 +173,24 @@ const findSuccessfulRuns = (
       .map(({ startSec, endSec }) => ({ startSec, endSec }));
   }
 
-  // 4) Not enough runs — try to split the *longest* one sensibly
+  // 4) simple split if only one run but want ≥2
   if (segs.length === 1 && wantNotes >= 2) {
-    // Find the longest original segment (pre-cap) to attempt a smart split
-    const longest = rawRuns
-      .map(({ startIdx, endIdx }) => {
-        const startSec = voiced[startIdx].tSec;
-        const endSec = voiced[endIdx].tSec;
-        return { startIdx, endIdx, startSec, endSec, dur: Math.max(0, endSec - startSec) };
-      })
-      .sort((a, b) => b.dur - a.dur)[0];
-
-    if (longest) {
-      const slice = voiced.slice(longest.startIdx, longest.endIdx + 1);
-      if (slice.length >= 4) {
-        // Pitch-based split: sustained deviation from first-half median
-        const midIdx = Math.floor(slice.length / 2);
-        const firstHalf = slice.slice(0, midIdx);
-        const m0 = median(firstHalf.map((s) => hzToMidi(s.hz!)));
-        const thr = changeCents / 100;
-
-        let devStart: number | null = null;
-        let splitT: number | null = null;
-
-        for (let i = midIdx; i < slice.length; i++) {
-          const dev = Math.abs(hzToMidi(slice[i].hz!) - m0);
-          if (dev >= thr) {
-            if (devStart == null) devStart = i;
-            const sustain = slice[i].tSec - slice[devStart].tSec;
-            if (sustain >= minChangeHoldSec) {
-              splitT = slice[devStart].tSec;
-              break;
-            }
-          } else {
-            devStart = null;
-          }
-        }
-
-        if (splitT != null) {
-          const a = { startSec: longest.startSec, endSec: splitT };
-          const b = { startSec: splitT, endSec: longest.endSec };
-          const okA = a.endSec - a.startSec >= Math.max(0.6 * minHoldSec, 0.2);
-          const okB = b.endSec - b.startSec >= Math.max(0.6 * minHoldSec, 0.2);
-          if (okA && okB) {
-            const capped = [a, b].map((r) => ({
-              startSec: r.startSec,
-              endSec: capPerRunSec > 0 ? Math.min(r.startSec + capPerRunSec, r.endSec) : r.endSec,
-            }));
-            return capped.slice(0, wantNotes);
-          }
-        }
-      }
-      // Equal-time split fallback
-      const midT = (longest.startSec + longest.endSec) / 2;
-      const a = { startSec: longest.startSec, endSec: midT };
-      const b = { startSec: midT, endSec: longest.endSec };
-      const fixed = [a, b]
-        .map((r) => ({
-          startSec: r.startSec,
-          endSec: capPerRunSec > 0 ? Math.min(r.startSec + capPerRunSec, r.endSec) : r.endSec,
-        }))
-        .filter((r) => r.endSec - r.startSec >= Math.max(0.6 * minHoldSec, 0.2));
-      if (fixed.length) return fixed.slice(0, wantNotes);
-    }
+    const s = segs[0];
+    const mid = (s.startSec + s.endSec) / 2;
+    const a = { startSec: s.startSec, endSec: Math.min(mid, s.startSec + (capPerRunSec || mid - s.startSec)) };
+    const b = { startSec: Math.max(a.endSec, mid), endSec: s.endSec };
+    const ok = (r: { startSec: number; endSec: number }) =>
+      r.endSec - r.startSec >= Math.max(0.6 * minHoldSec, 0.2);
+    const cands = [a, b].filter(ok);
+    if (cands.length) return cands.slice(0, wantNotes);
   }
 
-  // 5) Last-ditch: split overall voiced span equally
-  if (!segs.length && wantNotes >= 2 && voiced.length >= 2) {
-    const t0 = voiced[0].tSec;
-    const t1 = voiced[voiced.length - 1].tSec;
-    const mid = (t0 + t1) / 2;
-    const a0 = { startSec: t0, endSec: Math.min(t1, t0 + Math.max(minHoldSec, 0.2)) };
-    const b0 = { startSec: Math.max(a0.endSec, mid), endSec: t1 };
-    const capped = [a0, b0]
-      .map((r) => ({
-        startSec: r.startSec,
-        endSec: capPerRunSec > 0 ? Math.min(r.startSec + capPerRunSec, r.endSec) : r.endSec,
-      }))
-      .filter((r) => r.endSec - r.startSec >= Math.max(0.6 * minHoldSec, 0.2));
-    return capped.slice(0, wantNotes);
-  }
-
-  // 6) Return whatever we have (time order)
+  // 5) return whatever’s valid in time order
   return segs
     .slice()
     .sort((a, b) => a.startSec - b.startSec)
     .map(({ startSec, endSec }) => ({ startSec, endSec }));
 };
-
-function median(xs: number[]): number {
-  if (!xs.length) return 0;
-  const ys = xs.slice().sort((a, b) => a - b);
-  return ys[Math.floor(ys.length / 2)];
-}
 
 // ───────────────────────────────── hook ──────────────────────────────────────
 export default function useTakeScoring() {
@@ -287,6 +216,9 @@ export default function useTakeScoring() {
     align: AlignFn;
     phraseLengthOverrideSec?: number;
     optionsOverride?: Partial<ScoreOptions>;
+    /** When true, force timing-free path from session config (e.g., Intervals course). */
+    timingFreeResponse?: boolean;
+    /** Optional per-note capture requirement (seconds). Also implies timing-free if set. */
     minHoldSec?: number;
   }) => {
     const defaults: ScoreOptions = {
@@ -298,9 +230,17 @@ export default function useTakeScoring() {
     };
     const opts: ScoreOptions = { ...defaults, ...(args.optionsOverride ?? {}) };
 
+    // Source of truth: session-config trigger (Intervals sets timingFreeResponse: true)
+    const sessionSaysTimingFree = !!args.timingFreeResponse;
+    const timingFreeHint =
+      typeof args.minHoldSec === "number" ||
+      typeof args.phraseLengthOverrideSec === "number";
+
     const isTimingFree =
-      ((args.melodyOnsetsSec?.length ?? 0) <= 1) &&
-      (!args.rhythmOnsetsSec || args.rhythmOnsetsSec.length === 0);
+      sessionSaysTimingFree ||
+      timingFreeHint ||
+      (((args.melodyOnsetsSec?.length ?? 0) <= 1) &&
+        (!args.rhythmOnsetsSec || args.rhythmOnsetsSec.length === 0));
 
     const rawSamples = args.snapshotSamples();
 
@@ -315,33 +255,44 @@ export default function useTakeScoring() {
       const minHold = Math.max(0.1, args.minHoldSec ?? 1);
       const wantNotes = Math.max(1, args.phrase?.notes?.length ?? 1);
 
-      // Only score the captured hold window, and clear on pauses ≥ 350 ms
-      const runs = findSuccessfulRuns(rawSamples, opts.confMin, minHold, wantNotes, {
-        resetOnPauseSec: 0.35,  // tweak 0.3–0.5 to taste
-        capPerRunSec: minHold,  // score exactly the captured hold
-      });
+      // More forgiving run detection; never reset, generous caps
+      const runs = findSuccessfulRuns(
+        rawSamples,
+        Math.min(opts.confMin, 0.5),
+        minHold,
+        wantNotes,
+        {
+          maxGapSec: 0.20,
+          changeCents: 35,
+          minChangeHoldSec: 0.04,
+          resetOnPauseSec: 0,
+          capPerRunSec: 15,
+        }
+      );
 
       if (runs.length > 0) {
+        // Build eval phrase from actual captured windows, preserving gaps (timing-free only)
         phraseForEval = buildTimingFreeMultiPhrase(args.phrase, runs);
         evalPhraseLenSec = phraseForEval.durationSec;
 
         const firstStart = runs[0].startSec;
-        // Shift both streams so that the first scored run starts at t=0 post-align
+        // Anchor so first run aligns to t=0 post-align, regardless of when user started
         extraOffsetSec = firstStart - args.leadInSec - args.pitchLagSec;
 
-        // Beats for alignment: anchor each run start (gesture stream follows same anchor)
-        beatsRawForAlign = runs.map((r) => r.startSec);
+        // Use *eval phrase* onsets (== run starts, gap-preserved) for alignment/segmentation
+        beatsRawForAlign = phraseForEval.notes.map((n) => n.startSec);
 
-        // For timing-free, keep gesture aligned with pitch lag so both streams move together
+        // Glue gesture timing to pitch timing for timing-free mode
         gestureLagForAlign = args.pitchLagSec;
       } else {
-        // Fallback: single short window equal to minHold
+        // Nothing confidently captured: score a single short window so we don’t 0% by grid timing
         const fallbackLen = Math.max(0.5, minHold);
         phraseForEval = buildTimingFreePhrase(args.phrase, fallbackLen);
         evalPhraseLenSec = fallbackLen;
         beatsRawForAlign = [0];
       }
     } else {
+      // Regular timed flow — unchanged
       beatsRawForAlign = args.snapshotBeats();
     }
 
@@ -350,9 +301,10 @@ export default function useTakeScoring() {
       beatsRawForAlign,
       args.leadInSec,
       {
-        keepPreRollSec: isTimingFree ? 0 : 0.5,
+        // small pre-roll keeps us safe from tiny offset jitter when singing late
+        keepPreRollSec: isTimingFree ? 0.3 : 0.5,
         phraseLengthSec: evalPhraseLenSec,
-        tailGuardSec: 0.25,
+        tailGuardSec: 0.35,
         pitchLagSec: args.pitchLagSec,
         gestureLagSec: gestureLagForAlign,
         extraOffsetSec,
@@ -361,13 +313,44 @@ export default function useTakeScoring() {
       }
     );
 
+    // For timing-free, mask to the union of eval windows — with a small edge margin and tolerant fallback.
+    const samplesForScoring: PitchSample[] = (() => {
+      if (!isTimingFree) return samples;
+
+      const marginSec = 0.12; // ±120ms guard against alignment jitter
+      const windows = (phraseForEval?.notes ?? []).map(n => ([
+        Math.max(0, n.startSec - marginSec),
+        n.startSec + n.durSec + marginSec
+      ] as const));
+      const inAny = (t: number) => windows.some(([a, b]) => t >= a && t <= b);
+
+      // Strict → relaxed → voiced fallback
+      const strict = samples.filter(
+        (s) => inAny(s.tSec) && (s.hz ?? 0) > 0 && (s.conf ?? 0) >= opts.confMin
+      );
+      if (strict.length) return strict;
+
+      const relaxedConf = Math.min(0.35, opts.confMin);
+      const relaxed = samples.filter(
+        (s) => inAny(s.tSec) && (s.hz ?? 0) > 0 && (s.conf ?? 0) >= relaxedConf
+      );
+      if (relaxed.length) return relaxed;
+
+      return samples.filter((s) => inAny(s.tSec) && (s.hz ?? 0) > 0);
+    })();
+
+    const evalOnsets = phraseForEval.notes.map((n) => n.startSec);
+
     const score = computeTakeScore({
       phrase: phraseForEval,
       bpm: args.bpm,
       den: args.den,
-      samples,
+      samples: samplesForScoring,
+      // Use aligned beats as segmentation (equals evalOnsets)
       gestureEventsSec: beats,
-      melodyOnsetsSec: isTimingFree ? [0] : args.melodyOnsetsSec,
+      // And also tell the scorer the same onsets for melody; no musical grid
+      melodyOnsetsSec: isTimingFree ? evalOnsets : args.melodyOnsetsSec,
+      // No rhythm-line in timing-free
       rhythmLineOnsetsSec: isTimingFree ? undefined : args.rhythmOnsetsSec ?? undefined,
       options: {
         confMin: opts.confMin,
@@ -378,6 +361,7 @@ export default function useTakeScoring() {
       },
     });
 
+    // Store the actual eval phrase for analytics
     (score as any).__evalPhrase = phraseForEval;
 
     setLastScore(score);
@@ -385,10 +369,5 @@ export default function useTakeScoring() {
     return score;
   }, []);
 
-  return {
-    lastScore,
-    sessionScores,
-    scoreTake,
-    resetScores,
-  };
+  return { lastScore, sessionScores, scoreTake, resetScores };
 }

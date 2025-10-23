@@ -7,9 +7,8 @@ import { softCreditCosine } from "../helpers";
 
 /**
  * Interval accuracy (binary) with soft measurement:
- * - Per note, estimate a robust pitch *center* by taking frames that are "on pitch"
- *   (credit >= ON_THRESH using the same soft cosine as pitch scoring). If there
- *   aren't enough on-pitch frames, use a top-credit fallback slice.
+ * - Per note, estimate a robust pitch *center* using a credit-weighted median
+ *   over all frames in the eval window (no hard on/off filtering).
  * - Interval = difference of those per-note centers (in semitones).
  * - Direction-agnostic interval class (0..12).
  * - Binary credit:
@@ -27,22 +26,21 @@ export function computeIntervalScore(
   }
 
   // Match pitch scoring trims/feel
-  const ONSET_GRACE_MS = 100;   // match useTakeScoring default
-  const TAIL_GRACE_MS  = 80;
-  const ON_THRESH      = 0.85;  // "on" same as pitch landing threshold
-  const ZERO_CENTS     = 240;   // soft cosine tail
-  const tolSemis       = Math.abs(centsOk) / 100;
+  const ONSET_GRACE_MS = 100; // match useTakeScoring default
+  const TAIL_GRACE_MS = 80;
+  const ZERO_CENTS = 240; // soft cosine tail
+  const tolSemis = Math.abs(centsOk) / 100;
 
   // Pre-sort (they should already be time ordered post-align)
   const voiced = samplesVoiced.slice().sort((a, b) => a.tSec - b.tSec);
 
-  // Robust per-note centers
+  // Robust per-note centers via weighted median over all frames in-window
   const centersMidi: number[] = notes.map((n) => {
     const start = n.startSec + ONSET_GRACE_MS / 1000;
     const rawEnd = n.startSec + n.durSec;
     const end = Math.max(start, rawEnd - TAIL_GRACE_MS / 1000);
     const targetHz = midiToHz(n.midi);
-    return centerMidiInRange(voiced, start, end, targetHz, centsOk, ON_THRESH, ZERO_CENTS);
+    return centerMidiInRange(voiced, start, end, targetHz, centsOk, ZERO_CENTS);
   });
 
   // Per-class aggregation (0..12)
@@ -68,7 +66,6 @@ export function computeIntervalScore(
     const gotAbsInt = Math.abs(Math.round(gotFloat));
 
     // Binary credit:
-    // exact class match after rounding OR within tolerance in semitones
     const credit =
       gotAbsInt === expAbsInt || Math.abs(gotAbsFloat - expAbsFloat) <= tolSemis ? 1 : 0;
 
@@ -108,12 +105,11 @@ function makeEmptyClasses() {
 }
 
 /**
- * Robust per-note center:
- * 1) Filter frames to [t0, t1]
- * 2) Score each frame vs the note target (soft cosine)
- * 3) Prefer frames with credit >= onThresh.
- *    If too few, take the top-credit slice (max(3, 40%) of frames).
- * 4) Return the median MIDI of the selected frames.
+ * Robust per-note center without hard filtering:
+ * 1) Filter frames to [t0, t1], voiced only.
+ * 2) Score each frame vs the note target (soft cosine).
+ * 3) Return the credit-weighted median MIDI across *all* frames.
+ *    If all credits are ~0, fall back to the simple median.
  */
 function centerMidiInRange(
   samples: PitchSample[],
@@ -121,7 +117,6 @@ function centerMidiInRange(
   t1: number,
   targetHz: number,
   centsOk: number,
-  onThresh: number,
   zeroCents: number
 ): number {
   if (!(t1 > t0)) return NaN;
@@ -131,23 +126,24 @@ function centerMidiInRange(
   const scored = frames.map((s) => {
     const errCents = Math.abs(centsBetweenHz(s.hz!, targetHz));
     const credit = softCreditCosine(errCents, centsOk, zeroCents);
-    return { midi: hzToMidi(s.hz!), credit };
+    return { midi: hzToMidi(s.hz!), w: Math.max(0, credit) };
   });
 
-  const on = scored.filter((z) => z.credit >= onThresh);
-  let xs: number[];
-  if (on.length >= 3) {
-    xs = on.map((z) => z.midi);
-  } else {
-    // Fallback: take the top-credit slice (avoid scoops/releases)
-    const k = Math.max(3, Math.ceil(scored.length * 0.4));
-    xs = scored
-      .slice()
-      .sort((a, b) => b.credit - a.credit)
-      .slice(0, k)
-      .map((z) => z.midi);
+  const totalW = scored.reduce((a, z) => a + z.w, 0);
+
+  // Fallback if everything got weight ~0
+  if (totalW <= 1e-6) {
+    const mids = scored.map((z) => z.midi).sort((a, b) => a - b);
+    return mids[Math.floor(mids.length / 2)];
   }
 
-  xs.sort((a, b) => a - b);
-  return xs[Math.floor(xs.length / 2)];
+  // Weighted median
+  const sorted = scored.slice().sort((a, b) => a.midi - b.midi);
+  let acc = 0;
+  const half = totalW / 2;
+  for (const z of sorted) {
+    acc += z.w;
+    if (acc >= half) return z.midi;
+  }
+  return sorted[sorted.length - 1].midi;
 }

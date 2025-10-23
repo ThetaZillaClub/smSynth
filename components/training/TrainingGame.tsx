@@ -32,6 +32,7 @@ import { useScoringLifecycle } from "@/hooks/gameplay/useScoringLifecycle";
 // timing-free capture (per note)
 import useTimingFreeCapture from "@/hooks/gameplay/useTimingFreeCapture";
 import useContentLeadInCue from "@/hooks/gameplay/useContentLeadInCue";
+import usePolarTargetOverride from "@/hooks/gameplay/usePolarTargetOverride";
 import CourseNavGate from "./layout/stage/side-panel/CourseNavGate";
 
 type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean };
@@ -382,7 +383,7 @@ export default function TrainingGame({
     if (sessionId && sessionId !== sessionBaseIdRef.current) {
       sessionBaseIdRef.current = sessionId;
     }
-  }, [sessionId]);
+  }, [sessionId, genUUID]);
 
   // Namespaced lesson slug "course/lesson"
   const namespacedLessonSlug = useMemo(() => {
@@ -506,54 +507,24 @@ export default function TrainingGame({
     liveHz,
     confidence,
     minCaptureSec: minCaptureSecEff,
-    perNoteMaxSec: perNoteMaxSec || 5,
+    perNoteMaxSec: perNoteMaxSec || 10,
     threshold: CONF_THRESHOLD,
     phrase,
     tonicPc: sessionEff.scale?.tonicPc ?? 0,
     endRecordEarly: loop.endRecordEarly,
   });
 
-  // Lead-in: current note for Polar center text
-   const [leadInRel, setLeadInRel] = useState<number | null>(null);
-   const [leadInMidi, setLeadInMidi] = useState<number | null>(null);
+  // Polar target override (lead-in note OR timing-free capture target)
+  const { targetRelOverride, targetMidiOverride } = usePolarTargetOverride({
+    pretestActive,
+    loopPhase: loop.loopPhase,
+    phrase,
+    anchorMs: loop.anchorMs,
+    tonicPc: sessionEff.scale?.tonicPc ?? 0,
+    captureTargetRel: targetRel,
+    captureTargetMidi: targetMidi,
+  });
 
-  useEffect(() => {
-    if (pretestActive || loop.loopPhase !== "lead-in" || !phrase || loop.anchorMs == null) {
-      setLeadInRel(null);
-      setLeadInMidi(null);
-      return;
-    }
-    let raf = 0;
-    const tonicPcVal = ((sessionEff.scale?.tonicPc ?? 0) % 12 + 12) % 12;
-    const tick = () => {
-      const tSec = (performance.now() - (loop.anchorMs as number)) / 1000;
-      let rel: number | null = null;
-      let curMidi: number | null = null;
-      for (const n of phrase.notes) {
-        const s = n.startSec, e = s + n.durSec;
-        if (tSec >= s && tSec < e) {
-          const pcAbs = ((Math.round(n.midi) % 12) + 12) % 12;
-          rel = ((pcAbs - tonicPcVal) + 12) % 12;
-          curMidi = Math.round(n.midi);
-          break;
-        }
-      }
-      setLeadInRel(rel);
-      setLeadInMidi(curMidi);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [pretestActive, loop.loopPhase, phrase, loop.anchorMs, sessionEff.scale?.tonicPc]);
-
-  const targetRelForPolar =
-    loop.loopPhase === "lead-in"
-      ? (typeof leadInRel === "number" ? leadInRel : undefined)
-      : (typeof targetRel === "number" ? targetRel : undefined);
-  const targetMidiForPolar =
-    loop.loopPhase === "lead-in"
-      ? (typeof leadInMidi === "number" ? leadInMidi : undefined)
-      : (typeof targetMidi === "number" ? targetMidi : undefined);
   // Analytics sync guard
   const takesSynced = sessionScores.length === takeSnapshots.length;
   const sessionComplete =
@@ -625,8 +596,8 @@ export default function TrainingGame({
         />
       }
       centerProgress01={centerProgress01}
-      targetRelOverride={targetRelForPolar}
-      targetMidiOverride={targetMidiForPolar}
+      targetRelOverride={targetRelOverride}
+      targetMidiOverride={targetMidiOverride}
       // NEW: tell footer whether indicator should be enabled at all
       rhythmEnabled={rhythmIndicatorEnabled}
     />
