@@ -29,7 +29,7 @@ export default function CollapseToggleRow({ collapsed, onClick }: Props) {
         <ChevronRightIcon />
       </div>
       {!collapsed && (
-        <div className="flex-1 flex items-center text-base font-medium">
+        <div className="flex-1 flex items-center text-base px-2 font-medium">
           Collapse
         </div>
       )}
