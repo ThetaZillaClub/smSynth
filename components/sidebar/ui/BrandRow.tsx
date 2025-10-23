@@ -16,13 +16,14 @@ export default function BrandRow({
   goHome: () => void;
 }) {
   const baseRow = [
-    'flex items-stretch w-full select-none transition',
-    'hover:bg-[#e8e8e8] active:bg-[#e0e0e0]',
+    'relative flex items-stretch w-full select-none transition',
     'text-[#0f0f0f]',
     'py-3',
+    'focus-visible:outline-none' // remove black focus stroke
   ].join(' ');
+
   const col1 = 'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
-  const col2 = 'flex-1 flex items-center px-3 text-base font-medium';
+  const col2 = 'flex-1 flex items-center text-base font-medium';
 
   return (
     <Link
@@ -36,12 +37,9 @@ export default function BrandRow({
         }
       }}
     >
-      {/* Make the brand mark the largest icon in the rail. */}
       <div className={col1}>
         <Logo
           style={{
-            // Brand icon intentionally larger than 32px nav icons.
-            // Override via :root { --brand-icon: 52px; } if you want it even bigger.
             width: 'var(--brand-icon, 48px)',
             height: 'var(--brand-icon, 48px)',
             display: 'block',
