@@ -28,8 +28,8 @@ export default function NavButton({ active, onClick, icon, label, collapsed, loc
   // - active (route matches): gradient + subtle shadow
   // - idle w/ hover: solid mid tone (#f4f4f4), no :active styling
   const stateRow = active
-    ? 'bg-gradient-to-b from-[#fafafa] to-[#f8f8f8] shadow-sm'
-    : (locked ? '' : 'hover:bg-[#f4f4f4] hover:shadow-sm');
+    ? 'bg-gradient-to-b from-[#f8f8f8] to-[#f7f7f7] shadow-sm'
+    : (locked ? '' : 'hover:bg-[#f5f5f5] hover:shadow-sm');
 
   const cls = [
     baseRow,

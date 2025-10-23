@@ -20,7 +20,7 @@ export default function CollapseToggleRow({ collapsed, onClick }: Props) {
         'focus-visible:outline-none',
         'transition-colors duration-150 ease-out',
         // hover only; no :active styling to avoid flash
-        'hover:bg-[#f4f4f4] hover:shadow-sm',
+        'hover:bg-[#f5f5f5] hover:shadow-sm',
       ].join(' ')}
       title="Collapse"
       aria-label="Collapse sidebar"

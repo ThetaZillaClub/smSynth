@@ -29,11 +29,11 @@ export default function AvatarSettingsButton({
 
   const col1 =
     'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
-  const col2 = 'flex-1 flex items-center px-3 text-base font-medium';
+  const col2 = 'flex-1 flex items-center text-base font-medium';
 
   const stateRow = active
-    ? 'bg-gradient-to-b from-[#fafafa] to-[#f8f8f8] shadow-sm'
-    : 'hover:bg-[#f4f4f4] hover:shadow-sm'; // no :active
+    ? 'bg-gradient-to-b from-[#f8f8f8] to-[#f7f7f7] shadow-sm'
+    : 'hover:bg-[#f5f5f5] hover:shadow-sm'; // no :active
 
   const cls = [baseRow, stateRow].join(' ');
 
