@@ -34,10 +34,10 @@ export default function StatsBento() {
           </div>
 
           {/* Row group B */}
-          <div className="sm:col-span-3 row-span-6">
+          <div className="sm:col-span-3 row-span-5">
             <CoursesCard />
           </div>
-          <div className="sm:col-span-5 row-span-6">
+          <div className="sm:col-span-5 row-span-5">
             <RadialsTabsCard />
           </div>
         </div>

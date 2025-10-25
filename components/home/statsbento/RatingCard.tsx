@@ -5,6 +5,7 @@ import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureSessionReady } from '@/lib/client-cache';
 import { useHomeBootstrap } from '../HomeBootstrap';
+import { PR_COLORS } from '@/utils/stage';
 
 type RatingEventRow = {
   pool: string | null;
@@ -28,7 +29,6 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
         setLoading(true); setErr(null);
         await ensureSessionReady(supabase, 2000);
 
-        // Pull recent events and compute latest-per-pool
         const evQ = await supabase
           .from('rating_events')
           .select('pool, period_end, rating_after, rating_before')
@@ -43,7 +43,7 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
           return;
         }
 
-        // Latest event per pool (rows are desc by period_end)
+        // Latest per pool
         const latestByPool = new Map<string, { after: number; before: number }>();
         for (const r of rows) {
           const p = String(r.pool ?? '');
@@ -59,7 +59,7 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
           return;
         }
 
-        // Pick the pool with the highest current rating (rating_after)
+        // Pick pool with highest current rating
         let bestAfter = -Infinity;
         let bestBefore = 0;
         for (const [, v] of latestByPool.entries()) {
@@ -92,20 +92,33 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
           ? `+${rating.delta.toFixed(1)}`
           : `${rating.delta.toFixed(1)}`;
 
+  // Delta colors
+  const DELTA_RED = '#dc2626';
+  const DELTA_NEUTRAL = '#6b7280';
+  const deltaColor =
+    rating == null
+      ? DELTA_NEUTRAL
+      : rating.delta > 0
+        ? PR_COLORS.noteFill
+        : rating.delta < 0
+          ? DELTA_RED
+          : DELTA_NEUTRAL;
+
   const pad = compact ? 'p-4' : 'p-6';
   const titleCls = compact ? 'text-sm font-semibold' : 'text-xl md:text-2xl font-semibold';
   const valueCls = compact ? 'text-2xl font-semibold tracking-tight' : 'text-4xl font-semibold tracking-tight';
+  // ↓ slightly smaller than before
+  const deltaCls = compact ? 'text-lg font-semibold tracking-tight' : 'text-xl font-semibold tracking-tight';
   const bodyH = compact ? 'h-[48%]' : 'h-[64%]';
 
   return (
     <div className={`h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] ${pad} shadow-sm`}>
+      {/* Row 1: title */}
       <div className="flex items-baseline justify-between gap-3">
         <h3 className={`${titleCls} text-[#0f0f0f]`}>Rating</h3>
-        {!loading && rating && (
-          <div className={`text-[#0f0f0f]/80 tabular-nums ${compact ? 'text-xs' : 'text-sm md:text-base'}`}>{deltaText}</div>
-        )}
       </div>
 
+      {/* Row 2: rating + smaller colored delta (baseline-aligned) */}
       {loading ? (
         <div className={`${bodyH} mt-2 animate-pulse rounded-xl ${compact ? 'bg-[#efefef]' : 'bg-[#e8e8e8]'}`} />
       ) : !rating ? (
@@ -114,10 +127,21 @@ export default function RatingCard({ compact = false }: { compact?: boolean }) {
         </div>
       ) : (
         <div className={`${bodyH} mt-1 flex items-center`}>
-          <div className={`${valueCls}`}>{rating.value}</div>
+          <div className="flex items-baseline gap-3">
+            <div className={`${valueCls} tabular-nums leading-none`}>{rating.value}</div>
+            <div
+              className={`${deltaCls} tabular-nums leading-none`}
+              style={{ color: deltaColor }}
+              aria-label={`Change ${deltaText}`}
+              title={`Change ${deltaText}`}
+            >
+              {deltaText}
+            </div>
+          </div>
         </div>
       )}
 
+      {/* Row 3: error */}
       {err ? <div className={`${compact ? 'mt-1 text-[11px]' : 'mt-3 text-sm'} text-[#dc2626]`}>{err}</div> : null}
     </div>
   );

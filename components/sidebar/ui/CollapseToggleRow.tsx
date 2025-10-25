@@ -21,6 +21,7 @@ export default function CollapseToggleRow({ collapsed, onClick }: Props) {
     'rounded-xl',
     'text-[#0f0f0f]',
     'py-3',
+    // no rail here → no offset
     'transition-colors duration-150 ease-out',
     'hover:bg-[#f4f4f4] hover:shadow-sm',
   ].join(' ');

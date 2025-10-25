@@ -7,9 +7,10 @@ import { COURSES } from '@/lib/courses/registry';
 import useLessonBests from '@/hooks/progress/useLessonBests';
 import { letterFromPercent } from '@/utils/scoring/grade';
 import { PR_COLORS } from '@/utils/stage';
+import ScrollArea from '@/components/ui/scrollbar';
 
-const GRAY_IDLE = '#d1d5db';     // dot when nothing started
-const GRAY_PROGRESS = '#6b7280'; // dot when in progress (gray-500)
+const GRAY_IDLE = '#d1d5db';     // dot when nothing started (0%)
+const BLUE_PROGRESS = '#84b3f6'; // pretty blue for any progress (0% < pct < 100%)
 
 function isPassed(pct: number) {
   const l = letterFromPercent(pct);
@@ -17,7 +18,6 @@ function isPassed(pct: number) {
 }
 function isMastered(pct: number) {
   const l = letterFromPercent(pct);
-  // A+ and A = mastery; A- is not
   return ['A+', 'A'].includes(l);
 }
 
@@ -44,7 +44,6 @@ export default function CoursesCard() {
   const router = useRouter();
   const { loading, error, bests } = useLessonBests();
 
-  // Strongly-typed view of bests to avoid any
   const bestsMap: Record<string, number> = React.useMemo(
     () => (bests ?? {}) as Record<string, number>,
     [bests]
@@ -63,7 +62,6 @@ export default function CoursesCard() {
 
     let started = 0, completed = 0, mastered = 0;
     for (const ls of lessons) {
-      // Prefer namespaced key; fall back to plain slug only if unique
       const namespaced = `${courseSlug}/${ls}`;
       const best =
         bestsMap[namespaced] ??
@@ -75,16 +73,16 @@ export default function CoursesCard() {
         if (isMastered(best)) mastered += 1;
       }
     }
-    const pct = Math.round((completed / total) * 100);
+    const pct = total ? Math.round((completed / total) * 100) : 0;
     return { total, started, completed, mastered, pct };
   }, [bestsMap, lessonsByCourse]);
 
-  /** Neutral, fixed-width progress tag (consistent size at 0%–100%) */
+  /** Fixed-width progress tag with colored dot (green=100, blue=progress, gray=idle) */
   const ProgressTag = ({ p }: { p: Progress }) => {
     const dotColor =
-      p.mastered > 0 ? PR_COLORS.noteFill :
-      p.started  > 0 ? GRAY_PROGRESS :
-                       GRAY_IDLE;
+      p.pct === 100 ? PR_COLORS.noteFill :
+      p.pct > 0     ? BLUE_PROGRESS :
+                      GRAY_IDLE;
     const label = `${p.pct}%`;
     return (
       <span
@@ -104,12 +102,12 @@ export default function CoursesCard() {
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-2xl font-semibold tracking-tight text-[#0f0f0f]">Courses</h3>
       </div>
 
       {loading ? (
-        <div className="mt-2 flex-1 min-h-0">
+        <div className="mt-6 flex-1 min-h-0">
           <div className="space-y-2">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="h-14 rounded-xl bg-[#e8e8e8] animate-pulse" />
@@ -121,46 +119,55 @@ export default function CoursesCard() {
           No courses available.
         </div>
       ) : (
-        <div className="mt-2 flex-1 min-h-0">
-          <ul role="list" aria-label="Course progress" className="h-full overflow-auto">
-            <div className="space-y-2">
-              {COURSES.map((c) => {
-                const p = progressFor(c.slug);
-                const suffix =
-                  p.mastered > 0 ? `${p.mastered} mastered`
-                  : p.started > p.completed ? `${p.started - p.completed} in progress`
-                  : '';
-                const percentLabel = `${p.pct}%`;
+        <div className="mt-2 flex-1 min-h-0 relative">
+          {/* Right-edge aligned scrollbar; only appears if needed */}
+          <ScrollArea
+            className="h-full -mr-6 pr-6"
+            thumbColor="#cccccc"           // keeping your tweak
+            thumbHoverColor="#fcfcfc"
+            trackColor="rgba(15,15,15,0.08)"
+            darkTrackColor="rgba(255,255,255,0.18)"
+            thickness={8}
+            radius={9999}
+          >
+            {/* Do NOT force full height here; let content size itself so the last item isn't clipped */}
+            <ul role="list" aria-label="Course progress">
+              <div className="space-y-2 pb-2">
+                {COURSES.map((c) => {
+                  const p = progressFor(c.slug);
+                  const percentLabel = `${p.pct}%`;
 
-                return (
-                  <li key={c.slug} role="listitem">
-                    <button
-                      type="button"
-                      onClick={() => router.push(`/courses/${c.slug}`)}
-                      className="relative w-full text-left rounded-xl border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]
-                                 px-4 py-3 pr-28 transition shadow-sm
-                                 hover:shadow-md hover:border-[#dcdcdc]
-                                 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]"
-                      style={{ borderColor: '#e5e7eb' }}
-                      title={`${c.title} — ${p.completed}/${p.total} completed (${percentLabel})`}
-                      aria-label={`${c.title}, ${p.completed} of ${p.total} completed, ${percentLabel}`}
-                    >
-                      <div className="absolute top-2 right-4">
-                        <ProgressTag p={p} />
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-[#0f0f0f] truncate">{c.title}</div>
-                        <div className="text-xs text-[#0f0f0f]/65">
-                          {p.completed}/{p.total} completed{suffix ? ` • ${suffix}` : ''}
+                  return (
+                    <li key={c.slug} role="listitem">
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/courses/${c.slug}`)}
+                        className="relative w-full text-left rounded-xl border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]
+                                   px-4 py-3 pr-28 transition shadow-sm
+                                   hover:shadow-md hover:border-[#dcdcdc]
+                                   focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]"
+                        style={{ borderColor: '#e5e7eb' }}
+                        title={`${c.title} — ${p.completed}/${p.total} completed (${percentLabel})`}
+                        aria-label={`${c.title}, ${p.completed} of ${p.total} completed, ${percentLabel}`}
+                      >
+                        <div className="absolute top-2 right-4">
+                          <ProgressTag p={p} />
                         </div>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </div>
-          </ul>
+
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-[#0f0f0f] truncate">{c.title}</div>
+                          <div className="text-xs text-[#0f0f0f]/65">
+                            {p.completed}/{p.total} completed
+                            {p.mastered > 0 ? ` • ${p.mastered} mastered` : ''}
+                          </div>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </div>
+            </ul>
+          </ScrollArea>
         </div>
       )}
 

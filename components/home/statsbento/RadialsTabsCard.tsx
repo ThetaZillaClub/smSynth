@@ -68,7 +68,7 @@ export default function RadialsTabsCard() {
   return (
     <div className="relative h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
       {/* Header aligned like Session Performance, with segmented tabs */}
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex items-baseline justify-between gap-3 mb-2">
         <h3 className="text-2xl font-semibold text-[#0f0f0f]">Analytics</h3>
         <div className="inline-flex items-center">
           <SegBtn first on={isPitch} onClick={() => setActive('pitch')}>Pitch</SegBtn>
@@ -77,7 +77,7 @@ export default function RadialsTabsCard() {
       </div>
 
       {/* Body fills remaining space; crossfading overlay */}
-      <div className="mt-2 flex-1 min-h-0 relative overflow-hidden">
+      <div className="mt-2 flex-1 min-h-0 relative overflow-hidden mb-8">
         <div
           id="panel-pitch"
           className={[

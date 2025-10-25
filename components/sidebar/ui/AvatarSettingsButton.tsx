@@ -22,14 +22,14 @@ export default function AvatarSettingsButton({
   // Outer wrapper: provides padding so the highlight box doesn't touch edges
   const outer = [
     'relative w-full select-none',
-    'px-2 py-1', // inset on all sides
+    'px-2 py-1',
     'focus-visible:outline-none',
   ].join(' ');
 
   // Inner row: rounded highlight surface + existing sizing/typography
   const innerBase = [
     'relative flex items-stretch w-full',
-    'rounded-xl', // rounded rectangle highlight
+    'rounded-xl',
     'text-[#0f0f0f]',
     'py-3',
     'transition-colors duration-150 ease-out',
@@ -39,8 +39,9 @@ export default function AvatarSettingsButton({
     ? 'bg-gradient-to-b from-[#f7f7f7] to-[#f6f6f6] shadow-sm'
     : 'hover:bg-[#f4f4f4] hover:shadow-sm';
 
+  // Nudge avatar column left by half the rail so it's centered
   const col1 =
-    'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
+    'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center -translate-x-[3px]';
   const col2 = 'flex-1 flex items-center px-2 text-base font-medium';
 
   return (

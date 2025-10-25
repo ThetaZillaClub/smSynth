@@ -23,7 +23,8 @@ export default function BrandRow({
   ].join(' ');
 
   const col1 = 'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
-  const col2 = 'flex-1 flex items-center text-base px-2 font-medium';
+  // Slightly larger + heavier brand text
+  const col2 = 'flex-1 flex items-center px-2 text-lg font-semibold tracking-tight';
 
   return (
     <Link
