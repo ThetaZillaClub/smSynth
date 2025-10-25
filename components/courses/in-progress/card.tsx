@@ -15,7 +15,6 @@ function isPassed(pct: number) {
 }
 
 // Precompute whether a plain lesson slug is unique across all courses.
-// If unique, we can safely fall back to the plain slug for legacy rows.
 const UNIQUE_SLUG = (() => {
   const counts = new Map<string, number>();
   for (const c of REGISTRY) for (const l of c.lessons) {
@@ -31,7 +30,6 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
   const go = (slug: string) => router.push(`/courses/${slug}`);
   const { bests, loading } = useLessonBests();
 
-  // Strongly typed view of `bests` to avoid `any`
   const bestsMap: Record<string, number> = React.useMemo(
     () => (bests ?? {}) as Record<string, number>,
     [bests]
@@ -67,7 +65,6 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
   const items = React.useMemo(() => {
     const withProgress = courses.map(c => ({ c, p: progressFor(c.slug) }));
     return withProgress
-      // Only show courses that have at least one started lesson and are not fully completed
       .filter(({ p }) => p.total > 0 && p.started > 0 && p.completed < p.total)
       .sort((a, b) => a.p.pct - b.p.pct);
   }, [courses, progressFor]);
@@ -92,12 +89,10 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
     );
   }
 
-  // pre-typed CSS var so we don't need `as any`
   const btnStyle: React.CSSProperties & Record<'--tw-before-bg', string> = {
     '--tw-before-bg': PR_COLORS.noteFill,
   };
 
-  // Wide stacked list — bigger type, dark text only, piano-roll accent
   return (
     <div className="grid grid-cols-1 gap-4 md:gap-5">
       {items.map(({ c, p }) => (
@@ -105,100 +100,74 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
           key={c.slug}
           onClick={() => go(c.slug)}
           className={[
-            'relative w-full text-left rounded-2xl border p-6 md:p-7',
+            'relative w-full text-left rounded-r-2xl rounded-l-lg border p-5 md:p-5',
             'bg-gradient-to-b from-white to-[#f7f7f7]',
             'border-[#d2d2d2] hover:shadow-md shadow-sm active:scale-[0.99] transition',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
-            // left accent rail
-            'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1.5 before:rounded-l-2xl',
+            'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1.5 before:rounded-l-lg',
           ].join(' ')}
           style={btnStyle}
         >
           <div
-            className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl"
+            className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-lg"
             style={{ background: PR_COLORS.noteFill }}
             aria-hidden
           />
-          <div className="flex items-center justify-between gap-6">
-            {/* Left — title + meta */}
-            <div className="min-w-0">
-              <div className="text-sm uppercase tracking-wide text-[#0f0f0f]">
-                Continue
-              </div>
-              <div className="mt-1 text-2xl font-semibold text-[#0f0f0f] truncate">
-                {c.title}
-              </div>
-              {c.subtitle && (
-                <div className="mt-1 text-base text-[#0f0f0f] truncate">
-                  {c.subtitle}
-                </div>
-              )}
 
-              {/* Meta chips */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+          {/* Shared 3-row grid across BOTH sides for perfect vertical alignment */}
+          <div className="grid grid-cols-[minmax(0,1fr)_14rem] grid-rows-[auto_auto_auto] gap-x-6 gap-y-2">
+            {/* Row 1 — Left: title */}
+            <div className="col-[1] row-[1] self-center min-w-0 text-2xl font-semibold text-[#0f0f0f] truncate">
+              {c.title}
+            </div>
+
+            {/* Row 1 — Right: percent */}
+            <div className="col-[2] row-[1] self-center text-right text-3xl font-semibold leading-none text-[#0f0f0f]">
+              {p.pct}%
+            </div>
+
+            {/* Row 2 — Left: subtitle or placeholder to keep row height */}
+            {c.subtitle ? (
+              <div className="col-[1] row-[2] self-center min-w-0 text-base text-[#0f0f0f] truncate">
+                {c.subtitle}
+              </div>
+            ) : (
+              <div className="col-[1] row-[2] self-center h-5" aria-hidden />
+            )}
+
+            {/* Row 2 — Right: x/x completed */}
+            <div className="col-[2] row-[2] self-center text-right text-sm text-[#0f0f0f]">
+              {p.completed}/{p.total} completed
+            </div>
+
+            {/* Row 3 — Left: chip (keep your text tweak) */}
+            <div className="col-[1] row-[3] self-center flex flex-wrap items-center gap-2">
+              {p.remaining > 0 && (
                 <span
-                  className="inline-flex items-center rounded-full px-2.5 py-1 text-sm font-medium border"
+                  className="inline-flex items-center rounded-full px-2.5 py-2 text-sm font-medium border"
                   style={{
-                    background: '#fff',
+                    background: '#fcfcfc',
                     color: '#0f0f0f',
                     borderColor: PR_COLORS.gridMinor,
                   }}
                 >
-                  {p.completed}/{p.total} completed
+                  {p.remaining} lessons remaining
                 </span>
-                {p.remaining > 0 && (
-                  <span
-                    className="inline-flex items-center rounded-full px-2.5 py-1 text-sm font-medium border"
-                    style={{
-                      background: PR_COLORS.bg,
-                      color: '#0f0f0f',
-                      borderColor: PR_COLORS.gridMinor,
-                    }}
-                  >
-                    {p.remaining} left
-                  </span>
-                )}
-                {p.started > p.completed && (
-                  <span
-                    className="inline-flex items-center rounded-full px-2.5 py-1 text-sm font-medium border"
-                    style={{
-                      background: '#fff',
-                      color: '#0f0f0f',
-                      borderColor: PR_COLORS.gridMinor,
-                    }}
-                  >
-                    In progress
-                  </span>
-                )}
-              </div>
+              )}
             </div>
 
-            {/* Right — compact progress meter, larger number + thicker bar */}
-            <div className="flex items-center gap-5 shrink-0">
-              <div className="text-right">
-                <div className="text-3xl font-semibold leading-none text-[#0f0f0f]">
-                  {p.pct}%
-                </div>
-                <div className="mt-1 text-sm text-[#0f0f0f]">
-                  course progress
-                </div>
-              </div>
-              <div className="w-56">
+            {/* Row 3 — Right: progress bar (centered to align with chip) */}
+            <div className="col-[2] row-[3] self-center">
+              <div
+                className="h-3 rounded-full overflow-hidden"
+                style={{ background: PR_COLORS.gridMinor }}
+              >
                 <div
-                  className="h-3 rounded-full overflow-hidden"
-                  style={{ background: PR_COLORS.gridMinor }}
-                >
-                  <div
-                    className="h-full transition-[width] duration-500"
-                    style={{
-                      width: `${p.pct}%`,
-                      background: PR_COLORS.noteFill,
-                    }}
-                  />
-                </div>
-                <div
-                  className="mt-1 h-[2px] rounded-full"
-                  style={{ background: PR_COLORS.gridMinor }}
+                  className="h-full transition-[width] duration-500"
+                  style={{
+                    width: `${p.pct}%`,
+                    background: PR_COLORS.noteFill,
+                  }}
                 />
               </div>
             </div>

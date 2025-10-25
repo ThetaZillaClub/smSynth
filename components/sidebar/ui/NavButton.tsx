@@ -12,30 +12,39 @@ type Props = {
   locked?: boolean; // requireAuth && !authed (only set AFTER hydration)
 };
 
-export default function NavButton({ active, onClick, icon, label, collapsed, locked = false }: Props) {
-  const baseRow = [
-    'relative flex items-stretch w-full select-none',
-    'text-[#0f0f0f]',
-    'py-3',
-    'focus-visible:outline-none', // no black outline
-    'transition-colors duration-150 ease-out', // limit to color-only to avoid FOUC-y pops
-  ].join(' ');
-
-  const col1 = 'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
-  const col2 = 'flex-1 flex items-center text-base px-2 font-medium';
-
-  // Only two visual states:
-  // - active (route matches): gradient + subtle shadow
-  // - idle w/ hover: solid mid tone (#f4f4f4), no :active styling
-  const stateRow = active
-    ? 'bg-gradient-to-b from-[#f8f8f8] to-[#f7f7f7] shadow-sm'
-    : (locked ? '' : 'hover:bg-[#f5f5f5] hover:shadow-sm');
-
-  const cls = [
-    baseRow,
-    stateRow,
+export default function NavButton({
+  active,
+  onClick,
+  icon,
+  label,
+  collapsed,
+  locked = false,
+}: Props) {
+  // Outer wrapper: insets the highlight so it doesn't touch sidebar edges
+  const outer = [
+    'relative w-full select-none',
+    'px-2 py-1', // padding on all four sides
+    'focus-visible:outline-none',
     locked ? 'opacity-60 cursor-not-allowed' : '',
   ].join(' ');
+
+  // Inner highlight surface
+  const innerBase = [
+    'relative flex items-stretch w-full',
+    'rounded-xl', // rounded rectangle highlight
+    'text-[#0f0f0f]',
+    'py-3',
+    'transition-colors duration-150 ease-out',
+  ].join(' ');
+
+  // Only two visual states (same colors as before)
+  const innerState = active
+    ? 'bg-gradient-to-b from-[#f7f7f7] to-[#f6f6f6] shadow-sm'
+    : (locked ? '' : 'hover:bg-[#f4f4f4] hover:shadow-sm');
+
+  const col1 =
+    'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center';
+  const col2 = 'flex-1 flex items-center text-base px-2 font-medium';
 
   return (
     <button
@@ -43,16 +52,20 @@ export default function NavButton({ active, onClick, icon, label, collapsed, loc
       onClick={onClick}
       aria-disabled={locked || undefined}
       aria-current={active ? 'page' : undefined}
-      className={cls}
+      className={outer}
     >
-      {/* left green rail for active item */}
-      <div
-        className="absolute left-0 top-0 bottom-0 w-1.5"
-        style={{ background: active ? PR_COLORS.noteFill : 'transparent' }}
-        aria-hidden
-      />
-      <div className={col1} aria-hidden>{icon}</div>
-      {!collapsed && <div className={col2}>{label}</div>}
+      <div className={[innerBase, innerState].join(' ')}>
+        {/* left green rail (inside rounded box) */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl"
+          style={{ background: active ? PR_COLORS.noteFill : 'transparent' }}
+          aria-hidden
+        />
+        <div className={col1} aria-hidden>
+          {icon}
+        </div>
+        {!collapsed && <div className={col2}>{label}</div>}
+      </div>
     </button>
   );
 }

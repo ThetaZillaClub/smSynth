@@ -1,6 +1,6 @@
 // app/layout.tsx
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Poppins } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import AuthAwareShell from "@/components/sidebar/AuthAwareShell";
@@ -15,10 +15,10 @@ export const metadata: Metadata = {
   description: "The fastest way to become a professional vocalist",
 };
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  display: "swap",
+const poppins = Poppins({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -42,7 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   --sidebar-icon: clamp(20px, calc(var(--sidebar-w) * 0.16), 36px);
 }`}</style>
       </head>
-      <body className={`${geistSans.className} antialiased`}>
+      <body className={`${poppins.className} antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <AuthAwareShell>{children}</AuthAwareShell>
         </ThemeProvider>
