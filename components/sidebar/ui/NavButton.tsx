@@ -34,7 +34,7 @@ export default function NavButton({
     'relative flex items-stretch w-full',
     'rounded-xl',
     'text-[#0f0f0f]',
-    'py-3',
+    'py-3' ,
     'transition-colors duration-150 ease-out',
   ].join(' ');
 

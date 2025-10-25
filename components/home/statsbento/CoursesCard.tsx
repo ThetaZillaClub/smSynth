@@ -115,11 +115,11 @@ export default function CoursesCard() {
           </div>
         </div>
       ) : COURSES.length === 0 ? (
-        <div className="mt-2 flex-1 grid place-items-center text-base text-[#0f0f0f]">
+        <div className="mt-8 flex-1 grid place-items-center text-base text-[#0f0f0f]">
           No courses available.
         </div>
       ) : (
-        <div className="mt-2 flex-1 min-h-0 relative">
+        <div className="mt-8 flex-1 min-h-0 relative">
           {/* Right-edge aligned scrollbar; only appears if needed */}
           <ScrollArea
             className="h-full -mr-6 pr-6"
@@ -143,7 +143,7 @@ export default function CoursesCard() {
                         type="button"
                         onClick={() => router.push(`/courses/${c.slug}`)}
                         className="relative w-full text-left rounded-xl border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]
-                                   px-4 py-3 pr-28 transition shadow-sm
+                                   px-4 py-2.5 pr-28 transition shadow-sm
                                    hover:shadow-md hover:border-[#dcdcdc]
                                    focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]"
                         style={{ borderColor: '#e5e7eb' }}
