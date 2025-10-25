@@ -20,10 +20,11 @@ export default function NavButton({
   collapsed,
   locked = false,
 }: Props) {
-  // Outer wrapper: insets the highlight so it doesn't touch sidebar edges
+  // Always inset so highlight never touches edges
   const outer = [
     'relative w-full select-none',
-    'px-2 py-1',
+    'px-2', // keep inset even when collapsed
+    'py-1',
     'focus-visible:outline-none',
     locked ? 'opacity-60 cursor-not-allowed' : '',
   ].join(' ');
@@ -41,9 +42,12 @@ export default function NavButton({
     ? 'bg-gradient-to-b from-[#f7f7f7] to-[#f6f6f6] shadow-sm'
     : (locked ? '' : 'hover:bg-[#f4f4f4] hover:shadow-sm');
 
-  // Nudge the icon left by half the rail (6px / 2) so it's optically centered
-  const col1 =
-    'w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center -translate-x-[3px]';
+  // FIX: lock rail to 48px; no transform, no animation, no nudge on active
+  const col1 = [
+    'w-12 min-w-[48px] max-w-[48px]',
+    'shrink-0 grow-0 flex items-center justify-center',
+  ].join(' ');
+
   const col2 = 'flex-1 flex items-center text-base px-2 font-medium';
 
   return (
@@ -55,15 +59,19 @@ export default function NavButton({
       className={outer}
     >
       <div className={[innerBase, innerState].join(' ')}>
-        {/* left green rail (inside rounded box) */}
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl"
-          style={{ background: active ? PR_COLORS.noteFill : 'transparent' }}
-          aria-hidden
-        />
+        {/* Green rail overlays only when active; does NOT affect layout */}
+        {active && (
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl"
+            style={{ background: PR_COLORS.noteFill }}
+            aria-hidden
+          />
+        )}
+
         <div className={col1} aria-hidden>
           {icon}
         </div>
+
         {!collapsed && <div className={col2}>{label}</div>}
       </div>
     </button>

@@ -9,10 +9,11 @@ type Props = {
 };
 
 export default function CollapseToggleRow({ collapsed, onClick }: Props) {
-  // Outer padding so the hover state is inset & rounded
+  // Always inset so highlight never touches edges
   const outer = [
     'relative w-full select-none',
-    'px-2 py-1',
+    'px-2',
+    'py-1',
     'focus-visible:outline-none',
   ].join(' ');
 
@@ -21,10 +22,12 @@ export default function CollapseToggleRow({ collapsed, onClick }: Props) {
     'rounded-xl',
     'text-[#0f0f0f]',
     'py-3',
-    // no rail here → no offset
     'transition-colors duration-150 ease-out',
     'hover:bg-[#f4f4f4] hover:shadow-sm',
   ].join(' ');
+
+  // ✅ Keep the chevron rail fixed at 48px so it doesn't move on expand/collapse.
+  const col1 = 'w-12 min-w-[48px] max-w-[48px] shrink-0 grow-0 flex items-center justify-center';
 
   return (
     <button
@@ -35,7 +38,7 @@ export default function CollapseToggleRow({ collapsed, onClick }: Props) {
       aria-label="Collapse sidebar"
     >
       <div className={inner}>
-        <div className="w-16 min-w-[64px] max-w-[64px] shrink-0 grow-0 flex items-center justify-center">
+        <div className={col1}>
           <ChevronRightIcon />
         </div>
         {!collapsed && (

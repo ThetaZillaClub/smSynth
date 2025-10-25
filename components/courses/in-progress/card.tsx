@@ -126,21 +126,21 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
               {p.pct}%
             </div>
 
-            {/* Row 2 — Left: subtitle or placeholder to keep row height */}
+            {/* Row 2 — Left: subtitle or placeholder; slightly tighter to Row 1 */}
             {c.subtitle ? (
-              <div className="col-[1] row-[2] self-center min-w-0 text-base text-[#0f0f0f] truncate">
+              <div className="col-[1] row-[2] self-center min-w-0 text-base text-[#0f0f0f] truncate -mt-1">
                 {c.subtitle}
               </div>
             ) : (
-              <div className="col-[1] row-[2] self-center h-5" aria-hidden />
+              <div className="col-[1] row-[2] self-center h-5 -mt-0.5" aria-hidden />
             )}
 
-            {/* Row 2 — Right: x/x completed */}
-            <div className="col-[2] row-[2] self-center text-right text-sm text-[#0f0f0f]">
+            {/* Row 2 — Right: x/x completed; also slightly tighter to Row 1 */}
+            <div className="col-[2] row-[2] self-center text-right text-sm text-[#0f0f0f] -mt-0.5">
               {p.completed}/{p.total} completed
             </div>
 
-            {/* Row 3 — Left: chip (keep your text tweak) */}
+            {/* Row 3 — Left: chip (unchanged) */}
             <div className="col-[1] row-[3] self-center flex flex-wrap items-center gap-2">
               {p.remaining > 0 && (
                 <span
@@ -156,7 +156,7 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
               )}
             </div>
 
-            {/* Row 3 — Right: progress bar (centered to align with chip) */}
+            {/* Row 3 — Right: progress bar (unchanged) */}
             <div className="col-[2] row-[3] self-center">
               <div
                 className="h-3 rounded-full overflow-hidden"

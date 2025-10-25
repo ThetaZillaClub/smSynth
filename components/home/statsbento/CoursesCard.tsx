@@ -102,15 +102,15 @@ export default function CoursesCard() {
 
   return (
     <div className="h-full rounded-2xl border border-[#d2d2d2] bg-gradient-to-b from-[#f2f2f2] to-[#eeeeee] p-6 shadow-sm flex flex-col">
-      <div className="flex items-baseline justify-between gap-2">
+      <div className="flex items-baseline justify-between">
         <h3 className="text-2xl font-semibold tracking-tight text-[#0f0f0f]">Courses</h3>
       </div>
 
       {loading ? (
         <div className="mt-6 flex-1 min-h-0">
-          <div className="space-y-2">
+          <div>
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-14 rounded-xl bg-[#e8e8e8] animate-pulse" />
+              <div key={i} className="h-14 bg-[#e8e8e8] animate-pulse" />
             ))}
           </div>
         </div>
@@ -132,7 +132,7 @@ export default function CoursesCard() {
           >
             {/* Do NOT force full height here; let content size itself so the last item isn't clipped */}
             <ul role="list" aria-label="Course progress">
-              <div className="space-y-2 pb-2">
+              <div className="space-y-1 pb-0">
                 {COURSES.map((c) => {
                   const p = progressFor(c.slug);
                   const percentLabel = `${p.pct}%`;
