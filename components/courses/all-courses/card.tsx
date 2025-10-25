@@ -79,7 +79,7 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
               onClick={() => go(c.slug)}
               className={[
                 'group text-left rounded-xl border',
-                'bg-gradient-to-b from-white to-[#f7f7f7]',
+                'border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]',
                 'border-[#dcdcdc] aspect-[3/2] min-h-[240px]',
                 'p-5 md:p-6 flex flex-col items-start justify-between',
                 'hover:shadow-md shadow-sm active:scale-[0.99] transition',

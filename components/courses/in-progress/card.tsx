@@ -94,14 +94,14 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:gap-5">
+    <div className="grid grid-cols-1 gap-4 md:gap-6">
       {items.map(({ c, p }) => (
         <button
           key={c.slug}
           onClick={() => go(c.slug)}
           className={[
-            'relative w-full text-left rounded-r-2xl rounded-l-lg border p-5 md:p-5',
-            'bg-gradient-to-b from-white to-[#f7f7f7]',
+            'relative w-full text-left rounded-r-2xl rounded-l-lg border py-8 px-6 md:px-7', // ➜ extra L/R padding, Y kept the same
+            'border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]',
             'border-[#d2d2d2] hover:shadow-md shadow-sm active:scale-[0.99] transition',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
             'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1.5 before:rounded-l-lg',
@@ -114,11 +114,27 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
             aria-hidden
           />
 
-          {/* Shared 3-row grid across BOTH sides for perfect vertical alignment */}
-          <div className="grid grid-cols-[minmax(0,1fr)_14rem] grid-rows-[auto_auto_auto] gap-x-6 gap-y-2">
-            {/* Row 1 — Left: title */}
-            <div className="col-[1] row-[1] self-center min-w-0 text-2xl font-semibold text-[#0f0f0f] truncate">
-              {c.title}
+          {/* Shared 3-row grid; Row 3 is dedicated solely to the progress bar */}
+          <div className="grid grid-cols-[minmax(0,1fr)_14rem] grid-rows-[auto_auto_auto] gap-x-7 gap-y-2">
+            {/* Row 1 — Left: title with "lessons remaining" chip appended inline */}
+            <div className="col-[1] row-[1] self-center min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="text-2xl font-semibold text-[#0f0f0f] truncate">
+                  {c.title}
+                </div>
+                {p.remaining > 0 && (
+                  <span
+                    className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1.5 text-xs font-medium border"
+                    style={{
+                      background: '#fdfdfd',
+                      color: '#0f0f0f',
+                      borderColor: PR_COLORS.gridMinor,
+                    }}
+                  >
+                    {p.remaining} lessons remaining
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Row 1 — Right: percent */}
@@ -126,7 +142,7 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
               {p.pct}%
             </div>
 
-            {/* Row 2 — Left: subtitle or placeholder; slightly tighter to Row 1 */}
+            {/* Row 2 — Left: subtitle or placeholder */}
             {c.subtitle ? (
               <div className="col-[1] row-[2] self-center min-w-0 text-base text-[#0f0f0f] truncate -mt-1">
                 {c.subtitle}
@@ -135,29 +151,13 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
               <div className="col-[1] row-[2] self-center h-5 -mt-0.5" aria-hidden />
             )}
 
-            {/* Row 2 — Right: x/x completed; also slightly tighter to Row 1 */}
+            {/* Row 2 — Right: x/x completed */}
             <div className="col-[2] row-[2] self-center text-right text-sm text-[#0f0f0f] -mt-0.5">
               {p.completed}/{p.total} completed
             </div>
 
-            {/* Row 3 — Left: chip (unchanged) */}
-            <div className="col-[1] row-[3] self-center flex flex-wrap items-center gap-2">
-              {p.remaining > 0 && (
-                <span
-                  className="inline-flex items-center rounded-full px-2.5 py-2 text-sm font-medium border"
-                  style={{
-                    background: '#fcfcfc',
-                    color: '#0f0f0f',
-                    borderColor: PR_COLORS.gridMinor,
-                  }}
-                >
-                  {p.remaining} lessons remaining
-                </span>
-              )}
-            </div>
-
-            {/* Row 3 — Right: progress bar (unchanged) */}
-            <div className="col-[2] row-[3] self-center">
+            {/* Row 3 — Progress bar spans full width (its own row) */}
+            <div className="col-[1/_-1] row-[3] self-center">
               <div
                 className="h-3 rounded-full overflow-hidden"
                 style={{ background: PR_COLORS.gridMinor }}

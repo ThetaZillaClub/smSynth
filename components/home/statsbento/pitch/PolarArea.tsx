@@ -5,6 +5,7 @@ import * as React from 'react';
 import { useMeasure, useCanvas2d } from './hooks';
 import { clamp01, clamp, ease } from './utils';
 import type { Item } from './types';
+import { PR_COLORS } from '@/utils/stage';
 
 const GAMMA = 0.9;
 
@@ -20,22 +21,22 @@ const BLUE_HI  = '#84b3f6';
 const ORDER_EPS = 0.75; // px
 const TAU = Math.PI * 2;
 
+// Grid styling (match session performance colors)
+const GRID_WIDTH_MINOR = 1.0;
+const GRID_WIDTH_MAJOR = 1.25;
+
 // Only scale up relative to the dataset max (no min-centering)
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
   const finite = vals.filter((x) => Number.isFinite(x));
   const vMax = finite.length ? Math.max(...finite) : 0;
 
-  // If nothing usable, just apply gamma to the raw value (identity-ish)
   if (!isFinite(vMax) || vMax <= 1e-6) {
     return (v: number) => Math.pow(clamp01(v), GAMMA);
   }
 
-  // Scale-up factor: if max < 1, lift everything by 1/max; else leave as-is.
   const k = vMax < 1 ? 1 / vMax : 1;
-
   return (v: number) => Math.pow(clamp01(v * k), GAMMA);
 };
-
 
 function fitFontPx(text: string, family: string, weight: string, maxWidth: number, minPx: number, maxPx: number) {
   if (typeof window === 'undefined') return Math.max(minPx, Math.min(maxPx, minPx));
@@ -50,30 +51,6 @@ function fitFontPx(text: string, family: string, weight: string, maxWidth: numbe
     if (w <= maxWidth) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
   }
   return best;
-}
-
-function fillAnnulus(ctx: CanvasRenderingContext2D, r0: number, r1: number, paint: string | CanvasGradient | CanvasPattern) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(0, 0, r1, 0, TAU);
-  ctx.arc(0, 0, r0, 0, TAU, true);
-  ctx.closePath();
-  ctx.fillStyle = paint;
-  ctx.fill();
-  ctx.restore();
-}
-
-function strokeAnnulusEdges(ctx: CanvasRenderingContext2D, r0: number, r1: number, color: string, width = 1) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.arc(0, 0, r0, 0, TAU);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(0, 0, r1, 0, TAU);
-  ctx.stroke();
-  ctx.restore();
 }
 
 // draw text along a circular arc centered at angle theta
@@ -121,6 +98,19 @@ export default function PolarArea({
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
+  // Bump to force redraws in edge cases
+  const [nonce, setNonce] = React.useState(0);
+
+  // Stronger re-draw on window resizes / tab reveals
+  React.useEffect(() => {
+    const kick = () => setNonce(n => (n + 1) % 1_000_000);
+    window.addEventListener('resize', kick);
+    window.addEventListener('radials-tab-shown' as any, kick as any);
+    return () => {
+      window.removeEventListener('resize', kick);
+      window.removeEventListener('radials-tab-shown' as any, kick as any);
+    };
+  }, []);
 
   React.useEffect(() => {
     let raf = 0;
@@ -152,6 +142,10 @@ export default function PolarArea({
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
 
+    // CAP: we want 100% fills to TOUCH the outer ring, no gap and no bleed.
+    // So fills may reach exactly Rmax; strokes are kept inside by subtracting half their width.
+    const Rcap = Rmax;
+
     const cx = W / 2, cy = Hpx / 2;
 
     const onVals  = items.map(it => clamp01(it.v1 / max1));
@@ -166,28 +160,17 @@ export default function PolarArea({
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
-    // label band + text sizing
+    // label text radius (no background ring)
     const labelFontPx = Math.round(Math.max(11, Math.min(15, minSide * 0.04)));
-    const rText = Rmax + labelOutset * 0.9;
-    const bandThickness = Math.max(16, labelOutset * 1.2);
-    const bandInner = rText - bandThickness / 2;
-    const bandOuter = rText + bandThickness / 2;
+    const rText = Rmax + labelOutset * 0.85;
 
     ctx.save();
     ctx.translate(cx, cy);
 
-    // gradient banner: edges #f2f2f2 → center #f1f1f1 → edges #f2f2f2
-    const bannerGrad = ctx.createRadialGradient(0, 0, bandInner, 0, 0, bandOuter);
-    bannerGrad.addColorStop(0.00, '#f2f2f2');
-    bannerGrad.addColorStop(0.50, '#f1f1f1');
-    bannerGrad.addColorStop(1.00, '#f2f2f2');
-    fillAnnulus(ctx, bandInner, bandOuter, bannerGrad);
-
-    // crisp border (no shadow)
-    strokeAnnulusEdges(ctx, bandInner, bandOuter, '#d2d2d2', 1);
-
-    // slight inward optical offset so text is centered between edges
-    const textRadialOffset = -Math.max(1, Math.min(2, bandThickness * 0.08));
+    /* ───────────────────────────────
+       First pass: draw colored sectors
+       ─────────────────────────────── */
+    const pendingLabels: Array<{ text: string; radius: number; theta: number }> = [];
 
     for (let i = 0; i < n; i++) {
       const a0 = startBase + i * (sector + gapRad);
@@ -196,8 +179,8 @@ export default function PolarArea({
 
       const uOn  = normOn(onVals[i]);
       const uMae = normMae(maeGood[i]);
-      const rMae = r0 + (Rmax - r0) * uMae * t;
-      const rOn  = r0 + (Rmax - r0) * uOn  * t;
+      const rMae = r0 + (Rcap - r0) * uMae * t;
+      const rOn  = r0 + (Rcap - r0) * uOn  * t;
 
       const approxEqual = Math.abs(rMae - rOn) <= ORDER_EPS;
       const topIsGreen = approxEqual ? true : (rOn < rMae);
@@ -215,39 +198,72 @@ export default function PolarArea({
             { r: rMae,  fill: baseBlue,  stroke: baseBlue,  strokeWidth: 2.5 },
           ];
 
-      // fills
+      // fills (clamped to Rcap; can reach exactly the outer grid radius)
       for (const L of layers) {
+        const rOuter = Math.min(Math.max(r0, L.r), Rcap);
         ctx.save();
         ctx.fillStyle = L.fill;
         ctx.beginPath();
-        ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
+        ctx.arc(0, 0, rOuter, a0, a1, false);
         ctx.arc(0, 0, r0, a1, a0, true);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
       }
 
-      // rims
+      // rims (keep the stroke INSIDE so it never bleeds past the outer grid)
       for (const L of layers) {
+        const maxStrokeRadius = Rmax - L.strokeWidth / 2;
+        const rEdge = Math.min(Math.max(r0, L.r), maxStrokeRadius);
         ctx.save();
         ctx.strokeStyle = L.stroke;
         ctx.lineWidth = L.strokeWidth;
         ctx.beginPath();
-        ctx.arc(0, 0, Math.max(r0, L.r), a0, a1, false);
+        ctx.arc(0, 0, rEdge, a0, a1, false);
         ctx.stroke();
         ctx.restore();
       }
 
-      // curved labels (with optical offset)
-      ctx.save();
-      ctx.fillStyle = '#0f0f0f';
-      ctx.font = `bold ${labelFontPx}px ui-sans-serif, system-ui`;
-      drawCurvedText(ctx, items[i].label, rText + textRadialOffset, mid);
-      ctx.restore();
+      // queue labels (draw later, on top of grid)
+      pendingLabels.push({ text: items[i].label, radius: rText, theta: mid });
     }
 
+    /* ───────────────────────────────
+       Draw the polar grid ON TOP of color
+       (0/50/100 major color; 25/75 minor color) — solid lines
+       ─────────────────────────────── */
+    ctx.save();
+    const rings: Array<{ s: number; major: boolean }> = [
+      { s: 0.00, major: true  }, // 0%
+      { s: 0.25, major: false }, // 25%
+      { s: 0.50, major: true  }, // 50%
+      { s: 0.75, major: false }, // 75%
+      { s: 1.00, major: true  }, // 100%
+    ];
+
+    for (const r of rings) {
+      ctx.strokeStyle = r.major ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
+      ctx.lineWidth = r.major ? GRID_WIDTH_MAJOR : GRID_WIDTH_MINOR;
+      const rr = r0 + (Rmax - r0) * r.s;
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, 0, TAU);
+      ctx.stroke();
+    }
     ctx.restore();
-  }, [canvasRef, width, sqH, items, max1, max2, t, hover]);
+
+    /* ───────────────────────────────
+       Finally draw labels above everything
+       ─────────────────────────────── */
+    ctx.save();
+    ctx.fillStyle = '#0f0f0f';
+    ctx.font = `bold ${labelFontPx}px ui-sans-serif, system-ui`;
+    for (const L of pendingLabels) {
+      drawCurvedText(ctx, L.text, L.radius, L.theta);
+    }
+    ctx.restore();
+
+    ctx.restore();
+  }, [canvasRef, width, sqH, items, max1, max2, t, hover, nonce]);
 
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const c = canvasRef.current; if (!c) return;
@@ -262,14 +278,14 @@ export default function PolarArea({
     const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
     const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
-    const Rmax = Math.max(r0 + 6, R - ringPad);
 
     const cx = W / 2, cy = H / 2;
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
     const dx = x - cx, dy = y - cy;
     const r = Math.hypot(dx, dy);
 
-    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); return; }
+    // generous hover band (no upper cap so labels show even near outer edge)
+    if (r < r0 - 6) { setHover(null); return; }
 
     const startBase = -Math.PI / 2;
     const ang = Math.atan2(dy, dx);
@@ -313,32 +329,36 @@ export default function PolarArea({
     const maxHeight = Math.max(18, 2 * r0 - 18);
     const family = 'ui-sans-serif, system-ui';
 
-    if (!center) return { maxWidth, labelPx: 12, metricsPx: 10 };
+    if (!center) return { maxWidth, labelPx: 11, metricsPx: 9 };
 
-    // smaller caps for neatness
-    const labelMax = Math.round(Math.max(12, Math.min(18, minSide * 0.05)));
-    const labelMin = 9;
-    const metricsMax = Math.round(Math.max(10, Math.min(14, minSide * 0.035)));
-    const metricsMin = 8;
+    // a touch smaller for small screens
+    const labelMax = Math.round(Math.max(11, Math.min(16, minSide * 0.045)));
+    const labelMin = 8;
+    const metricsMax = Math.round(Math.max(9, Math.min(12, minSide * 0.03)));
+    const metricsMin = 7;
 
     const v1Str = `${center.v1}%`;
     const v2Str = `${center.v2}¢`;
 
     let labelPx = fitFontPx(center.label, family, 'bold', maxWidth, labelMin, labelMax);
-    // choose a single metrics size that fits both lines
     let metricsPx = Math.min(
       fitFontPx(v1Str, family, '500', maxWidth, metricsMin, metricsMax),
       fitFontPx(v2Str, family, '500', maxWidth, metricsMin, metricsMax),
     );
 
-    // height clamp: label + gap + v1 + gap + v2
-    let gap = Math.max(2, Math.round(metricsPx * 0.25));
-    const block = labelPx + gap + metricsPx + gap + metricsPx; // <- const; never reassigned
+    // subtle global downscale
+    const globalScale = 0.9;
+    labelPx = Math.max(labelMin, Math.floor(labelPx * globalScale));
+    metricsPx = Math.max(metricsMin, Math.floor(metricsPx * globalScale));
+
+    // height clamp
+    let gap = Math.max(2, Math.round(metricsPx * 0.20));
+    const block = labelPx + gap + metricsPx + gap + metricsPx;
     if (block > maxHeight) {
       const k = maxHeight / block;
       labelPx = Math.max(labelMin, Math.floor(labelPx * k));
       metricsPx = Math.max(metricsMin, Math.floor(metricsPx * k));
-      gap = Math.max(2, Math.round(metricsPx * 0.25));
+      gap = Math.max(2, Math.round(metricsPx * 0.20));
     }
 
     return { maxWidth, labelPx, metricsPx, gap };
@@ -347,8 +367,9 @@ export default function PolarArea({
   return (
     <div
       ref={ref}
-      className="relative w-full bg-transparent"
-      style={{ height: sqH }}
+      className="relative w-full"
+      // Inherit the parent card background to guarantee visual match
+      style={{ height: sqH, background: 'inherit' }}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >

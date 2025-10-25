@@ -9,6 +9,7 @@ import { useHomeResults } from '@/components/home/data/HomeResultsProvider';
 // Reuse hooks & utils as PitchFocusCard
 import { useMeasure, useCanvas2d } from './pitch/hooks';
 import { clamp01, clamp, ease } from './pitch';
+import { PR_COLORS } from '@/utils/stage';
 
 // Solid green & highlight (no blending)
 const GREEN_BASE = '#5ac698';
@@ -19,18 +20,18 @@ type Item = { label: string; pct: number; attempts: number };
 const intervalName = (s: number) =>
   ({ 0:'Unison',1:'m2',2:'M2',3:'m3',4:'M3',5:'P4',6:'TT',7:'P5',8:'m6',9:'M6',10:'m7',11:'M7',12:'Octave' } as Record<number,string>)[s] ?? `${s}`;
 
-// dataset-bounds normalization
+// normalization (match pitch chart: scale by dataset max only, no min-centering)
 const GAMMA = 0.9;
 const TAU = Math.PI * 2;
 
 const normFromDataset = (vals: number[]): ((v: number) => number) => {
-  const vMin = Math.min(...vals);
-  const vMax = Math.max(...vals);
-  const spread = vMax - vMin;
-  if (!isFinite(vMin) || !isFinite(vMax) || spread <= 1e-6) {
-    return () => Math.pow(0.75, GAMMA);
+  const finite = vals.filter((x) => Number.isFinite(x));
+  const vMax = finite.length ? Math.max(...finite) : 0;
+  if (!isFinite(vMax) || vMax <= 1e-6) {
+    return (v: number) => Math.pow(clamp01(v), GAMMA);
   }
-  return (v: number) => Math.pow(clamp01((v - vMin) / spread), GAMMA);
+  const k = vMax < 1 ? 1 / vMax : 1;
+  return (v: number) => Math.pow(clamp01(v * k), GAMMA);
 };
 
 // text fitting helper (clamps font by width; we also height-clamp later)
@@ -49,33 +50,7 @@ function fitFontPx(text: string, family: string, weight: string, maxWidth: numbe
   return best;
 }
 
-// fill full annulus between r0..r1 with a color/gradient
-function fillAnnulus(ctx: CanvasRenderingContext2D, r0: number, r1: number, paint: string | CanvasGradient | CanvasPattern) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(0, 0, r1, 0, TAU);
-  ctx.arc(0, 0, r0, 0, TAU, true);
-  ctx.closePath();
-  ctx.fillStyle = paint;
-  ctx.fill();
-  ctx.restore();
-}
-
-// stroke the inner & outer edges of an annulus
-function strokeAnnulusEdges(ctx: CanvasRenderingContext2D, r0: number, r1: number, color: string, width = 1) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.arc(0, 0, r0, 0, TAU);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(0, 0, r1, 0, TAU);
-  ctx.stroke();
-  ctx.restore();
-}
-
-// curved text along a circle, centered at angle 'theta' (bottom text will be upside down — intended)
+// curved text along a circle, centered at angle 'theta'
 function drawCurvedText(ctx: CanvasRenderingContext2D, text: string, radius: number, theta: number) {
   if (!text) return;
   let totalW = 0;
@@ -113,6 +88,18 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
 
   const [t, setT] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
+  // Force re-draws on tricky reveal/resize cases (match pitch)
+  const [nonce, setNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    const kick = () => setNonce(n => (n + 1) % 1_000_000);
+    window.addEventListener('resize', kick);
+    window.addEventListener('radials-tab-shown' as any, kick as any);
+    return () => {
+      window.removeEventListener('resize', kick);
+      window.removeEventListener('radials-tab-shown' as any, kick as any);
+    };
+  }, []);
 
   React.useEffect(() => {
     let raf = 0;
@@ -143,6 +130,8 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
     const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
     const Rmax = Math.max(r0 + 6, R - ringPad);
+    // CAP: 100% fills TOUCH the outer ring, no gap and no bleed.
+    const Rcap = Rmax;
 
     const cx = W / 2, cy = Hpx / 2;
 
@@ -156,68 +145,76 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
     const sector = Math.max(0, (Math.PI * 2 - totalGap) / n);
     const startBase = -Math.PI / 2;
 
-    // label band (~2× thicker than original) + font sizing
+    // label font & radius (no background ring; match pitch)
     const labelFontPx = Math.round(Math.max(11, Math.min(15, minSide * 0.04)));
-    const rText = Rmax + labelOutset * 0.9;
-    const bandThickness = Math.max(16, labelOutset * 1.2); // thicker banner for comfy top/bottom gap
-    const bandInner = rText - bandThickness / 2;
-    const bandOuter = rText + bandThickness / 2;
+    const rText = Rmax + labelOutset * 0.85;
 
     ctx.save();
     ctx.translate(cx, cy);
 
-    // ---- gradient banner (outer #f6f6f6 → center #f5f5f5 → outer #f6f6f6) ----
-    const bannerGrad = ctx.createRadialGradient(0, 0, bandInner, 0, 0, bandOuter);
-    bannerGrad.addColorStop(0.00, '#f2f2f2');
-    bannerGrad.addColorStop(0.50, '#f1f1f1');
-    bannerGrad.addColorStop(1.00, '#f2f2f2');
-    fillAnnulus(ctx, bandInner, bandOuter, bannerGrad);
-
-    // ---- card-style stroke on both edges (no shadow) ----
-    strokeAnnulusEdges(ctx, bandInner, bandOuter, '#d2d2d2', 1);
-
-    // slight inward optical offset so text is perfectly centered between edges
-    const textRadialOffset = -Math.max(1, Math.min(2, bandThickness * 0.08));
-
+    // ----- draw colored sectors first -----
     for (let i = 0; i < n; i++) {
       const a0 = startBase + i * (sector + gapRad);
       const a1 = a0 + sector;
-      const mid = (a0 + a1) / 2;
 
       const u = norm(vals[i]);
-      const rFill = r0 + (Rmax - r0) * u * t;
+      const rFill = r0 + (Rcap - r0) * u * t;
 
       // solid sector fill (green)
       const fill = hover === i ? GREEN_HI : GREEN_BASE;
 
+      // FILL (clamped so outer edge hits, but never exceeds, the 100% ring)
+      const rOuter = Math.min(Math.max(r0, rFill), Rcap);
       ctx.save();
       ctx.fillStyle = fill;
       ctx.beginPath();
-      ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
+      ctx.arc(0, 0, rOuter, a0, a1, false);
       ctx.arc(0, 0, r0, a1, a0, true);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
 
-      // green rim (opaque)
+      // RIM stroke stays INSIDE outer grid (subtract half the linewidth)
+      const lineW = 3;
+      const rEdge = Math.min(Math.max(r0, rFill), Rmax - lineW / 2);
       ctx.save();
       ctx.strokeStyle = fill;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = lineW;
       ctx.beginPath();
-      ctx.arc(0, 0, Math.max(r0, rFill), a0, a1, false);
+      ctx.arc(0, 0, rEdge, a0, a1, false);
       ctx.stroke();
-      ctx.restore();
-
-      // ----- CURVED OUTSIDE LABELS (on the banner; bottom labels upside down by design) -----
-      ctx.save();
-      ctx.fillStyle = '#0f0f0f';
-      ctx.font = `bold ${labelFontPx}px ui-sans-serif, system-ui`;
-      drawCurvedText(ctx, items[i].label, rText + textRadialOffset, mid);
       ctx.restore();
     }
 
+    // ----- draw polar grid ON TOP of color (solid; major: 0/50/100, minor: 25/75) -----
+    const rings: Array<{ s: number; major: boolean }> = [
+      { s: 0.00, major: true  }, // 0%
+      { s: 0.25, major: false }, // 25%
+      { s: 0.50, major: true  }, // 50%
+      { s: 0.75, major: false }, // 75%
+      { s: 1.00, major: true  }, // 100%
+    ];
+    for (const r of rings) {
+      const rr = r0 + (Rmax - r0) * r.s;
+      ctx.strokeStyle = r.major ? PR_COLORS.gridMajor : PR_COLORS.gridMinor;
+      ctx.lineWidth = r.major ? 1.25 : 1.0;
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, 0, TAU);
+      ctx.stroke();
+    }
+
+    // ----- labels above everything (curved along outer radius; bottom upside down by design) -----
+    ctx.fillStyle = '#0f0f0f';
+    ctx.font = `bold ${labelFontPx}px ui-sans-serif, system-ui`;
+    for (let i = 0; i < n; i++) {
+      const a0 = startBase + i * (sector + gapRad);
+      const a1 = a0 + sector;
+      const mid = (a0 + a1) / 2;
+      drawCurvedText(ctx, items[i].label, rText, mid);
+    }
+
     ctx.restore();
-  }, [canvasRef, width, sqH, items, t, hover]);
+  }, [canvasRef, width, sqH, items, t, hover, nonce]);
 
   const onMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const c = canvasRef.current; if (!c) return;
@@ -239,7 +236,8 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
     const dx = x - cx, dy = y - cy;
     const r = Math.hypot(dx, dy);
 
-    if (r < r0 - 6 || r > Rmax + 10) { setHover(null); return; }
+    // generous hover band
+    if (r < r0 - 6) { setHover(null); return; }
 
     const startBase = -Math.PI / 2;
     const ang = Math.atan2(dy, dx);
@@ -305,8 +303,9 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
   return (
     <div
       ref={ref}
-      className="relative w-full bg-transparent"
-      style={{ height: sqH }}
+      className="relative w-full"
+      // Match card background (like pitch)
+      style={{ height: sqH, background: 'inherit' }}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
     >

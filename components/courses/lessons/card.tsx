@@ -74,7 +74,7 @@ export default function LessonsCard({
             onClick={() => go(l.slug)}
             className={[
               'relative w-full text-left rounded-2xl border p-6 md:p-7',
-              'bg-gradient-to-b from-white to-[#f7f7f7]',
+              'border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]',
               'border-[#d2d2d2] hover:shadow-md shadow-sm active:scale-[0.99] transition',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
             ].join(' ')}
