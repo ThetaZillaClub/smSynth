@@ -391,13 +391,12 @@ export default function IntervalsCard({
           g.c += Number(r.correct || 0);
         }
 
-        const anchors = new Set([0, 2, 3, 7, 12]);
         const list = Array.from({ length: 13 }, (_, s) => {
           const v = by.get(s)!;
           const pct = v.a ? Math.round((100 * v.c) / v.a) : 0;
           return { s, label: intervalName(s), pct, attempts: v.a };
         })
-          .filter(x => x.pct > 0 || anchors.has(x.s))
+          .filter(x => x.attempts > 0)
           .map(({ label, pct, attempts }) => ({ label, pct, attempts }));
 
         if (!cancelled) setItems(list);

@@ -100,7 +100,7 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
           key={c.slug}
           onClick={() => go(c.slug)}
           className={[
-            'relative w-full text-left rounded-r-2xl rounded-l-lg border py-8 px-6 md:px-7', // ➜ extra L/R padding, Y kept the same
+            'relative w-full text-left rounded-r-2xl rounded-l-lg border py-6 px-6 md:px-7', // ➜ extra L/R padding, Y kept the same
             'border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]',
             'border-[#d2d2d2] hover:shadow-md shadow-sm active:scale-[0.99] transition',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
@@ -157,7 +157,7 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
             </div>
 
             {/* Row 3 — Progress bar spans full width (its own row) */}
-            <div className="col-[1/_-1] row-[3] self-center">
+            <div className="col-[1/_-1] row-[3] self-center mt-6">
               <div
                 className="h-3 rounded-full overflow-hidden"
                 style={{ background: PR_COLORS.gridMinor }}

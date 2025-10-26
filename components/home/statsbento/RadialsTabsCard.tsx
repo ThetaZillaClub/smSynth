@@ -106,10 +106,10 @@ export default function RadialsTabsCard() {
         {isPitch ? (
           <>
             <div className="pointer-events-auto">
-              <LegendTag dot={PR_COLORS.noteFill} label="On-pitch %" />
+              <LegendTag dot={PR_COLORS.noteFill} label="On-Pitch %" />
             </div>
             <div className="pointer-events-auto">
-              <LegendTag dot="#3b82f6" label="MAE ¢" />
+              <LegendTag dot="#3b82f6" label="Precision ¢" />
             </div>
           </>
         ) : (
