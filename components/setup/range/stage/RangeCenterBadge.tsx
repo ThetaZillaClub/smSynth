@@ -7,6 +7,10 @@ const SUBTLE = '#4b5563';
 const BORDER = '#dcdcdc';
 const PROGRESS_GREEN = 'rgb(35, 215, 148)';
 
+// Tailwind-ish palette to mirror your Play/Pause button accents
+const GLOW_GREEN = 'rgb(16, 185, 129)'; // green-500
+const GLOW_BLUE  = 'rgb(56, 189, 248)'; // sky-400
+
 type Props = {
   cx: number;
   cy: number;
@@ -17,6 +21,8 @@ type Props = {
   progress01?: number;
   /** ring/overlay thickness (default doubled vs game’s = 2) */
   strokeWidth?: number;
+  /** when true, glow is green (live). when false, glow is blue (idle) */
+  live?: boolean;
 };
 
 export default function RangeCenterBadge({
@@ -27,41 +33,64 @@ export default function RangeCenterBadge({
   secondary,
   progress01 = 0,
   strokeWidth = 2, // doubled vs shared game badge
+  live = false,
 }: Props) {
   const p = Math.max(0, Math.min(1, progress01));
   const dash = 360 * p;
   const gap = 360 - dash;
 
+  // Unique filter id per instance
+  const filterId = React.useId();
+  const glowColor = live ? GLOW_GREEN : GLOW_BLUE;
+
   return (
     <g textRendering="geometricPrecision">
-      {/* Base circular ring */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={r}
-        fill="none"
-        stroke={BORDER}
-        strokeWidth={strokeWidth}
-        pathLength={360}
-      />
+      {/* ---- soft glow under the ring (green when live, blue when idle) ---- */}
+      <defs>
+        <filter
+          id={filterId}
+          x="-50%" y="-50%" width="200%" height="200%"
+          colorInterpolationFilters="sRGB"
+        >
+          {/* two-layer glow for depth */}
+          <feDropShadow dx="0" dy="0" stdDeviation="8"
+                        floodColor={glowColor} floodOpacity=".75" />
+          <feDropShadow dx="0" dy="0" stdDeviation="16"
+                        floodColor={glowColor} floodOpacity=".5" />
+        </filter>
+      </defs>
 
-      {/* Green sweep (progress) */}
-      {p > 0 ? (
+      {/* Put both ring strokes inside the filtered group so glow is beneath them */}
+      <g filter={`url(#${filterId})`} style={{ pointerEvents: "none" }}>
+        {/* Base circular ring */}
         <circle
           cx={cx}
           cy={cy}
           r={r}
           fill="none"
-          stroke={PROGRESS_GREEN}
+          stroke={BORDER}
           strokeWidth={strokeWidth}
-          strokeLinecap="round"
           pathLength={360}
-          strokeDasharray={`${dash} ${gap}`}
-          transform={`rotate(-90 ${cx} ${cy})`}
-          pointerEvents="none"
-          aria-hidden
         />
-      ) : null}
+
+        {/* Green sweep (progress) */}
+        {p > 0 ? (
+          <circle
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke={PROGRESS_GREEN}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            pathLength={360}
+            strokeDasharray={`${dash} ${gap}`}
+            transform={`rotate(-90 ${cx} ${cy})`}
+            pointerEvents="none"
+            aria-hidden
+          />
+        ) : null}
+      </g>
 
       {/* Perfectly centered primary label */}
       <text

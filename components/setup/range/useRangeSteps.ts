@@ -1,4 +1,4 @@
-// components/range/useRangeSteps.ts
+// components/setup/range/useRangeSteps.ts
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
@@ -7,9 +7,8 @@ import { hzToMidi, midiToNoteName } from "@/utils/pitch/pitchMath";
 type Step = "low" | "high" | "play";
 
 type Opts = {
-  /** Persist range label when low/high confirmed */
   updateRange: (which: "low" | "high", label: string) => Promise<void> | void;
-  a4Hz?: number; // default 440
+  a4Hz?: number;
 };
 
 type ReturnShape = {
@@ -20,6 +19,8 @@ type ReturnShape = {
   canPlay: boolean;
   confirmLow: (hz: number) => void;
   confirmHigh: (hz: number) => void;
+  /** NEW: clears low/high + sets step back to "low" */
+  resetAll: () => void;
 };
 
 export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): ReturnShape {
@@ -42,7 +43,7 @@ export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): Return
   const confirmLow = useCallback(
     (hz: number) => {
       const { label, snappedHz } = snapToEqualTempered(hz);
-      setLowHz(snappedHz);           // keep UI in sync with what we save
+      setLowHz(snappedHz);
       void updateRange("low", label);
       setStep("high");
     },
@@ -59,5 +60,12 @@ export default function useRangeSteps({ updateRange, a4Hz = 440 }: Opts): Return
     [snapToEqualTempered, updateRange]
   );
 
-  return { step, setStep, lowHz, highHz, canPlay, confirmLow, confirmHigh };
+  // NEW: full reset for a new run
+  const resetAll = useCallback(() => {
+    setLowHz(null);
+    setHighHz(null);
+    setStep("low");
+  }, []);
+
+  return { step, setStep, lowHz, highHz, canPlay, confirmLow, confirmHigh, resetAll };
 }

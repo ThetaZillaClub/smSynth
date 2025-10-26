@@ -7,33 +7,24 @@ import { hzToMidi, midiToNoteName, centsBetweenHz } from "@/utils/pitch/pitchMat
 
 type Props = {
   mode: "low" | "high";
-  /** when true, we actively capture/advance progress; when false, only show live label */
   active: boolean;
-  /** live pitch is always shown as the center label even when not capturing */
   pitchHz: number | null | undefined;
-  holdSec?: number;               // seconds to “fill”
-  centsWindow?: number;           // stability window
-  a4Hz?: number;                  // default 440
-  resetKey?: number;              // bump to hard reset internals
-
-  onProgress?: (progress01: number) => void;               // 0..1
-  onCaptured?: (capturedHz: number, label: string) => void; // once per capture
+  holdSec?: number;
+  centsWindow?: number;
+  a4Hz?: number;
+  resetKey?: number;
+  onProgress?: (progress01: number) => void;
+  onCaptured?: (capturedHz: number, label: string) => void;
 };
 
 // ---- sizing knobs -----------------------------------------------------------
-// Base “fractions” that kept layout safe before:
 const WIDTH_FRACTION_BASE = 0.92;
 const HEIGHT_FRACTION_BASE = 0.78;
-
-// Apply a 250% increase to the *base percent* without letting it exceed the container.
-// Practically, this bumps the fractions up to 1.0 (fill), but never beyond.
-const PERCENT_INCREASE = 2.5; // “250% increase of base percent”
+const PERCENT_INCREASE = 2.5;
 const WIDTH_FRACTION = Math.min(1, WIDTH_FRACTION_BASE * PERCENT_INCREASE);
 const HEIGHT_FRACTION = Math.min(1, HEIGHT_FRACTION_BASE * PERCENT_INCREASE);
-
-// Visual clamps (feel free to nudge)
-const MIN_STAGE_PX = 180;   // lower bound for tiny screens
-const MAX_STAGE_PX = 680;   // allow a larger ring on roomy layouts
+const MIN_STAGE_PX = 180;
+const MAX_STAGE_PX = 680;
 
 export default function RangePolarStage({
   mode,
@@ -55,7 +46,6 @@ export default function RangePolarStage({
     if (!el) return;
 
     const measure = () => {
-      // Prefer client* (no forced layout), fall back to rect.
       let w = el.clientWidth;
       let h = el.clientHeight;
       if (!w || !h) {
@@ -63,10 +53,8 @@ export default function RangePolarStage({
         w ||= Math.round(rect.width);
         h ||= Math.round(rect.height);
       }
-      if (!w || !h) return; // ignore transient zeros
+      if (!w || !h) return;
 
-      // Compute an ideal square size from the *increased* fractions,
-      // but never exceed the container's smaller dimension.
       const ideal = Math.min(
         Math.floor(w * WIDTH_FRACTION),
         Math.floor(h * HEIGHT_FRACTION)
@@ -95,8 +83,15 @@ export default function RangePolarStage({
   const holdSecRef = useRef(0);
   const bufRef = useRef<number[]>([]);
   const visualSecRef = useRef(0);
+
   const lastTsRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
+
+  // NEW: epoch guard to invalidate any in-flight RAF frames after a reset
+  const epochRef = useRef(0);
+
+  // local progress to animate badge WITHOUT re-rendering parent
+  const [progress01, setProgress01] = useState(0);
 
   const latest = useRef({
     active,
@@ -110,6 +105,12 @@ export default function RangePolarStage({
   useLayoutEffect(() => { latest.current.targetSec = Math.max(0.1, holdSec); }, [holdSec]);
 
   const hardReset = () => {
+    // invalidate any loops
+    epochRef.current += 1;
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+
+    // clear all state/refs
     setCapturedHz(null);
     setCapturedFor(null);
     completedRef.current = false;
@@ -121,20 +122,58 @@ export default function RangePolarStage({
     holdSecRef.current = 0;
     bufRef.current = [];
     visualSecRef.current = 0;
+    lastTsRef.current = null;
+    setProgress01(0);
     onProgress?.(0);
   };
 
-  // Reset on mode / external reset
-  useEffect(() => { hardReset(); }, [mode, resetKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // If capture toggles OFF, clear progress immediately (keep live label preview)
+  // Reset on mode / external reset — and restart RAF cleanly if still active
   useEffect(() => {
+    hardReset();
+
+    if (latest.current.active) {
+      const myEpoch = epochRef.current;
+      const loop = (ts: number) => {
+        if (myEpoch !== epochRef.current) return; // stale frame, ignore
+        tick(ts);
+        rafRef.current = requestAnimationFrame(loop);
+      };
+      rafRef.current = requestAnimationFrame(loop);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, resetKey]);
+
+  // If capture toggles OFF, clear visual progress and kill loop
+  useEffect(() => {
+    lastTsRef.current = null;
     if (!active) {
+      epochRef.current += 1; // invalidate in-flight frames
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+
       holdSecRef.current = 0;
       visualSecRef.current = 0;
+      setProgress01(0);
       onProgress?.(0);
+      return;
     }
-  }, [active, onProgress]);
+
+    // start fresh loop
+    const myEpoch = epochRef.current;
+    const loop = (ts: number) => {
+      if (myEpoch !== epochRef.current) return; // stale loop, ignore
+      tick(ts);
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+
+    return () => {
+      epochRef.current += 1;
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // constants (engine feel)
   const HYSTERESIS_GAP = 0.5;
@@ -157,13 +196,12 @@ export default function RangePolarStage({
   const updateVisual = (dt: number) => {
     const sameModeComplete = completedRef.current && capturedFor === mode;
     const logicalTarget = sameModeComplete ? latest.current.targetSec : holdSecRef.current;
-
-    // Ease toward target up *and* down (so ring drops when you stop singing)
     const lerp = Math.min(1, VISUAL_FOLLOW_RATE * dt);
     const next = visualSecRef.current + (logicalTarget - visualSecRef.current) * lerp;
-
     visualSecRef.current = next;
+
     const p01 = Math.max(0, Math.min(1, next / Math.max(0.001, latest.current.targetSec)));
+    setProgress01(p01);
     onProgress?.(p01);
   };
 
@@ -267,31 +305,15 @@ export default function RangePolarStage({
       holdSecRef.current = latest.current.targetSec;
       visualSecRef.current = latest.current.targetSec;
 
+      // lock progress to full
+      setProgress01(1);
+
       const m = Math.round(hzToMidi(med, a4Hz));
       const n = midiToNoteName(m, { useSharps: true, octaveAnchor: "C" });
       const label = `${n.name}${n.octave}`;
       try { onCaptured?.(med, label); } catch {}
     }
   };
-
-  useEffect(() => {
-    lastTsRef.current = null;
-    // Keep animating only while active (when inactive, we show a static ring at 0)
-    if (!active) {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      return;
-    }
-    const loop = (ts: number) => {
-      tick(ts);
-      rafRef.current = requestAnimationFrame(loop);
-    };
-    rafRef.current = requestAnimationFrame(loop);
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    };
-  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- labels + render ----------
   const liveLabel = (() => {
@@ -313,7 +335,6 @@ export default function RangePolarStage({
   const cx = size / 2, cy = size / 2;
   const centerR = Math.max(24, Math.floor(size * 0.18));
 
-  // Fit SVG to container in both axes
   return (
     <div
       ref={hostRef}
@@ -322,6 +343,7 @@ export default function RangePolarStage({
       <svg
         width="150%"
         height="150%"
+        className="pointer-events-none"
         viewBox={`0 0 ${size} ${size}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
@@ -333,14 +355,8 @@ export default function RangePolarStage({
             cy={cy}
             r={centerR}
             primary={primary}
-            progress01={
-              completedRef.current
-                ? 1
-                : Math.max(
-                    0,
-                    Math.min(1, visualSecRef.current / Math.max(0.001, latest.current.targetSec))
-                  )
-            }
+            progress01={completedRef.current ? 1 : progress01}
+            live={active}
           />
         </g>
       </svg>
