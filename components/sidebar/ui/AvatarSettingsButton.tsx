@@ -45,7 +45,7 @@ export default function AvatarSettingsButton({
     'shrink-0 grow-0 flex items-center justify-center',
   ].join(' ');
 
-  const col2 = 'flex-1 flex items-center px-2 text-base font-medium';
+  const col2 = 'flex-1 flex items-center pl-3 text-base font-medium';
 
   return (
     <button

@@ -48,7 +48,7 @@ export default function NavButton({
     'shrink-0 grow-0 flex items-center justify-center',
   ].join(' ');
 
-  const col2 = 'flex-1 flex items-center text-base px-2 font-medium';
+  const col2 = 'flex-1 flex items-center text-base pl-3 font-medium';
 
   return (
     <button

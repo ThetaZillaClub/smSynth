@@ -87,7 +87,7 @@ export default function LessonsCard({
               </div>
 
               <span
-                className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium bg-white"
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium bg-[#f8f8f8]"
                 style={{ borderColor: chipBorder, color: '#0f0f0f' }}
               >
                 <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: chipDot }} aria-hidden />
