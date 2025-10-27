@@ -7,6 +7,13 @@ import { clamp01, clamp, ease } from './utils';
 import type { Item } from './types';
 import { PR_COLORS } from '@/utils/stage';
 
+// Extend the DOM typing for our custom event fired by RadialsTabsCard
+declare global {
+  interface WindowEventMap {
+    'radials-tab-shown': CustomEvent<{ tab: 'pitch' | 'intervals' }>;
+  }
+}
+
 const GAMMA = 0.9;
 
 // Solid palette
@@ -104,11 +111,15 @@ export default function PolarArea({
   // Stronger re-draw on window resizes / tab reveals
   React.useEffect(() => {
     const kick = () => setNonce(n => (n + 1) % 1_000_000);
+
+    // Consume the param so ESLint is happy
+    const onTabShown = (e: Event) => { void e; kick(); };
+
     window.addEventListener('resize', kick);
-    window.addEventListener('radials-tab-shown' as any, kick as any);
+    window.addEventListener('radials-tab-shown', onTabShown);
     return () => {
       window.removeEventListener('resize', kick);
-      window.removeEventListener('radials-tab-shown' as any, kick as any);
+      window.removeEventListener('radials-tab-shown', onTabShown);
     };
   }, []);
 

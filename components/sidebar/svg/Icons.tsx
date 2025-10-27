@@ -68,9 +68,9 @@ export const ProfileIcon = (props: React.SVGProps<SVGSVGElement>) => (
     preserveAspectRatio="xMidYMid meet"
     {...props}
   >
-    {/* Head */}
-    <circle cx="256" cy="196" r="76" fill={PROFILE_ST1} />
-    {/* Shoulders / bust */}
+    {/* Head (st0) */}
+    <circle cx="256" cy="196" r="76" fill={PROFILE_ST0} />
+    {/* Shoulders / bust (st1) */}
     <path
       d="M144 392c0-62 50-112 112-112s112 50 112 112v24H144v-24z"
       fill={PROFILE_ST1}

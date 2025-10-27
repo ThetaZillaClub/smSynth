@@ -36,13 +36,20 @@ const BASE: Partial<SessionConfig> = {
   // We intentionally do NOT set rhythm.lengthBars here (derived per lesson)
 };
 
+// Helper type to avoid `any` on rhythm objects while staying flexible
+type RhythmCfg = NonNullable<SessionConfig["rhythm"]>;
+
+// Optional metadata hook your app can use to auto-enable/require vision provider.
+// Using a spread of a broadly-typed object avoids excess-property checks without `any`.
+const METADATA_SPREAD: Record<string, unknown> = {
+  metadata: { requiresVision: true, feature: "rhythm-line" },
+};
+
 export const SCALES_COURSE: CourseDef = {
   slug: "scales",
   title: "Scales",
   subtitle: "Within-key scale work",
-  // Optional metadata hook your app can use to auto-enable/require vision provider.
-  // Safe no-op if unused.
-  ...( { metadata: { requiresVision: true, feature: "rhythm-line" } } as any ),
+  ...METADATA_SPREAD,
   lessons: [
     {
       slug: "major-one-octave-middle-2-bars",
@@ -58,7 +65,7 @@ export const SCALES_COURSE: CourseDef = {
           pattern: "asc-desc",
           available: ["quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
-        } as any,
+        } as unknown as RhythmCfg,
         loopingMode: true,
       },
     },
@@ -75,7 +82,7 @@ export const SCALES_COURSE: CourseDef = {
           mode: "random",
           available: ["quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
-        } as any,
+        } as unknown as RhythmCfg,
       },
     },
     {
@@ -92,7 +99,7 @@ export const SCALES_COURSE: CourseDef = {
           pattern: "asc-desc",
           available: ["quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
-        } as any,
+        } as unknown as RhythmCfg,
       },
     },
     {
@@ -109,7 +116,7 @@ export const SCALES_COURSE: CourseDef = {
           mode: "random",
           available: ["quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
-        } as any,
+        } as unknown as RhythmCfg,
       },
     },
     {
@@ -126,7 +133,7 @@ export const SCALES_COURSE: CourseDef = {
           available: ["eighth", "quarter"] as NoteValue[],
           // lengthBars intentionally omitted — derived from scale length
           // Force no rests despite syncopation
-        } as any,
+        } as unknown as RhythmCfg,
       },
     },
     {
@@ -143,7 +150,7 @@ export const SCALES_COURSE: CourseDef = {
           numIntervals: 8,
           available: ["quarter"] as NoteValue[],
           // interval mode ignores bar length
-        } as any,
+        } as unknown as RhythmCfg,
       },
     },
   ],

@@ -20,13 +20,22 @@ type ScrollbarProps = {
   children: React.ReactNode;
 };
 
+type ScrollbarCSSVars = {
+  '--sb-thumb'?: string;
+  '--sb-thumb-hover'?: string;
+  '--sb-track'?: string;
+  '--sb-track-dark'?: string;
+  '--sb-size'?: string;
+  '--sb-radius'?: string;
+};
+
 /**
  * Drop-in scroll container with themed, native scrollbars.
  * Uses ::-webkit-scrollbar (Chromium/WebKit) and scrollbar-color (Firefox).
  */
 export default function ScrollArea({
   className = '',
-  style,
+  style = {},
   thumbColor = '#f7f7f7',
   thumbHoverColor = '#fcfcfc',
   trackColor = 'rgba(15,15,15,0.08)',
@@ -35,14 +44,14 @@ export default function ScrollArea({
   radius = 9999,
   children,
 }: ScrollbarProps) {
-  const mergedStyle: React.CSSProperties = {
+  const mergedStyle: React.CSSProperties & ScrollbarCSSVars = {
     ...style,
-    ['--sb-thumb' as any]: thumbColor,
-    ['--sb-thumb-hover' as any]: thumbHoverColor,
-    ['--sb-track' as any]: trackColor,
-    ['--sb-track-dark' as any]: darkTrackColor ?? trackColor,
-    ['--sb-size' as any]: `${thickness}px`,
-    ['--sb-radius' as any]: `${radius}px`,
+    '--sb-thumb': thumbColor,
+    '--sb-thumb-hover': thumbHoverColor,
+    '--sb-track': trackColor,
+    '--sb-track-dark': darkTrackColor ?? trackColor,
+    '--sb-size': `${thickness}px`,
+    '--sb-radius': `${radius}px`,
   };
 
   return (

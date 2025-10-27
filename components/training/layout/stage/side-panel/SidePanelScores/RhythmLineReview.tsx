@@ -4,61 +4,7 @@ import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
 
 export default function RhythmLineReview({ score }: { score: TakeScore }) {
-  const meta = (score as any).__rhythmLine as
-    | {
-        skippedReason: string | null;
-        expectedBeatsCount: number;
-        capturedBeatsCount: number;
-        usingVisionBeats: boolean;
-        timingFree: boolean;
-        haveRhythm: boolean;
-      }
-    | undefined;
-
   if (!score.rhythm.lineEvaluated) {
-    // Build a friendly reason string
-    let reason = "Rhythm line was not evaluated for this take.";
-    const details: string[] = [];
-
-    if (meta?.skippedReason) {
-      switch (meta.skippedReason) {
-        case "timing_free":
-          reason = "Rhythm line was not evaluated because this lesson ran in free-time mode.";
-          break;
-        case "line_disabled":
-          reason = "Rhythm line was not evaluated because the rhythm line was disabled for this take.";
-          break;
-        case "no_expected_onsets":
-          reason = "Rhythm line was not evaluated because there were no expected rhythm-line onsets.";
-          break;
-        case "no_taps_captured":
-          reason = "Rhythm line was not evaluated because no hand taps were captured during the response window.";
-          break;
-        case "scorer_missing_onsets":
-          reason =
-            "Rhythm line data was captured, but the scorer did not receive the expected beat grid.";
-          break;
-        default:
-          reason = "Rhythm line was not evaluated.";
-      }
-    }
-
-    if (typeof meta?.expectedBeatsCount === "number") {
-      details.push(`Expected beats: ${meta.expectedBeatsCount}`);
-    }
-    if (typeof meta?.capturedBeatsCount === "number") {
-      details.push(`Captured taps: ${meta.capturedBeatsCount}`);
-    }
-    if (meta?.usingVisionBeats === true) {
-      details.push("Input: vision hand-taps");
-    }
-
-    // Contextual hint
-    const hint =
-      meta?.skippedReason === "scorer_missing_onsets"
-        ? "Tip: Ensure rhythmLineOnsetsSec is forwarded to computeTakeScore → computeRhythmScore."
-        : "Tip: Make sure the lesson has a rhythm line, camera access is granted, and taps are clearly visible.";
-
     return (
       <div
         className={[
@@ -67,9 +13,7 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
         ].join(" ")}
       >
-        <div className="text-sm">{reason}</div>
-        {details.length > 0 && <div className="text-xs text-[#444] mt-1">{details.join(" • ")}</div>}
-        <div className="text-xs text-[#444] mt-1">{hint}</div>
+        <div className="text-sm">Rhythm line was not evaluated for this take.</div>
       </div>
     );
   }
@@ -106,7 +50,9 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
           <tbody>
             {rows.length === 0 ? (
               <tr className="border-t border-[#eee]">
-                <td className="px-2 py-1.5" colSpan={5}>No onsets to evaluate.</td>
+                <td className="px-2 py-1.5" colSpan={5}>
+                  No onsets to evaluate.
+                </td>
               </tr>
             ) : (
               rows.map((r, i) => {

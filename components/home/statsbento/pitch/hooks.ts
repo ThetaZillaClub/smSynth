@@ -1,13 +1,22 @@
+// components/home/statsbento/pitch/hooks.ts
 'use client';
 
 import * as React from 'react';
+
+// Extend the DOM typing for our custom event fired by RadialsTabsCard
+declare global {
+  interface WindowEventMap {
+    'radials-tab-shown': CustomEvent<{ tab: 'pitch' | 'intervals' }>;
+  }
+}
 
 export function useMeasure() {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [w, setW] = React.useState(0);
 
   React.useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
+    const el = ref.current;
+    if (!el) return;
 
     const pump = () => setW(el.clientWidth || 0);
 
@@ -22,13 +31,13 @@ export function useMeasure() {
 
     window.addEventListener('resize', onResize);
     // Custom event fired by RadialsTabsCard
-    window.addEventListener('radials-tab-shown' as any, onTabShown as any);
+    window.addEventListener('radials-tab-shown', onTabShown);
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('radials-tab-shown' as any, onTabShown as any);
+      window.removeEventListener('radials-tab-shown', onTabShown);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
@@ -40,17 +49,21 @@ export function useDpr() {
   const [dpr, setDpr] = React.useState(
     typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
   );
+
   React.useEffect(() => {
-    const h = () => setDpr(window.devicePixelRatio || 1);
-    window.addEventListener('resize', h);
+    const onResize = () => setDpr(window.devicePixelRatio || 1);
     // Also react when tabs reveal/hide canvases
-    const h2 = () => setDpr(window.devicePixelRatio || 1);
-    window.addEventListener('radials-tab-shown' as any, h2 as any);
+    const onTabShown = () => setDpr(window.devicePixelRatio || 1);
+
+    window.addEventListener('resize', onResize);
+    window.addEventListener('radials-tab-shown', onTabShown);
+
     return () => {
-      window.removeEventListener('resize', h);
-      window.removeEventListener('radials-tab-shown' as any, h2 as any);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('radials-tab-shown', onTabShown);
     };
   }, []);
+
   return dpr;
 }
 
@@ -59,7 +72,9 @@ export function useCanvas2d(width: number, height: number) {
   const dpr = useDpr();
 
   React.useLayoutEffect(() => {
-    const c = ref.current; if (!c) return;
+    const c = ref.current;
+    if (!c) return;
+
     const W = Math.max(1, Math.floor(width));
     const H = Math.max(1, Math.floor(height));
 

@@ -93,11 +93,13 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
 
   React.useEffect(() => {
     const kick = () => setNonce(n => (n + 1) % 1_000_000);
+    const onRadialsTabShown = () => kick();
+
     window.addEventListener('resize', kick);
-    window.addEventListener('radials-tab-shown' as any, kick as any);
+    window.addEventListener('radials-tab-shown', onRadialsTabShown);
     return () => {
       window.removeEventListener('resize', kick);
-      window.removeEventListener('radials-tab-shown' as any, kick as any);
+      window.removeEventListener('radials-tab-shown', onRadialsTabShown);
     };
   }, []);
 
@@ -229,7 +231,6 @@ function PolarAreaIntervals({ items, height = 360 }: { items: Item[]; height?: n
     const labelOutset = Math.max(20, Math.min(30, minSide * 0.05));
     const R = Math.max(ringPad + 12, minSide * 0.5 - ringPad - labelOutset);
     const r0 = Math.max(0, R * 0.20);
-    const Rmax = Math.max(r0 + 6, R - ringPad);
 
     const cx = W / 2, cy = H / 2;
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -381,7 +382,7 @@ export default function IntervalsCard({
 
         if (iQ.error) throw iQ.error;
 
-        type IntervalRow = { result_id: number; semitones: number; attempts: number; correct: number };
+        type IntervalRow = { result_id: string; semitones: number; attempts: number; correct: number };
         const rows: IntervalRow[] = (iQ.data ?? []) as IntervalRow[];
 
         const by = new Map<number, { a: number; c: number }>(); for (let i = 0; i <= 12; i++) by.set(i,{a:0,c:0});
