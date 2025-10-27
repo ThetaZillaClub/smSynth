@@ -8,6 +8,7 @@ import { COURSES as REGISTRY } from '@/lib/courses/registry';
 import useLessonBests from '@/hooks/progress/useLessonBests';
 import { letterFromPercent } from '@/utils/scoring/grade';
 import { PR_COLORS } from '@/utils/stage/theme';
+import { fetchJsonNoStore } from '@/components/sidebar/fetch/noStore';
 
 function isPassed(pct: number) {
   const l = letterFromPercent(pct);
@@ -31,7 +32,18 @@ const UNIQUE_SLUG = (() => {
 
 export default function AllCoursesCard({ courses }: { courses: Course[] }) {
   const router = useRouter();
-  const go = (slug: string) => router.push(`/courses/${slug}`);
+
+  const goCourse = async (slug: string) => {
+    const dest = `/courses/${slug}`;
+    const row = await fetchJsonNoStore<{ range_low: string | null; range_high: string | null }>(`/api/students/current/range`);
+    const ready = !!(row && typeof row.range_low === 'string' && row.range_low && typeof row.range_high === 'string' && row.range_high);
+    if (!ready) {
+      router.push(`/setup/range?next=${encodeURIComponent(dest)}`);
+      return;
+    }
+    router.push(dest);
+  };
+
   const { bests } = useLessonBests();
 
   // Normalize `bests` to a strongly typed map to avoid `any`
@@ -76,7 +88,7 @@ export default function AllCoursesCard({ courses }: { courses: Course[] }) {
           return (
             <button
               key={c.slug}
-              onClick={() => go(c.slug)}
+              onClick={() => goCourse(c.slug)}
               className={[
                 'group text-left rounded-xl border',
                 'border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]',

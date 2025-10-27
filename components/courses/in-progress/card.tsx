@@ -8,6 +8,7 @@ import { COURSES as REGISTRY } from '@/lib/courses/registry';
 import useLessonBests from '@/hooks/progress/useLessonBests';
 import { letterFromPercent } from '@/utils/scoring/grade';
 import { PR_COLORS } from '@/utils/stage/theme';
+import { fetchJsonNoStore } from '@/components/sidebar/fetch/noStore';
 
 function isPassed(pct: number) {
   const l = letterFromPercent(pct);
@@ -27,7 +28,18 @@ const UNIQUE_SLUG = (() => {
 
 export default function InProgressCard({ courses }: { courses: Course[] }) {
   const router = useRouter();
-  const go = (slug: string) => router.push(`/courses/${slug}`);
+
+  const goCourse = async (slug: string) => {
+    const dest = `/courses/${slug}`;
+    const row = await fetchJsonNoStore<{ range_low: string | null; range_high: string | null }>(`/api/students/current/range`);
+    const ready = !!(row && typeof row.range_low === 'string' && row.range_low && typeof row.range_high === 'string' && row.range_high);
+    if (!ready) {
+      router.push(`/setup/range?next=${encodeURIComponent(dest)}`);
+      return;
+    }
+    router.push(dest);
+  };
+
   const { bests, loading } = useLessonBests();
 
   const bestsMap: Record<string, number> = React.useMemo(
@@ -98,9 +110,9 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
       {items.map(({ c, p }) => (
         <button
           key={c.slug}
-          onClick={() => go(c.slug)}
+          onClick={() => goCourse(c.slug)}
           className={[
-            'relative w-full text-left rounded-r-2xl rounded-l-lg border py-6 px-6 md:px-7', // ➜ extra L/R padding, Y kept the same
+            'relative w-full text-left rounded-r-2xl rounded-l-lg border py-6 px-6 md:px-7',
             'border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]',
             'border-[#d2d2d2] hover:shadow-md shadow-sm active:scale-[0.99] transition',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]',
@@ -114,9 +126,7 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
             aria-hidden
           />
 
-          {/* Shared 3-row grid; Row 3 is dedicated solely to the progress bar */}
           <div className="grid grid-cols-[minmax(0,1fr)_14rem] grid-rows-[auto_auto_auto] gap-x-7 gap-y-2">
-            {/* Row 1 — Left: title with "lessons remaining" chip appended inline */}
             <div className="col-[1] row-[1] self-center min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="text-2xl font-semibold text-[#0f0f0f] truncate">
@@ -137,12 +147,10 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
               </div>
             </div>
 
-            {/* Row 1 — Right: percent */}
             <div className="col-[2] row-[1] self-center text-right text-3xl font-semibold leading-none text-[#0f0f0f]">
               {p.pct}%
             </div>
 
-            {/* Row 2 — Left: subtitle or placeholder */}
             {c.subtitle ? (
               <div className="col-[1] row-[2] self-center min-w-0 text-base text-[#0f0f0f] truncate -mt-1">
                 {c.subtitle}
@@ -151,12 +159,10 @@ export default function InProgressCard({ courses }: { courses: Course[] }) {
               <div className="col-[1] row-[2] self-center h-5 -mt-0.5" aria-hidden />
             )}
 
-            {/* Row 2 — Right: x/x completed */}
             <div className="col-[2] row-[2] self-center text-right text-sm text-[#0f0f0f] -mt-0.5">
               {p.completed}/{p.total} completed
             </div>
 
-            {/* Row 3 — Progress bar spans full width (its own row) */}
             <div className="col-[1/_-1] row-[3] self-center mt-6">
               <div
                 className="h-3 rounded-full overflow-hidden"

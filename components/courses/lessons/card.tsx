@@ -8,6 +8,7 @@ import { COURSES as REGISTRY } from '@/lib/courses/registry';
 import useLessonBests from '@/hooks/progress/useLessonBests';
 import { letterFromPercent } from '@/utils/scoring/grade';
 import { PR_COLORS } from '@/utils/stage/theme';
+import { fetchJsonNoStore } from '@/components/sidebar/fetch/noStore';
 
 type StatusKey = 'not-started' | 'started' | 'completed' | 'mastered';
 
@@ -40,7 +41,18 @@ export default function LessonsCard({
   basePath?: string; // default `/courses/${courseSlug}`
 }) {
   const router = useRouter();
-  const go = (slug: string) => router.push(`${basePath ?? `/courses/${courseSlug}`}/${slug}`);
+
+  const openLesson = async (slug: string) => {
+    const dest = `${basePath ?? `/courses/${courseSlug}`}/${slug}`;
+    const row = await fetchJsonNoStore<{ range_low: string | null; range_high: string | null }>(`/api/students/current/range`);
+    const ready = !!(row && typeof row.range_low === 'string' && row.range_low && typeof row.range_high === 'string' && row.range_high);
+    if (!ready) {
+      router.push(`/setup/range?next=${encodeURIComponent(dest)}`);
+      return;
+    }
+    router.push(dest);
+  };
+
   const { bests } = useLessonBests();
 
   const bestsSafe = (bests ?? {}) as Record<string, number | undefined>;
@@ -71,7 +83,7 @@ export default function LessonsCard({
           <button
             key={l.slug}
             type="button"
-            onClick={() => go(l.slug)}
+            onClick={() => openLesson(l.slug)}
             className={[
               'relative w-full text-left rounded-2xl border p-6 md:p-7',
               'border bg-gradient-to-b from-[#fafafa] to-[#f8f8f8]',
