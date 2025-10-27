@@ -1,6 +1,8 @@
 // components/vision/stage/VisionStage.tsx
 "use client";
 import React, { useCallback, useRef, useState, useEffect, useMemo } from "react";
+import useStudentRow from "@/hooks/students/useStudentRow";
+import useStudentGestureLatencyUpdater from "@/hooks/students/useStudentGestureLatencyUpdater";
 import { HandLandmarker } from "@mediapipe/tasks-vision";
 import { StageCamera, StageCanvas, StageFooter } from "./stage-layout";
 import useCameraStream from "./hooks/useCameraStream";
@@ -46,7 +48,8 @@ export default function VisionStage() {
   const secPerBeat = 60 / bpm;
   const leadBeats = 4;
   const runBeats = 16;
-
+  const { studentRowId } = useStudentRow({ studentIdFromQuery: null });
+  const pushLatency = useStudentGestureLatencyUpdater(studentRowId);
   const videoConstraints = useMemo<MediaStreamConstraints["video"]>(
     () => ({ facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }),
     []
@@ -201,6 +204,12 @@ export default function VisionStage() {
 
         setMatched(deltasMs.length);
         setResultMs(latency);
+        // persist if we have a valid result
+        try {
+          if (latency != null) {
+            void pushLatency(latency);
+          }
+        } catch {}        
         try {
           if (latency != null) localStorage.setItem(KEY, String(latency));
           else localStorage.removeItem(KEY);
@@ -212,7 +221,7 @@ export default function VisionStage() {
     } catch (e) {
       setError((e as Error)?.message ?? "Audio error");
     }
-  }, [phase, resetEvents, secPerBeat, leadBeats, runBeats, playLeadInTicks, eventsSecRef]);
+  }, [phase, resetEvents, secPerBeat, leadBeats, runBeats, playLeadInTicks, eventsSecRef, pushLatency]);
 
   return (
     <div className="w-full h-full flex flex-col bg-transparent" style={{ cursor: "default" }}>

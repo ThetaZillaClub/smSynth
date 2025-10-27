@@ -3,6 +3,10 @@ import type { Options, PitchSample, RhythmScore } from "../types";
 import { evalMelodyCoverageRhythm } from "./melodyCoverage";
 import { evalHandLineRhythm } from "./handline";
 
+/**
+ * NOTE: Hand-line events are assumed to be latency-compensated upstream (realtime detector).
+ * We therefore pass goodAlignMs=0 so scoring applies no additional “adjustment band”.
+ */
 export function computeRhythmScore({
   phrase,
   samples,
@@ -26,11 +30,12 @@ export function computeRhythmScore({
     maxAlignMs: options.maxAlignMs,
   });
 
+  // ❗No extra adjustment here — events are already aligned in realtime.
   const line = evalHandLineRhythm({
     onsets: rhythmLineOnsetsSec,
     events: gestureEventsSec,
     maxAlignMs: options.maxAlignMs,
-    goodAlignMs: options.goodAlignMs,
+    goodAlignMs: 0, // <- disable “full-credit band” as an adjustment
     unique: true,
   });
 

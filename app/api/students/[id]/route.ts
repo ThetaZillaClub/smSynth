@@ -10,6 +10,7 @@ type StudentRow = {
   privacy: "public" | "private";
   range_low: string | null;
   range_high: string | null;
+  gesture_latency_ms: number | null;
   updated_at?: string;
 };
 
@@ -22,7 +23,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("models")
-    .select("id,name,creator_display_name,image_path,privacy,range_low,range_high,updated_at")
+    .select("id,name,creator_display_name,image_path,privacy,range_low,gesture_latency_ms,range_high,updated_at")
     .eq("id", id)
     .single();
 

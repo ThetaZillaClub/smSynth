@@ -23,7 +23,6 @@ import useTakeScoring from "@/hooks/gameplay/useTakeScoring";
 import usePitchSampler from "@/hooks/pitch/usePitchSampler";
 import { useGameplaySession } from "@/hooks/gameplay/useGameplaySession";
 import { useVisionEnabled } from "@/components/settings/vision/vision-layout";
-import useVisionLatency from "@/hooks/vision/useVisionLatency";
 import { useTempoWindows } from "@/hooks/gameplay/useTempoWindows";
 import { useVisionBeatRunner } from "@/hooks/vision/useVisionBeatRunner";
 import { useFooterActions } from "@/hooks/gameplay/useFooterActions";
@@ -34,6 +33,7 @@ import useTimingFreeCapture from "@/hooks/gameplay/useTimingFreeCapture";
 import useContentLeadInCue from "@/hooks/gameplay/useContentLeadInCue";
 import usePolarTargetOverride from "@/hooks/gameplay/usePolarTargetOverride";
 import CourseNavGate from "./layout/stage/side-panel/CourseNavGate";
+import useStudentRow from "@/hooks/students/useStudentRow";
 
 type RhythmConfig = { lineEnabled?: boolean; detectEnabled?: boolean };
 
@@ -72,6 +72,11 @@ export default function TrainingGame({
     studentRowId,
     { rangeLowLabel, rangeHighLabel }
   );
+
+  // DB-backed latency (no localStorage); falls back to session/default when missing
+  const { gestureLatencyMs: gestureLatencyMsDb } = useStudentRow({
+    studentIdFromQuery: studentRowId ?? null,
+  });
 
   // Effective session from settings + range
   const { session: sessionEff } = useGameplaySession({
@@ -305,7 +310,8 @@ export default function TrainingGame({
     stopPlayback,
   });
 
-  const calibratedLatencyMs = useVisionLatency(gestureLatencyMs ?? 90);
+  // Effective latency for realtime vision runner
+  const latencyMsEff = (gestureLatencyMsDb ?? gestureLatencyMs ?? 90);
 
   // Pitch sampler
   const samplerActive: boolean = !pretestActive && loop.loopPhase === "record";
@@ -324,7 +330,7 @@ export default function TrainingGame({
   // Start the vision/tap runner when allowed
   const hand = useVisionBeatRunner({
     enabled: needVision,
-    latencyMs: (calibratedLatencyMs ?? gestureLatencyMs) || 90,
+    latencyMs: latencyMsEff,
     loopPhase: loop.loopPhase,
     anchorMs: loop.anchorMs,
     pretestActive,
@@ -404,7 +410,9 @@ export default function TrainingGame({
     bpm,
     den: ts.den,
     leadInSec,
-    calibratedLatencyMs,
+    // Provide DB-calibrated latency for scoring when NOT using vision beats.
+    // Scoring will set gestureLagSec=0 when vision beats are used (to avoid double-comp).
+    calibratedLatencyMs: gestureLatencyMsDb ?? null,
     gestureLatencyMs,
     exerciseLoops,
     lessonSlug: namespacedLessonSlug,
