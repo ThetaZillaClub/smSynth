@@ -3,8 +3,12 @@ import { useEffect, useRef } from "react";
 
 /**
  * Plays a metronome COUNT-IN during the exercise lead-in.
- * - Triggers when loopPhase === "lead-in"
- * - Uses `anchorMs` as the moment the first click should fire
+ *
+ * Timebase contract (IMPORTANT):
+ * - `anchorMs` is the DOWNBEAT (start of the record window / phrase time t=0).
+ * - The FIRST count-in click must occur `leadBeats * secPerBeat` BEFORE `anchorMs`.
+ *
+ * We schedule exactly once per `anchorMs`.
  */
 export function useLeadInMetronome(opts: {
   enabled: boolean;
@@ -12,7 +16,8 @@ export function useLeadInMetronome(opts: {
   leadBeats: number;
   loopPhase: "idle" | "call" | "lead-in" | "record" | "rest" | string;
   anchorMs: number | null | undefined;
-  playLeadInTicks: (beats: number, secPerBeat: number, anchorMs: number) => Promise<void> | void;
+  /** playLeadInTicks(beats, secPerBeat, startAtMs) */
+  playLeadInTicks: (beats: number, secPerBeat: number, startAtMs: number) => Promise<void> | void;
   secPerBeat: number;
 }) {
   const {
@@ -25,22 +30,24 @@ export function useLeadInMetronome(opts: {
     secPerBeat,
   } = opts;
 
-  // Guard so we schedule exactly once per anchor
+  // Guard so we schedule exactly once per anchor/start time
   const scheduledStartRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Only schedule when: feature enabled, metronome on, have a lead-in, IN the "lead-in" phase,
-    // and we have a valid anchor.
     if (!enabled) return;
     if (!metronome) return;
     if (leadBeats <= 0) return;
     if (loopPhase !== "lead-in") return;
     if (anchorMs == null) return;
 
-    if (scheduledStartRef.current === anchorMs) return;
-    scheduledStartRef.current = anchorMs;
+    // Treat anchor as downbeat; start first click BEFORE it.
+    const firstClickAtMs = Math.round(anchorMs - leadBeats * secPerBeat * 1000);
 
-    // Start clicks AT the start of lead-in so they count down toward the downbeat.
-    void playLeadInTicks(leadBeats, secPerBeat, anchorMs);
+    // Avoid duplicate scheduling for the same start time
+    if (scheduledStartRef.current === firstClickAtMs) return;
+    scheduledStartRef.current = firstClickAtMs;
+
+    // Schedule the ticks leading up to the downbeat.
+    void playLeadInTicks(leadBeats, secPerBeat, firstClickAtMs);
   }, [enabled, metronome, leadBeats, loopPhase, anchorMs, playLeadInTicks, secPerBeat]);
 }

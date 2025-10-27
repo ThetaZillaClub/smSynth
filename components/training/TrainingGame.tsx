@@ -164,7 +164,7 @@ export default function TrainingGame({
     : 0;
 
   const MAX_TAKES = Math.max(1, Number(exerciseLoops ?? 10));
-  const MAX_SESSION_SEC = 15 * 60;
+  const MAX_SESSION_SEC = 120 * 60;
 
   // IO
   const { pitch, confidence, isReady, error } = usePitchDetection("/models/swiftf0", {

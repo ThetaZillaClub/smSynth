@@ -232,9 +232,10 @@ export default function useTakeScoring() {
 
     // Source of truth: session-config trigger (Intervals sets timingFreeResponse: true)
     const sessionSaysTimingFree = !!args.timingFreeResponse;
+    // Only treat hints as "on" when they are meaningfully > 0
     const timingFreeHint =
-      typeof args.minHoldSec === "number" ||
-      typeof args.phraseLengthOverrideSec === "number";
+      (typeof args.minHoldSec === "number" && (args.minHoldSec ?? 0) > 0) ||
+      (typeof args.phraseLengthOverrideSec === "number" && (args.phraseLengthOverrideSec ?? 0) > 0);
 
     const isTimingFree =
       sessionSaysTimingFree ||
