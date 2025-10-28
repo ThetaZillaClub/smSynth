@@ -268,16 +268,19 @@ export type BuildSequenceParams = {
   /** NEW */
   allowedDegreeIndices?: number[] | null;
   allowedMidis?: number[] | null;
+  /** NEW: mirror random-mode behavior for sequence mode */
+  dropUpperWindowDegrees?: boolean;
 };
 
 export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phrase {
   const {
     lowHz, highHz, bpm, den,
-    tonicPc, scale, rhythm, pattern, noteQuota,
+    tonicPc, scale, rhythm, pattern, noteQuota: noteQuotaParam,
     a4Hz = 440, seed = 0xd1a1,
     tonicMidis = null,
     allowedDegreeIndices = null,
     allowedMidis = null,
+    dropUpperWindowDegrees = false,
   } = params;
 
   const loM = Math.round(hzToMidi(Math.min(lowHz, highHz), a4Hz));
@@ -304,20 +307,19 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
     return { durationSec: totalSec, notes: [] };
   }
 
-  const baseOffsets = scaleSemitones(scale).slice().sort((a, b) => a - b);
-  const buildAscendingOffsets = (quota: number): number[] => {
-    const out: number[] = [];
-    let k = 0;
-    while (out.length < quota) {
-      const idx = k % baseOffsets.length;
-      const oct = Math.floor(k / baseOffsets.length);
-      const off = baseOffsets[idx] + 12 * oct;
-      out.push(off);
-      k++;
-    }
-    return out.slice(0, quota);
-  };
-  const asc = buildAscendingOffsets(noteQuota);
+  // ---- degree offsets limited to allowed degrees (single window/octave)
+  const allOffsets = scaleSemitones(scale).slice().sort((a, b) => a - b);
+  const degOffsetsRaw = (allowedDegreeIndices && allowedDegreeIndices.length)
+    ? allowedDegreeIndices
+    .map((i) => (i >= 0 && i < allOffsets.length ? allOffsets[i] : undefined))
+    .filter((x): x is number => typeof x === "number")
+    : allOffsets;
+  const degOffsets = Array.from(new Set(degOffsetsRaw)).sort((a, b) => a - b);
+  if (!degOffsets.length) {
+    const totalSec = rhythm.reduce((s, r) => s + noteValueToSeconds(r.value, bpm, den), 0);
+    return { durationSec: totalSec, notes: [] };
+  }
+  const K = degOffsets.length; // number of unique degrees in phrase
 
   // tonic candidates inside range
   const tonicCandidates: number[] = [];
@@ -344,11 +346,14 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   if (!effectiveCandidates.length) effectiveCandidates = tonicCandidates.length ? tonicCandidates : [allowed[0]];
 
   const center = Math.round((loM + hiM) / 2);
+  // pick base so chosen window [base+minOff, base+maxOff] fits range
   type Fit = { base: number; fits: boolean; overflow: number; dist: number };
+  const minOff = degOffsets[0];
+  const maxOff = degOffsets[degOffsets.length - 1];
   const fits: Fit[] = effectiveCandidates.map((base) => {
-    const lastAsc = base + asc[asc.length - 1];
-    const firstAsc = base + asc[0];
-    const overflow = Math.max(0, loM - firstAsc) + Math.max(0, lastAsc - hiM);
+    const lowT = base + minOff;
+    const highT = base + maxOff;
+    const overflow = Math.max(0, loM - lowT) + Math.max(0, highT - hiM);
     return { base, fits: overflow === 0, overflow, dist: Math.abs(base - center) };
   });
   fits.sort((a, b) => {
@@ -361,18 +366,16 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   });
   const chosenBase = fits[0]?.base ?? effectiveCandidates[0];
 
-  // build targets per pattern and clamp to range + degree whitelist + absolute whitelist
-  let ascTargets = asc.map((o) => chosenBase + o).filter((m) => m >= loM && m <= hiM);
+  // ascending list inside chosen window
+  let ascTargets = degOffsets.map((o) => chosenBase + o).filter((m) => m >= loM && m <= hiM);
+  if (allowSet) ascTargets = ascTargets.filter((m) => allowSet.has(m));
 
-  if (allowedDegreeIndices && allowedDegreeIndices.length) {
-    const set = new Set(allowedDegreeIndices);
-    ascTargets = ascTargets.filter((m) => {
-      const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
-      return di >= 0 && set.has(di);
-    });
-  }
-  if (allowSet) {
-    ascTargets = ascTargets.filter((m) => allowSet.has(m));
+  // optional: drop upper-window octave duplicate for sequence mode too
+  if (dropUpperWindowDegrees && tonicMidis && tonicMidis.length) {
+    const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
+    const upperSet = new Set<number>();
+    for (const T of sorted) for (const off of degOffsets) upperSet.add(Math.round(T + 12 + off));
+    ascTargets = ascTargets.filter((m) => !upperSet.has(m));
   }
 
   const concatNoDup = (a: number[], b: number[]) => {
@@ -383,30 +386,38 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
     else out.push(...b);
     return out;
   };
+  // phrase length:
+  // - prefer the number of 'note' slots in rhythm (no silent gaps)
+  // - else: asc/desc -> K, asc-desc/desc-asc -> 2*K-1
+  const noteSlots = rhythm.reduce((s, r) => s + (r.type === "note" ? 1 : 0), 0);
+  const defaultQuota = (pattern === "asc" || pattern === "desc") ? K : (2 * K - 1);
+  const noteQuota = noteSlots || noteQuotaParam || defaultQuota;
 
   let targets: number[] = [];
   switch (pattern) {
     case "asc":
-      targets = ascTargets.slice(0, noteQuota);
+      targets = ascTargets.slice(0, Math.max(1, Math.min(K, noteQuota)));
       break;
     case "desc":
-      targets = ascTargets.slice(0, noteQuota).reverse();
+      targets = ascTargets.slice(0, Math.max(1, Math.min(K, noteQuota))).reverse();
       break;
     case "asc-desc": {
-      const up = ascTargets.slice(0, Math.max(1, Math.ceil(noteQuota / 2)));
+      const up = ascTargets.slice(0, Math.max(1, K));
       const down = up.slice().reverse();
-      targets = concatNoDup(up, down).slice(0, noteQuota);
+      targets = concatNoDup(up, down);
       break;
     }
     case "desc-asc": {
-      const down = ascTargets.slice(0, Math.max(1, Math.ceil(noteQuota / 2))).reverse();
+      const down = ascTargets.slice(0, Math.max(1, K)).reverse();
       const up = down.slice().reverse();
-      targets = concatNoDup(down, up).slice(0, noteQuota);
+      targets = concatNoDup(down, up);
       break;
     }
   }
-  while (targets.length < noteQuota && targets.length > 0) {
-    targets.push(targets[targets.length - 1]);
+  // match target count to actual note slots
+  if (targets.length > noteQuota) targets = targets.slice(0, noteQuota);
+  else if (targets.length < noteQuota && targets.length > 0) {
+    while (targets.length < noteQuota) targets.push(targets[targets.length - 1]);
   }
 
   // map targets onto rhythm
@@ -415,7 +426,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   const notes: { midi: number; startSec: number; durSec: number }[] = [];
   for (const ev of rhythm) {
     const d = noteValueToSeconds(ev.value, bpm, den);
-    if (ev.type === "note" && ti < targets.length) {
+    if (ev.type === "note") {
       notes.push({ midi: targets[ti++], startSec: t, durSec: d });
     }
     t += d;

@@ -1,9 +1,9 @@
 // lib/courses/pitch-tune/index.ts
-import type { CourseDef } from "../types";
+import { defineCourse } from "../builder";
 import type { SessionConfig } from "@/components/training/session/types";
 
 const BASE: Partial<SessionConfig> = {
-  bpm: 120,                // ← bump from 80 to 100 for this course
+  bpm: 120,
   view: "polar",
   metronome: true,
   callResponse: true,
@@ -14,6 +14,7 @@ const BASE: Partial<SessionConfig> = {
   timingFreeMaxSec: 10,
   timingFreeMinCaptureSec: 1,
 
+  // Major scale context; gameplay resolves tonic as usual.
   scale: { name: "major", tonicPc: 0, maxPerDegree: 8 },
 
   rhythm: {
@@ -29,30 +30,53 @@ const BASE: Partial<SessionConfig> = {
   },
 };
 
-const deg = (degree: number, title: string, slug: string, summary: string) => ({
-  slug,
-  title,
-  summary,
-  config: {
-    ...BASE,
-    // restrict to a single diatonic scale degree (0=Do, 1=Re, ... 6=Ti)
-    allowedDegrees: [degree],
-  } as Partial<SessionConfig>,
-});
-
-const PITCH_TUNE_COURSE: CourseDef = {
+export default defineCourse({
   slug: "pitch-tune",
   title: "Pitch Tune",
-  subtitle: "Single-pitch call & response",
+  subtitle: "Single tone call & response",
+  base: BASE,
   lessons: [
-    deg(0, "Match Do (1)",  "do-1",  "Listen, then sing Do. Aim for the green capture band."),
-    deg(1, "Match Re (2)",  "re-2",  "Sing Re relative to the current key."),
-    deg(2, "Match Mi (3)",  "mi-3",  "Hold Mi steadily in tune."),
-    deg(3, "Match Fa (4)",  "fa-4",  "Lock into Fa; watch the cents arrow."),
-    deg(4, "Match Sol (5)", "sol-5", "Sing Sol with a centered tone."),
-    deg(5, "Match La (6)",  "la-6",  "Match La cleanly and consistently."),
-    deg(6, "Match Ti (7)",  "ti-7",  "Find Ti; feel the leading-tone pull."),
+    {
+      slug: "do",
+      title: "Do",
+      summary: "Home tone, stable and calm.",
+      overrides: { allowedDegrees: [0] },
+    },
+    {
+      slug: "re",
+      title: "Re",
+      summary: "Forward leaning and bright.",
+      overrides: { allowedDegrees: [1] },
+    },
+    {
+      slug: "mi",
+      title: "Mi",
+      summary: "Warm major color, relaxed.",
+      overrides: { allowedDegrees: [2] },
+    },
+    {
+      slug: "fa",
+      title: "Fa",
+      summary: "Steady tone that sets up motion.",
+      overrides: { allowedDegrees: [3] },
+    },
+    {
+      slug: "sol",
+      title: "Sol",
+      summary: "Open and resonant, strong center.",
+      overrides: { allowedDegrees: [4] },
+    },
+    {
+      slug: "la",
+      title: "La",
+      summary: "Lyrical and light, invites motion.",
+      overrides: { allowedDegrees: [5] },
+    },
+    {
+      slug: "ti",
+      title: "Ti",
+      summary: "Tense and bright, wants to resolve to do.",
+      overrides: { allowedDegrees: [6] },
+    },
   ],
-};
-
-export default PITCH_TUNE_COURSE;
+});

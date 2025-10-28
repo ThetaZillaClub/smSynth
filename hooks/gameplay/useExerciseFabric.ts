@@ -1,5 +1,7 @@
 // hooks/gameplay/useExerciseFabric.ts
+
 import * as React from "react";
+
 import type { Phrase as StagePhrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/generator";
 import {
@@ -89,38 +91,34 @@ export function useExerciseFabric(opts: {
   const tonicMidisSafe: number[] | null = React.useMemo(() => {
     if (tonicMidis && tonicMidis.length) return tonicMidis;
     if (!haveRange || !scale) return null;
-
     const wins = windowsForKeyInRange(scale.tonicPc, lowHz as number, highHz as number);
     if (!wins.length) return null;
-
     const pref =
       Array.isArray(sessionConfig.preferredOctaveIndices) &&
       sessionConfig.preferredOctaveIndices.length
         ? sessionConfig.preferredOctaveIndices[0]!
         : null;
-
     const chosen = pickWindow(wins, lowHz as number, highHz as number, pref);
     return chosen != null ? [chosen] : null;
   }, [tonicMidis, haveRange, scale, lowHz, highHz, sessionConfig.preferredOctaveIndices]);
 
   // ---- rest policy calc ----
+  // IMPORTANT FIX: contentAllowRests must be *clamped* by lineAllowRests.
+  // When resolveLessonToSession merges defaults, it may inject contentAllowRests:true.
+  // If the author disabled rests at the line level (allowRests:false),
+  // we hard-disable them for melody too.
   const lineAllowRests: boolean = (rhythm as any)?.allowRests !== false;
   const lineRestProbRaw: number = (rhythm as any)?.restProb ?? 0.3;
   const lineRestProb = lineAllowRests ? lineRestProbRaw : 0;
 
-  const contentAllowRests: boolean = (() => {
-    const v = (rhythm as any)?.contentAllowRests;
-    return v == null ? lineAllowRests : v !== false;
-  })();
-  const contentRestProbRaw: number = (() => {
-    const v = (rhythm as any)?.contentRestProb;
-    return v == null ? lineRestProbRaw : v;
-  })();
+  const contentAllowRests: boolean = lineAllowRests && ((rhythm as any)?.contentAllowRests !== false);
+  const contentRestProbRaw: number = (rhythm as any)?.contentRestProb ?? lineRestProbRaw;
   const contentRestProb = contentAllowRests ? contentRestProbRaw : 0;
 
   // ---- BLUE RHYTHM ----
   const syncRhythmFabric: RhythmEvent[] | null = React.useMemo(() => {
     if (!rhythm) return null;
+
     const lineEnabled = (rhythm as any).lineEnabled !== false;
     if (!lineEnabled) return null;
 
@@ -129,12 +127,21 @@ export function useExerciseFabric(opts: {
       : ["quarter"];
 
     if ((rhythm as any).mode === "sequence") {
-      const base = sequenceNoteCountForScale((scale?.name ?? "major") as any);
-      const want =
-        ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
-          ? base * 2 - 1
-          : base;
-      return buildBarsRhythmForQuota({
+      // Size quota by allowed degrees if present; else fall back to scale-based size.
+      const degK = Array.isArray(sessionConfig.allowedDegrees) && sessionConfig.allowedDegrees.length
+        ? new Set(
+            sessionConfig.allowedDegrees
+              .map((n) => Math.max(0, Math.floor(n)))
+          ).size
+        : sequenceNoteCountForScale((scale?.name ?? "major") as any);
+
+      const isMirror =
+        (rhythm as any).pattern === "asc-desc" ||
+        (rhythm as any).pattern === "desc-asc";
+
+      const want = Math.max(1, isMirror ? (degK * 2 - 1) : degK);
+
+      const fabricRaw = buildBarsRhythmForQuota({
         bpm, den: ts.den, tsNum: ts.num,
         available,
         restProb: lineRestProb,
@@ -142,6 +149,9 @@ export function useExerciseFabric(opts: {
         seed: syncSeed,
         noteQuota: want,
       });
+
+      // Ensure no rests in the visual rhythm line when rests are disabled.
+      return lineAllowRests ? fabricRaw : fabricRaw.filter((ev) => ev.type === "note");
     }
 
     return buildTwoBarRhythm({
@@ -152,7 +162,7 @@ export function useExerciseFabric(opts: {
       seed: syncSeed,
       bars: lengthBars,
     });
-  }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed, lengthBars, lineAllowRests, lineRestProb]);
+  }, [rhythm, bpm, ts.den, ts.num, scale?.name, syncSeed, lengthBars, lineAllowRests, lineRestProb, sessionConfig.allowedDegrees]);
 
   // ---- MELODY FABRIC ----
   const generated = React.useMemo((): { phrase: StagePhrase | null; melodyRhythm: RhythmEvent[] | null } => {
@@ -176,6 +186,7 @@ export function useExerciseFabric(opts: {
           default: return "quarter";
         }
       })();
+
       const pairRhythm: RhythmEvent[] = [
         { type: "note", value: beatNote },
         { type: "note", value: beatNote },
@@ -190,6 +201,7 @@ export function useExerciseFabric(opts: {
           ...Array.from({ length: restBeats }, () => ({ type: "rest", value: beatNote } as const)),
         ];
       })();
+
       const melodyRhythm = Array.from({ length: (rhythm as any).numIntervals || 8 }, () => perPair).flat();
 
       const phrase = buildIntervalPhrase({
@@ -211,17 +223,26 @@ export function useExerciseFabric(opts: {
         /** Still respect absolute whitelists if present */
         allowedMidis,
       });
+
       return { phrase, melodyRhythm };
     }
 
     if ((rhythm as any).mode === "sequence") {
-      const base = sequenceNoteCountForScale(scale.name);
-      const want =
-        ((rhythm as any).pattern === "asc-desc" || (rhythm as any).pattern === "desc-asc")
-          ? base * 2 - 1
-          : base;
+      // Size by allowed degrees: e.g., triad [0,2,4] => degK=3, asc-desc => 5
+      const degK = Array.isArray(sessionConfig.allowedDegrees) && sessionConfig.allowedDegrees.length
+        ? new Set(
+            sessionConfig.allowedDegrees
+              .map((n) => Math.max(0, Math.floor(n)))
+          ).size
+        : sequenceNoteCountForScale(scale.name);
 
-      const fabric = buildBarsRhythmForQuota({
+      const isMirror =
+        (rhythm as any).pattern === "asc-desc" ||
+        (rhythm as any).pattern === "desc-asc";
+
+      const want = Math.max(1, isMirror ? (degK * 2 - 1) : degK);
+
+      const fabricRaw = buildBarsRhythmForQuota({
         bpm, den: ts.den, tsNum: ts.num,
         available,
         restProb: contentRestProb,
@@ -229,6 +250,9 @@ export function useExerciseFabric(opts: {
         seed: rhythmSeed,
         noteQuota: want,
       });
+
+      // Hard guarantee: if rests are disabled for content, strip them.
+      const fabric = contentAllowRests ? fabricRaw : fabricRaw.filter((ev) => ev.type === "note");
 
       const phrase = buildPhraseFromScaleSequence({
         lowHz: lowHz as number,
@@ -245,7 +269,6 @@ export function useExerciseFabric(opts: {
         /** degree filter */
         allowedDegreeIndices: sessionConfig.allowedDegrees ?? null,
         allowedMidis,
-        
       });
 
       return { phrase, melodyRhythm: fabric };
@@ -264,14 +287,17 @@ export function useExerciseFabric(opts: {
     // Build an allowed MIDI whitelist for RANDOM mode that optionally drops the top-octave tonic(s)
     const buildAllowedMidiWhitelist = (): number[] | null => {
       if (!tonicMidisSafe?.length) return null;
+
       const a4 = 440;
       const loM = Math.round(hzToMidi(Math.min(lowHz as number, highHz as number), a4));
       const hiM = Math.round(hzToMidi(Math.max(lowHz as number, highHz as number), a4));
 
       const sortedT = Array.from(new Set(tonicMidisSafe.map((t) => Math.round(t)))).sort((a, b) => a - b);
       const windows = sortedT.map((T) => [T, T + 12] as const);
+
       const minStart = windows[0][0];
       const maxEnd = windows[windows.length - 1][1];
+
       const inAny = (m: number) => windows.some(([s, e]) => m >= s && m <= e);
       const underOk = !!randomIncludeUnder ? (m: number) => m < minStart : () => false;
       const overOk  = !!randomIncludeOver  ? (m: number) => m > maxEnd  : () => false;
@@ -294,6 +320,7 @@ export function useExerciseFabric(opts: {
         const allowSet = new Set(allowedMidis.map((x) => Math.round(x)));
         allowed = allowed.filter((m) => allowSet.has(m));
       }
+
       return allowed.length ? allowed : null;
     };
 
@@ -341,12 +368,14 @@ export function useExerciseFabric(opts: {
       }
       return customWords;
     }
+
     if (phrase && scale && lyricStrategy === "solfege") {
       return makeSolfegeLyrics(phrase, scale.tonicPc, scale.name as any, {
         chromaticStyle: "auto",
         caseStyle: "lower",
       });
     }
+
     return null;
   }, [customWords, phrase, lyricStrategy, scale]);
 

@@ -5,6 +5,8 @@ import type { CourseDef } from "./types";
 import SCALES_COURSE from "./scales";
 import PITCH_TUNE_COURSE from "./pitch-tune";
 import PITCH_TIME_COURSE from "./pitch-time";
+import SCALES_INTRO_COURSE from "./scales-intro";
+import TRIADS_COURSE from "./triads";              // ← NEW
 import INTERVALS_COURSE from "./intervals";
 import INTERVAL_DETECTION_COURSE from "./interval-detection";
 import KEY_DETECTION_COURSE from "./key-detection";
@@ -15,6 +17,8 @@ export const INTENDED_ORDER = [
   "pitch-tune",
   "intervals",
   "pitch-time",
+  "scales-intro",
+  "triads",                 // ← NEW position
   "interval-detection",
   "scales",
   "key-detection",
@@ -26,6 +30,8 @@ const COURSE_MODULES: Record<string, CourseDef> = {
   "scales": SCALES_COURSE,
   "pitch-tune": PITCH_TUNE_COURSE,
   "pitch-time": PITCH_TIME_COURSE,
+  "scales-intro": SCALES_INTRO_COURSE,
+  "triads": TRIADS_COURSE,                     // ← NEW
   "intervals": INTERVALS_COURSE,
   "interval-detection": INTERVAL_DETECTION_COURSE,
   "key-detection": KEY_DETECTION_COURSE,

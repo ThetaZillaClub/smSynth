@@ -1,151 +1,49 @@
 // lib/courses/pitch-time/index.ts
-import type { CourseDef } from "../types";
+import { defineCourse } from "../builder";
+import type { SessionConfig } from "@/components/training/session/types";
 import type { NoteValue } from "@/utils/time/tempo";
-import type {
-  SessionConfig,
-  CRMode,
-  RhythmConfig,
-} from "@/components/training/session/types";
 
-// Shared (non-rhythm) config:
-// - bpm 80 (default), metronome on
-// - takes = 4, regenerate between takes = on
-// - Pretest: Single Pitch
-// - Key/view/looping are client-set; we don't force them here.
-// - Chromatic so every semitone is available (m2, tritone, etc.)
+// Shared (non-rhythm) config
 const BASE: Partial<SessionConfig> = {
   metronome: true,
   exerciseLoops: 4,
   regenerateBetweenTakes: true,
-  callResponseSequence: [{ kind: "single_tonic" }] as CRMode[],
+  callResponseSequence: [{ kind: "single_tonic" }],
   scale: { name: "chromatic", tonicPc: 0 }, // client can change tonicPc
 };
 
-// Strictly-typed interval rhythm base so `numIntervals` is always present
-const INTERVAL_BASE: Extract<RhythmConfig, { mode: "interval" }> = {
-  mode: "interval",
-  intervals: [], // overridden per-lesson
-  numIntervals: 5, // “number of intervals: 5”
+// Strict interval rhythm base (numIntervals always present)
+const INTERVAL_BASE = {
+  mode: "interval" as const,
+  intervals: [] as number[], // overridden per lesson
+  numIntervals: 5,
   available: ["quarter"] as NoteValue[],
-  lineEnabled: false, // Rhythm Line: Hidden
-  detectEnabled: false, // Rhythm Detection: Off
+  lineEnabled: false,
+  detectEnabled: false,
 };
 
-// helper: keep lessons concise
-// - `allowedDegrees` indexes are chromatic semitone offsets from tonic: 0..11
-//   e.g., [0,2] = do & re (M2), [0,1] = do & ra/di (m2), [0] = do only (octave).
-const mk = (
-  intervals: number[],
-  allowedDegrees: number[],
-  title: string,
-  slug: string,
-  summary: string
-) => ({
-  slug,
-  title,
-  summary,
-  config: {
-    ...BASE,
-    allowedDegrees,
-    rhythm: { ...INTERVAL_BASE, intervals },
-  } as Partial<SessionConfig>,
-});
-
-const PITCH_TIME_COURSE: CourseDef = {
+export default defineCourse({
   slug: "pitch-time",
   title: "Pitch Time",
-  subtitle: "Sing intervals with movable-do (chromatic solfège)",
+  subtitle: "Intervals with simple timing",
+  base: BASE,
   lessons: [
-    // ===== MAJOR INTERVALS FIRST =====
-    mk(
-      [2],
-      [0, 2],
-      "Major 2nd — do→re",
-      "major-2nd-deg-1-2",
-      "Whole step (2): bright neighbor motion — do–re, re–mi, la–ti."
-    ),
-    mk(
-      [4],
-      [0, 4],
-      "Major 3rd — do→mi",
-      "major-3rd-deg-1-3",
-      "Four semitones: open & sunny — do–mi / fa–la. Clear, ringing color."
-    ),
-    mk(
-      [9],
-      [0, 9],
-      "Major 6th — do→la",
-      "major-6th-deg-1-6",
-      "Nine semitones: expansive lift — do–la. Warm, lyrical leap."
-    ),
-    mk(
-      [11],
-      [0, 11],
-      "Major 7th — do→ti",
-      "major-7th-deg-1-7",
-      "Eleven semitones: leading-tone pull — do–ti. Tense, reaching color."
-    ),
+    // MAJOR
+    { slug: "major-second",  title: "Major second",  summary: "Bright step that feels open.",                 overrides: { allowedDegrees: [0, 2],  rhythm: { ...INTERVAL_BASE, intervals: [2]  } } },
+    { slug: "major-third",   title: "Major third",   summary: "Sunny color with a clear lift.",               overrides: { allowedDegrees: [0, 4],  rhythm: { ...INTERVAL_BASE, intervals: [4]  } } },
+    { slug: "major-sixth",   title: "Major sixth",   summary: "Wide warm leap that feels friendly.",          overrides: { allowedDegrees: [0, 9],  rhythm: { ...INTERVAL_BASE, intervals: [9]  } } },
+    { slug: "major-seventh", title: "Major seventh", summary: "Tense high pull that wants to rise.",          overrides: { allowedDegrees: [0, 11], rhythm: { ...INTERVAL_BASE, intervals: [11] } } },
 
-    // ===== THEN THE MINOR INTERVALS =====
-    mk(
-      [1],
-      [0, 1],
-      "Minor 2nd — do→ra (or ti→do ↓)",
-      "minor-2nd-deg-1-2",
-      "Semitone (1): close, spicy tension — do–ra up; classic descent ti–do."
-    ),
-    mk(
-      [3],
-      [0, 3],
-      "Minor 3rd — do→me",
-      "minor-3rd-deg-1-3",
-      "Three semitones: soulful shade — do–me / la–do. Expressive, vocal."
-    ),
-    mk(
-      [8],
-      [0, 8],
-      "Minor 6th — do→le",
-      "minor-6th-deg-1-6",
-      "Eight semitones: bittersweet distance — do–le. Yearning leap."
-    ),
-    mk(
-      [10],
-      [0, 10],
-      "Minor 7th — do→te",
-      "minor-7th-deg-1-7",
-      "Ten semitones: bluesy pull — do–te. Strong away-from-home feel."
-    ),
+    // MINOR
+    { slug: "minor-second",  title: "Minor second",  summary: "Tight close squeeze with sharp tension.",      overrides: { allowedDegrees: [0, 1],  rhythm: { ...INTERVAL_BASE, intervals: [1]  } } },
+    { slug: "minor-third",   title: "Minor third",   summary: "Soft sad color with a gentle pull.",           overrides: { allowedDegrees: [0, 3],  rhythm: { ...INTERVAL_BASE, intervals: [3]  } } },
+    { slug: "minor-sixth",   title: "Minor sixth",   summary: "Long bittersweet reach like a sigh.",          overrides: { allowedDegrees: [0, 8],  rhythm: { ...INTERVAL_BASE, intervals: [8]  } } },
+    { slug: "minor-seventh", title: "Minor seventh", summary: "Bluesy pull with an easy sway.",               overrides: { allowedDegrees: [0, 10], rhythm: { ...INTERVAL_BASE, intervals: [10] } } },
 
-    // ===== PERFECTS, TRITONE, OCTAVE =====
-    mk(
-      [5],
-      [0, 5],
-      "Perfect 4th — do→fa",
-      "perfect-4th-deg-1-4",
-      "Five semitones: solid pillar — do–fa. Grounded, stable sonority."
-    ),
-    mk(
-      [7],
-      [0, 7],
-      "Perfect 5th — do→sol",
-      "perfect-5th-deg-1-5",
-      "Seven semitones: open resonance — do–sol. Classic perfect span."
-    ),
-    mk(
-      [6],
-      [0, 6],
-      "Tritone — do→fi / fa→ti",
-      "tritone-deg-1-sharp4",
-      "Six semitones: restless & bright — do–fi (aug4) or fa–ti (dim5). Wants to resolve."
-    ),
-    mk(
-      [12],
-      [0],
-      "Octave — do→do",
-      "octave-deg-1-8",
-      "Twelve semitones: same home, higher — do–do. Complete and calm."
-    ),
+    // PERFECT + TRITONE + OCTAVE
+    { slug: "perfect-fourth", title: "Perfect fourth", summary: "Solid steady span that feels grounded.",     overrides: { allowedDegrees: [0, 5],  rhythm: { ...INTERVAL_BASE, intervals: [5]  } } },
+    { slug: "perfect-fifth",  title: "Perfect fifth",  summary: "Clean open ring with strong stability.",     overrides: { allowedDegrees: [0, 7],  rhythm: { ...INTERVAL_BASE, intervals: [7]  } } },
+    { slug: "tritone",        title: "Tritone",        summary: "Edgy uneasy tension that wants to move.",    overrides: { allowedDegrees: [0, 6],  rhythm: { ...INTERVAL_BASE, intervals: [6]  } } },
+    { slug: "octave",         title: "Octave",         summary: "Same note higher. Full and settled.",        overrides: { allowedDegrees: [0],     rhythm: { ...INTERVAL_BASE, intervals: [12] } } },
   ],
-};
-
-export default PITCH_TIME_COURSE;
+});
