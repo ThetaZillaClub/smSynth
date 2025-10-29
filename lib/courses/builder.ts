@@ -180,19 +180,22 @@ export const COURSE_PARAM_SCHEMA = {
 
 /** Optional: small helper that formats the schema as a concise Markdown guide. */
 export function courseParamGuideMarkdown(): string {
-  const bullets = (arr: readonly string[]) => arr.map((s) => `\`${s}\``).join(", ");
+  // Generic helper—accepts any readonly string literal array
+  const bullets = <T extends readonly string[]>(arr: T) =>
+    arr.map((s) => `\`${s}\``).join(", ");
+
   return [
     `# Course Param Guide`,
     `## Rhythm`,
-    `- modes: ${bullets(RHYTHM_MODES as any)}`,
-    `- sequence.pattern: ${bullets(SEQUENCE_PATTERNS as any)}`,
-    `- common.available NoteValues: ${bullets(NOTE_VALUES as any)}`,
+    `- modes: ${bullets(RHYTHM_MODES)}`,
+    `- sequence.pattern: ${bullets(SEQUENCE_PATTERNS)}`,
+    `- common.available NoteValues: ${bullets(NOTE_VALUES)}`,
     `## Scale`,
-    `- name: ${bullets(SCALE_NAMES as any)}`,
+    `- name: ${bullets(SCALE_NAMES)}`,
     `## View`,
-    `- ${bullets(VIEW_MODES as any)}`,
+    `- ${bullets(VIEW_MODES)}`,
     `## Call/Response kinds`,
-    `- ${bullets(CR_KINDS as any)}`,
+    `- ${bullets(CR_KINDS)}`,
   ].join("\n");
 }
 
@@ -261,15 +264,19 @@ function mergeSession(
   }
 
   // ---------- RHYTHM: deep-merge only when a valid discriminant is present ----------
+  type RhythmWithMode = { mode: RhythmConfig["mode"] };
+  const hasMode = (x: unknown): x is RhythmWithMode =>
+    typeof x === "object" && x !== null && typeof (x as { mode?: unknown }).mode === "string";
+
   if (aRhythm || bRhythm) {
     const ra: Partial<RhythmConfig> = aRhythm ?? {};
     const rb: Partial<RhythmConfig> = bRhythm ?? {};
     const merged = { ...ra, ...rb } as Partial<RhythmConfig>;
 
-    if (merged && typeof (merged as any).mode === "string") {
+    if (hasMode(merged)) {
       out.rhythm = merged as RhythmConfig;
     } else {
-      delete (out as any).rhythm; // keep it absent if not a valid union member
+      delete (out as { rhythm?: unknown }).rhythm; // keep it absent if not a valid union member
     }
   }
 
@@ -294,8 +301,13 @@ export function defineCourse(input: CourseInput): CourseDef {
   }
 
   const lessons: LessonDef[] = input.lessons.map((l) => {
-    const perLesson: SessionPatch | undefined =
-      "overrides" in l ? l.overrides : (l as any).config;
+    let perLesson: SessionPatch | undefined;
+    if ("config" in l) {
+      perLesson = l.config;
+    } else if ("overrides" in l) {
+      perLesson = l.overrides;
+    }
+
     const config = mergeSession(input.base, perLesson);
     return { slug: l.slug, title: l.title, summary: l.summary, config };
   });
