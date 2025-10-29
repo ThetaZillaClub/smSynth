@@ -40,6 +40,7 @@ export default defineCourse({
     { slug: "quarters-only", title: "Quarters", summary: "Quarter-note prompts across the scale.", overrides: { rhythm: { available: ["quarter"] as NoteValue[] } } },
     { slug: "quarter-eighth", title: "Quarters + Eighths", summary: "Strengthen groove and subdivision.", overrides: { rhythm: { available: ["quarter", "eighth"] as NoteValue[] } } },
     { slug: "triplet-quarter-and-quarter", title: "Triplet Quarters + Quarters", summary: "Switch cleanly between triplet and straight feels.", overrides: { rhythm: { available: ["triplet-quarter", "quarter"] as NoteValue[] } } },
-    { slug: "mixed-values", title: "Mixed Values", summary: "Quarter, eighth, and triplet-quarter values combined.", overrides: { rhythm: { available: ["quarter", "eighth", "triplet-quarter"] as NoteValue[] } } },
+    { slug: "dotted-eighth-quarter", title: "Dotted Eighths + Quarters", summary: "Introduce dotted feel against steady quarters.", overrides: { rhythm: { available: ["dotted-eighth", "quarter"] as NoteValue[] } } },
+    { slug: "all-note-values", title: "All Note Values", summary: "Comprehensive mix: simple, dotted, and triplet feels.", overrides: { rhythm: { available: ["whole", "half", "quarter", "eighth", "dotted-eighth", "triplet-quarter"] as NoteValue[] } } },
   ],
 });

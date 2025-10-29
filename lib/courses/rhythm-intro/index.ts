@@ -39,10 +39,15 @@ export default defineCourse({
   subtitle: "Build steady time with short randomized drills across simple and triplet feels.",
   base: BASE,
   lessons: [
-    { slug: "whole-half",           title: "Whole + Half",                summary: "Sustain and shape time.",                   overrides: { rhythm: { available: ["whole", "half"] } } },
-    { slug: "half-quarter",         title: "Half + Quarter",              summary: "Balance motion and space.",                 overrides: { rhythm: { available: ["half", "quarter"] } } },
-    { slug: "quarters-and-eighths", title: "Quarters + Eighths",          summary: "Lock subdivision and groove.",              overrides: { rhythm: { available: ["quarter", "eighth"] } } },
-    { slug: "triplet-vs-quarters",  title: "Triplet Quarters + Quarters", summary: "Switch cleanly between grids.",             overrides: { rhythm: { available: ["triplet-quarter", "quarter"] } } },
-    { slug: "mixed-values",         title: "Mixed Values",                summary: "Combine simple and triplet feels.",         overrides: { rhythm: { available: ["whole", "half", "quarter", "eighth", "triplet-quarter"] } } },
+    { slug: "whole-half",           title: "Whole + Half",                         summary: "Sustain and shape time.",                      overrides: { rhythm: { available: ["whole", "half"] } } },
+    { slug: "half-quarter",         title: "Half + Quarter",                       summary: "Balance motion and space.",                    overrides: { rhythm: { available: ["half", "quarter"] } } },
+    { slug: "quarters-and-eighths", title: "Quarters + Eighths",                   summary: "Lock subdivision and groove.",                 overrides: { rhythm: { available: ["quarter", "eighth"] } } },
+    { slug: "triplet-vs-quarters",  title: "Triplet Quarters + Quarters",          summary: "Switch cleanly between grids.",                overrides: { rhythm: { available: ["triplet-quarter", "quarter"] } } },
+
+    // NEW dotted lessons (harder than triplets, easier than the full mix)
+    { slug: "dotted-eighth-quarter",  title: "Dotted Eighths + Quarters",   summary: "Add dotted quarters to build a strong long–short feel.", overrides: { rhythm: { available: ["dotted-eighth", "quarter"] } } },
+
+    // SEO-friendly final mixed set, now includes dotted values too
+    { slug: "all-note-values",      title: "All Note Values",                      summary: "Comprehensive mix: simple, dotted, and triplet feels.", overrides: { rhythm: { available: ["whole", "half", "quarter", "eighth", "dotted-eighth", "triplet-quarter"] } } },
   ],
 });
