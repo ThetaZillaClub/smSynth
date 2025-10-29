@@ -6,19 +6,20 @@ import SCALES_COURSE from "./scales";
 import PITCH_TUNE_COURSE from "./pitch-tune";
 import PITCH_TIME_COURSE from "./pitch-time";
 import SCALES_INTRO_COURSE from "./scales-intro";
-import TRIADS_COURSE from "./triads";              // ← NEW
+import TRIADS_COURSE from "./triads";              // ← Basic Triads
 import INTERVALS_COURSE from "./intervals";
 import INTERVAL_DETECTION_COURSE from "./interval-detection";
 import KEY_DETECTION_COURSE from "./key-detection";
 import SCALES_RHYTHMS_COURSE from "./scales-rhythms";
 
 // 1) Your intended order lives here (single source of truth)
+//    Put "triads" right after "pitch-time".
 export const INTENDED_ORDER = [
   "pitch-tune",
   "intervals",
   "pitch-time",
+  "triads",                 // ← moved here
   "scales-intro",
-  "triads",                 // ← NEW position
   "interval-detection",
   "scales",
   "key-detection",
@@ -31,7 +32,7 @@ const COURSE_MODULES: Record<string, CourseDef> = {
   "pitch-tune": PITCH_TUNE_COURSE,
   "pitch-time": PITCH_TIME_COURSE,
   "scales-intro": SCALES_INTRO_COURSE,
-  "triads": TRIADS_COURSE,                     // ← NEW
+  "triads": TRIADS_COURSE,                     // ← Basic Triads
   "intervals": INTERVALS_COURSE,
   "interval-detection": INTERVAL_DETECTION_COURSE,
   "key-detection": KEY_DETECTION_COURSE,

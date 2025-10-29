@@ -29,16 +29,16 @@ export type BuildPhraseWithRhythmParams = {
   includeUnder?: boolean;
   includeOver?: boolean;
 
-  /** NEW: filter by scale-degree indices (0-based within scale) */
+  /** filter by scale-degree indices (0-based within scale) */
   allowedDegreeIndices?: number[] | null;
 
   /** Legacy absolute whitelist (still supported if present). */
   allowedMidis?: number[] | null;
 
   /**
-   * NEW: If true (default when `allowedDegreeIndices` is provided), remove the
+   * If true (default when `allowedDegreeIndices` is provided), remove the
    * upper-octave duplicate of the selected degree(s) inside each tonic window
-   * [T, T+12]. This prevents A3 being chosen when A2 is intended, etc.
+   * [T, T+12). Prevents A3 being chosen when A2 is intended, etc.
    */
   dropUpperWindowDegrees?: boolean;
 };
@@ -49,7 +49,6 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     lowHz, highHz, bpm, den,
     tonicPc, scale, rhythm,
     a4Hz = 440,
-    // ⬇ caller's value, else default to 1 when degrees are limited, else 2
     maxPerDegree: maxPerDegreeInput,
     seed = 0x9e3779b9,
     tonicMidis = null,
@@ -60,23 +59,22 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     dropUpperWindowDegrees,
   } = params;
 
-  const maxPerDegree =
-    maxPerDegreeInput ??
-    ((allowedDegreeIndices && allowedDegreeIndices.length) ? 1 : 2);
+  // Default = 2; caller can raise/lower. Always ≥1.
+  const runCap = Math.max(1, maxPerDegreeInput ?? 2);
 
   const lowM = Math.round(hzToMidi(lowHz, a4Hz));
   const highM = Math.round(hzToMidi(highHz, a4Hz));
   const lo = Math.min(lowM, highM);
   const hi = Math.max(lowM, highM);
 
-  // Base: in-range & in-scale
+  // Base pool: in-range & in-scale
   let allowed: number[] = [];
   for (let m = lo; m <= hi; m++) {
     const pc = ((m % 12) + 12) % 12;
     if (isInScale(pc, tonicPc, scale)) allowed.push(m);
   }
 
-  // ---- DEGREE FILTER APPLIES **ONLY INSIDE SELECTED WINDOWS** ----
+  // ---- degree filter applies INSIDE selected tonic windows; optional spill under/over ----
   if (tonicMidis && tonicMidis.length) {
     const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
     const windows = sorted.map((T) => [T, T + 12] as const);
@@ -84,7 +82,6 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     const maxEnd = windows[windows.length - 1][1];
     const inAnyWindow = (m: number) => windows.some(([s, e]) => m >= s && m <= e);
 
-    // Partition allowed notes
     const inWin: number[] = [];
     const under: number[] = [];
     const over: number[] = [];
@@ -94,7 +91,6 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
       else if (m > maxEnd && includeOver) over.push(m);
     }
 
-    // Apply degree whitelist ONLY to in-window notes
     let inWinFiltered = inWin;
     if (allowedDegreeIndices && allowedDegreeIndices.length) {
       const set = new Set(allowedDegreeIndices);
@@ -104,7 +100,6 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
       });
     }
 
-    // ✨ NEW: drop upper-octave duplicates of selected degree(s) inside each window
     const shouldDropUpper =
       (dropUpperWindowDegrees !== undefined ? dropUpperWindowDegrees : !!(allowedDegreeIndices && allowedDegreeIndices.length)) &&
       sorted.length > 0;
@@ -125,26 +120,22 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
           upperSet.add(Math.round(T + 12 + off));
         }
       }
-
       const trimmed = inWinFiltered.filter((m) => !upperSet.has(m));
       if (trimmed.length) inWinFiltered = trimmed;
     }
 
     const combined = Array.from(new Set<number>([...inWinFiltered, ...under, ...over])).sort((a, b) => a - b);
     if (combined.length) allowed = combined;
-  } else {
-    // No windows picked → degree filter applies globally (legacy behaviour)
-    if (allowedDegreeIndices && allowedDegreeIndices.length) {
-      const set = new Set(allowedDegreeIndices);
-      const filtered = allowed.filter((m) => {
-        const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
-        return di >= 0 && set.has(di);
-      });
-      if (filtered.length) allowed = filtered;
-    }
+  } else if (allowedDegreeIndices && allowedDegreeIndices.length) {
+    const set = new Set(allowedDegreeIndices);
+    const filtered = allowed.filter((m) => {
+      const di = degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
+      return di >= 0 && set.has(di);
+    });
+    if (filtered.length) allowed = filtered;
   }
 
-  // Optional absolute whitelist (still applies to the final pool)
+  // Optional absolute whitelist
   if (allowedMidis && allowedMidis.length) {
     const allow = new Set(allowedMidis.map((m) => Math.round(m)));
     const filtered = allowed.filter((m) => allow.has(m));
@@ -158,22 +149,18 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
     return { durationSec: dur, notes: [{ midi: mid, startSec: 0, durSec: dur }] };
   }
 
-  // ---------------- selection with uniqueness + per-degree cap ----------------
-  const degCounts = new Map<number, number>();
+  // ---------------- selection with HARD consecutive per-degree cap ----------------
   const rnd = makeRng(seed);
-  const toDegreeIndex = (m: number) => degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
-  const fitsCap = (m: number) => {
-    const di = toDegreeIndex(m);
-    if (di < 0) return false;
-    const c = degCounts.get(di) ?? 0;
-    return c < maxPerDegree;
-  };
+  const toDeg = (m: number) => degreeIndex(((m % 12) + 12) % 12, tonicPc, scale);
 
   const midTarget = Math.round((lo + hi) / 2);
   let cur = allowed.find((m) => m >= midTarget) ?? allowed[allowed.length - 1];
 
   let t = 0;
   const notes: { midi: number; startSec: number; durSec: number }[] = [];
+
+  let lastDeg = -999;
+  let runLen = 0;
 
   for (const ev of rhythm) {
     const durSec = noteValueToSeconds(ev.value, bpm, den);
@@ -186,45 +173,57 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
       if (delta <= 2) near.push(m);
       else leap.push(m);
     }
+
+    // baseline bias
     let choices = rnd() < 0.75 ? near : leap;
     if (!choices.length) choices = allowed.slice();
 
-    // respect per-degree cap
-    let filtered = choices.filter(fitsCap);
-    if (!filtered.length) filtered = choices;
+    // soft: prefer not to repeat immediate previous degree
+    const prevDeg = notes.length ? toDeg(notes[notes.length - 1].midi) : -999;
+    const nonRepeat = choices.filter((m) => toDeg(m) !== prevDeg);
+    if (nonRepeat.length) choices = nonRepeat;
 
-    // prefer not to repeat the previous degree
-    const prevDeg = notes.length ? toDegreeIndex(notes[notes.length - 1].midi) : -999;
-    const nonRepeat = filtered.filter((m) => toDegreeIndex(m) !== prevDeg);
-    if (nonRepeat.length) filtered = nonRepeat;
+    // soft: keep motion reasonable
+    const tight = choices.filter((m) => Math.abs(m - cur) <= 6);
+    let finalPool = tight.length ? tight : choices;
 
-    // keep motion reasonable if possible
-    const tight = filtered.filter((m) => Math.abs(m - cur) <= 6);
-    const finalPool = tight.length ? tight : filtered;
+    // HARD: if we've already hit the cap, forbid picking lastDeg again.
+    const mustAvoid = lastDeg >= 0 && runLen >= runCap;
+    if (mustAvoid) {
+      const avoid = (arr: number[]) => arr.filter((m) => toDeg(m) !== lastDeg);
 
-    const next = choose(finalPool, rnd);
-    const di = toDegreeIndex(next);
-    if (di >= 0) degCounts.set(di, (degCounts.get(di) ?? 0) + 1);
+      // widen progressively until an alternative exists
+      let alt = avoid(finalPool);
+      if (!alt.length) alt = avoid(choices);
+      if (!alt.length) alt = avoid(Array.from(new Set([...near, ...leap])));
+      if (!alt.length) alt = avoid(allowed);
+      if (alt.length) finalPool = alt;
+      // if still empty: genuinely no alternative → allow overrun this time
+    }
 
-    notes.push({ midi: next, startSec: t, durSec });
+    let next = choose(finalPool, rnd);
+
+    // run bookkeeping
+    const di = toDeg(next);
+    if (di === lastDeg) runLen++;
+    else { lastDeg = di; runLen = 1; }
+
+    notes.push({ midi: next, startSec: t, durSec: durSec });
     t += durSec;
     cur = next;
   }
 
-  // If this phrase is exactly TWO notes:
-  // - Normal case: prefer different degrees for clarity.
-  // - Special case (single allowed degree): keep the degree but prefer another OCTAVE.
+  // two-note special case (unchanged)
   const noteSlots = rhythm.filter((r) => r.type === "note").length;
   if (noteSlots === 2 && notes.length === 2) {
     const onlyOneDegree =
       Array.isArray(allowedDegreeIndices) && allowedDegreeIndices.length === 1;
-    const d0 = toDegreeIndex(notes[0].midi);
-    const d1 = toDegreeIndex(notes[1].midi);
+    const d0 = toDeg(notes[0].midi);
+    const d1 = toDeg(notes[1].midi);
     if (d0 === d1) {
       if (onlyOneDegree) {
-        // same degree allowed → try to pick same-degree, different OCTAVE for note 2
         const sameDegOtherOct = allowed.filter(
-          (m) => toDegreeIndex(m) === d0 && Math.round(m) !== Math.round(notes[0].midi)
+          (m) => toDeg(m) === d0 && Math.round(m) !== Math.round(notes[0].midi)
         );
         if (sameDegOtherOct.length) {
           const target = notes[1].midi;
@@ -235,8 +234,7 @@ export function buildPhraseFromScaleWithRhythm(params: BuildPhraseWithRhythmPara
           notes[1].midi = best;
         }
       } else {
-        // normal rule: force different degrees if possible
-        const alts = allowed.filter((m) => toDegreeIndex(m) !== d0);
+        const alts = allowed.filter((m) => toDeg(m) !== d0);
         if (alts.length) {
           const target = notes[1].midi;
           const best = alts.reduce(
@@ -265,10 +263,8 @@ export type BuildSequenceParams = {
   noteQuota: number;
   seed?: number;
   tonicMidis?: number[] | null;
-  /** NEW */
   allowedDegreeIndices?: number[] | null;
   allowedMidis?: number[] | null;
-  /** NEW: mirror random-mode behavior for sequence mode */
   dropUpperWindowDegrees?: boolean;
 };
 
@@ -293,7 +289,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
     if (isInScale(pc, tonicPc, scale)) allowed.push(m);
   }
 
-  // degree filter (NEW)
+  // degree filter
   if (allowedDegreeIndices && allowedDegreeIndices.length) {
     const set = new Set(allowedDegreeIndices);
     allowed = allowed.filter((m) => {
@@ -307,19 +303,19 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
     return { durationSec: totalSec, notes: [] };
   }
 
-  // ---- degree offsets limited to allowed degrees (single window/octave)
+  // degree offsets limited to allowed degrees (single window/octave)
   const allOffsets = scaleSemitones(scale).slice().sort((a, b) => a - b);
   const degOffsetsRaw = (allowedDegreeIndices && allowedDegreeIndices.length)
     ? allowedDegreeIndices
-    .map((i) => (i >= 0 && i < allOffsets.length ? allOffsets[i] : undefined))
-    .filter((x): x is number => typeof x === "number")
+        .map((i) => (i >= 0 && i < allOffsets.length ? allOffsets[i] : undefined))
+        .filter((x): x is number => typeof x === "number")
     : allOffsets;
   const degOffsets = Array.from(new Set(degOffsetsRaw)).sort((a, b) => a - b);
   if (!degOffsets.length) {
     const totalSec = rhythm.reduce((s, r) => s + noteValueToSeconds(r.value, bpm, den), 0);
     return { durationSec: totalSec, notes: [] };
   }
-  const K = degOffsets.length; // number of unique degrees in phrase
+  const K = degOffsets.length;
 
   // tonic candidates inside range
   const tonicCandidates: number[] = [];
@@ -335,7 +331,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
     if (filtered.length) effectiveCandidates = filtered;
   }
 
-  // further restrict by per-note whitelist (if present)
+  // further restrict by whitelist
   const allowSet = allowedMidis && allowedMidis.length
     ? new Set(allowedMidis.map((m) => Math.round(m)))
     : null;
@@ -346,7 +342,6 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   if (!effectiveCandidates.length) effectiveCandidates = tonicCandidates.length ? tonicCandidates : [allowed[0]];
 
   const center = Math.round((loM + hiM) / 2);
-  // pick base so chosen window [base+minOff, base+maxOff] fits range
   type Fit = { base: number; fits: boolean; overflow: number; dist: number };
   const minOff = degOffsets[0];
   const maxOff = degOffsets[degOffsets.length - 1];
@@ -386,9 +381,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
     else out.push(...b);
     return out;
   };
-  // phrase length:
-  // - prefer the number of 'note' slots in rhythm (no silent gaps)
-  // - else: asc/desc -> K, asc-desc/desc-asc -> 2*K-1
+
   const noteSlots = rhythm.reduce((s, r) => s + (r.type === "note" ? 1 : 0), 0);
   const defaultQuota = (pattern === "asc" || pattern === "desc") ? K : (2 * K - 1);
   const noteQuota = noteSlots || noteQuotaParam || defaultQuota;
@@ -414,7 +407,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
       break;
     }
   }
-  // match target count to actual note slots
+
   if (targets.length > noteQuota) targets = targets.slice(0, noteQuota);
   else if (targets.length < noteQuota && targets.length > 0) {
     while (targets.length < noteQuota) targets.push(targets[targets.length - 1]);
@@ -426,9 +419,7 @@ export function buildPhraseFromScaleSequence(params: BuildSequenceParams): Phras
   const notes: { midi: number; startSec: number; durSec: number }[] = [];
   for (const ev of rhythm) {
     const d = noteValueToSeconds(ev.value, bpm, den);
-    if (ev.type === "note") {
-      notes.push({ midi: targets[ti++], startSec: t, durSec: d });
-    }
+    if (ev.type === "note") notes.push({ midi: targets[ti++], startSec: t, durSec: d });
     t += d;
   }
   return { durationSec: t, notes };
@@ -453,7 +444,7 @@ export type BuildIntervalPhraseParams = {
 
   tonicMidis?: number[] | null;
 
-  /** NEW: degree filter applied to BOTH notes */
+  /** degree filter applied to BOTH notes */
   allowedDegreeIndices?: number[] | null;
 
   /** Optional whitelist of absolute MIDI notes (both root & top must be allowed). */
@@ -466,7 +457,7 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
     bpm, den, tsNum,
     tonicPc, scale,
     intervals, numIntervals,
-    pairRhythm, gapRhythm, // gap ignored now
+    pairRhythm, gapRhythm,
     seed = 0x1234,
     tonicMidis = null,
     allowedDegreeIndices = null,
@@ -484,7 +475,7 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
     if (isInScale(pc, tonicPc, scale)) allowedAbs.add(m);
   }
 
-  // degree filter (NEW)
+  // degree filter
   if (allowedDegreeIndices && allowedDegreeIndices.length) {
     const set = new Set(allowedDegreeIndices);
     allowedAbs = new Set(
@@ -495,7 +486,7 @@ export function buildIntervalPhrase(params: BuildIntervalPhraseParams): Phrase {
     );
   }
 
-  // tonic windows (both notes must be inside)
+  // tonic windows: both notes must be inside
   if (tonicMidis && tonicMidis.length) {
     const sorted = Array.from(new Set(tonicMidis.map((x) => Math.round(x)))).sort((a, b) => a - b);
     const windows = sorted.map((T) => [T, T + 12] as const);

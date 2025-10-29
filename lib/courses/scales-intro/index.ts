@@ -6,6 +6,13 @@ const BASE: Partial<SessionConfig> = {
   bpm: 80,
   exerciseLoops: 3,
 
+  // Run a short pretest before each exercise
+  callResponse: true,
+  callResponseSequence: [
+    { kind: "single_tonic" },
+    { kind: "guided_arpeggio" }, // ← added
+  ],
+
   // keep it singing-only (no rhythm line / vision)
   rhythm: {
     mode: "sequence",
