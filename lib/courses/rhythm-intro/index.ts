@@ -7,12 +7,11 @@ const BASE: Partial<SessionConfig> = {
   metronome: true,
   exerciseLoops: 4,
   regenerateBetweenTakes: true,
-  
 
   callResponse: true,
   callResponseSequence: [
     { kind: "single_tonic" },
-    { kind: "guided_arpeggio" }, // ← added
+    { kind: "guided_arpeggio" },
   ],
 
   // 4/4, 4-bar random fabrics with rests enabled
@@ -20,68 +19,30 @@ const BASE: Partial<SessionConfig> = {
   rhythm: {
     mode: "random",
     lengthBars: 4,
-
     lineEnabled: false,
     detectEnabled: false,
-
-    // Rests: enabled globally for line & content at p = 0.2
     allowRests: true,
     restProb: 0.2,
     contentAllowRests: true,
     contentRestProb: 0.2,
   },
 
-  // Key/pitch scope: major, degrees 1–5 only
+  // Limit internally to simple range; not referenced in UI copy
   scale: { name: "major", tonicPc: 0 },
-  allowedDegrees: [0, 1, 2, 3, 4], // 1–5 in 0-based indexing
+  allowedDegrees: [0, 1, 2, 3, 4],
   dropUpperWindowDegrees: true,
 };
 
 export default defineCourse({
-  slug: "rhythm-intro",
-  title: "Introduction to Rhythm",
-  subtitle: "Major scale degrees 1–5, randomized rhythms with rests (p=0.2)",
+  slug: "introduction-to-rhythm",
+  title: "Rhythm Basics",
+  subtitle: "Build steady time with short randomized drills across simple and triplet feels.",
   base: BASE,
   lessons: [
-    {
-      slug: "whole-half",
-      title: "Whole & Half Notes (4 bars)",
-      summary: "Random 1–5 pitches using whole and half notes; rests ~20%.",
-      overrides: {
-        rhythm: { available: ["whole", "half"] },
-      },
-    },
-    {
-      slug: "half-quarter",
-      title: "Half & Quarter Notes (4 bars)",
-      summary: "Mix of half and quarter notes with occasional rests.",
-      overrides: {
-        rhythm: { available: ["half", "quarter"] },
-      },
-    },
-    {
-      slug: "quarter-eighth",
-      title: "Quarter & Eighth Notes (4 bars)",
-      summary: "Uptempo feel with quarters and eighths; rests enabled.",
-      overrides: {
-        rhythm: { available: ["quarter", "eighth"] },
-      },
-    },
-    {
-      slug: "triplet-quarter-and-quarter",
-      title: "Triplet Quarters & Quarters (4 bars)",
-      summary: "Introduce triplet grid against straight quarters.",
-      overrides: {
-        rhythm: { available: ["triplet-quarter", "quarter"] },
-      },
-    },
-    {
-      slug: "all-of-the-above",
-      title: "All of the Above (4 bars)",
-      summary: "Whole, half, quarter, eighth, and triplet-quarter values mixed.",
-      overrides: {
-        rhythm: { available: ["whole", "half", "quarter", "eighth", "triplet-quarter"] },
-      },
-    },
+    { slug: "whole-half",           title: "Whole + Half",                summary: "Sustain and shape time.",                   overrides: { rhythm: { available: ["whole", "half"] } } },
+    { slug: "half-quarter",         title: "Half + Quarter",              summary: "Balance motion and space.",                 overrides: { rhythm: { available: ["half", "quarter"] } } },
+    { slug: "quarters-and-eighths", title: "Quarters + Eighths",          summary: "Lock subdivision and groove.",              overrides: { rhythm: { available: ["quarter", "eighth"] } } },
+    { slug: "triplet-vs-quarters",  title: "Triplet Quarters + Quarters", summary: "Switch cleanly between grids.",             overrides: { rhythm: { available: ["triplet-quarter", "quarter"] } } },
+    { slug: "mixed-values",         title: "Mixed Values",                summary: "Combine simple and triplet feels.",         overrides: { rhythm: { available: ["whole", "half", "quarter", "eighth", "triplet-quarter"] } } },
   ],
 });

@@ -17,52 +17,23 @@ const BASE: Partial<SessionConfig> = {
   metronome: true,
   exerciseLoops: 4,
   regenerateBetweenTakes: true,
-
   callResponse: true,
   callResponseSequence: [{ kind: "single_tonic" }, { kind: "guided_arpeggio" }],
-
   ts: { num: 4, den: 4 },
-
-  rhythm: {
-    ...RHYTHM_FLAGS,
-    mode: "random",
-    available: ["quarter"],
-  },
-
+  rhythm: { ...RHYTHM_FLAGS, mode: "random", available: ["quarter"] },
   scale: { name: "natural_minor", tonicPc: 0 },
   dropUpperWindowDegrees: true,
 };
 
 export default defineCourse({
-  slug: "natural-minor-scale-syncopation",
-  title: "Natural Minor Scale — Syncopation",
-  subtitle:
-    "Develop rock-solid syncopation in natural minor—randomized, 4-bar drills to sharpen timing, feel, and reading.",
+  slug: "natural-minor-scale-syncopation-exercises",
+  title: "Natural Minor Syncopation",
+  subtitle: "Syncopation practice in natural minor with visual feedback and detection.",
   base: BASE,
   lessons: [
-    {
-      slug: "quarters-only",
-      title: "Quarters Only",
-      summary: "Quarter-note prompts across the full natural minor scale.",
-      overrides: { rhythm: { available: ["quarter"] as NoteValue[] } },
-    },
-    {
-      slug: "quarter-eighth",
-      title: "Quarter & Eighth Notes",
-      summary: "Subdivision control in minor with quarters and eighths.",
-      overrides: { rhythm: { available: ["quarter", "eighth"] as NoteValue[] } },
-    },
-    {
-      slug: "triplet-quarter-and-quarter",
-      title: "Triplet Quarters & Quarters",
-      summary: "Switch between triplet and straight quarters under rest pressure.",
-      overrides: { rhythm: { available: ["triplet-quarter", "quarter"] as NoteValue[] } },
-    },
-    {
-      slug: "all-of-the-above",
-      title: "All of the Above",
-      summary: "Mixed practice: quarter, eighth, and triplet-quarter values.",
-      overrides: { rhythm: { available: ["quarter", "eighth", "triplet-quarter"] as NoteValue[] } },
-    },
+    { slug: "quarters-only", title: "Quarters", summary: "Quarter-note prompts across the scale.", overrides: { rhythm: { available: ["quarter"] as NoteValue[] } } },
+    { slug: "quarter-eighth", title: "Quarters + Eighths", summary: "Subdivision control under syncopation.", overrides: { rhythm: { available: ["quarter", "eighth"] as NoteValue[] } } },
+    { slug: "triplet-quarter-and-quarter", title: "Triplet Quarters + Quarters", summary: "Stay aligned when switching grids.", overrides: { rhythm: { available: ["triplet-quarter", "quarter"] as NoteValue[] } } },
+    { slug: "mixed-values", title: "Mixed Values", summary: "Quarter, eighth, and triplet-quarter values combined.", overrides: { rhythm: { available: ["quarter", "eighth", "triplet-quarter"] as NoteValue[] } } },
   ],
 });

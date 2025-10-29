@@ -6,8 +6,8 @@ import type { NoteValue } from "@/utils/time/tempo";
 // Syncopation visuals + detection on, higher rest probability
 const RHYTHM_FLAGS = {
   lengthBars: 4,
-  lineEnabled: true,   // show rhythm line for syncopation
-  detectEnabled: true, // enable rhythm detection
+  lineEnabled: true,
+  detectEnabled: true,
   allowRests: true,
   restProb: 0.35,
   contentAllowRests: true,
@@ -33,23 +33,22 @@ const BASE: Partial<SessionConfig> = {
     available: ["quarter"], // default; lessons override
   },
 
-  // default to major; lessons override scale for minor set
+  // default to major; lessons override for minor set
   scale: { name: "major", tonicPc: 0 },
   dropUpperWindowDegrees: true,
 };
 
 export default defineCourse({
-  slug: "syncopation-intro",
-  title: "Introduction to Syncopation",
-  subtitle:
-    "Strengthen your feel for off-beats and space with randomized, triad-focused prompts—build accuracy reading and performing syncopated rhythms.",
+  slug: "introduction-to-syncopation",
+  title: "Syncopation Basics",
+  subtitle: "Feel the off-beat with triad-focused drills and clear visual feedback.",
   base: BASE,
   lessons: [
-    // ---- Major triad (allowed degrees: 1–3–5) ----
+    // Major triad
     {
       slug: "major-triad-quarters-only",
-      title: "Major Triad — Quarters Only",
-      summary: "Random quarter-note prompts on 1–3–5; line & detect on; ~35% rests.",
+      title: "Major Triad Quarters",
+      summary: "Quarter-note prompts with line and detection enabled.",
       overrides: {
         scale: { name: "major", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
@@ -58,8 +57,8 @@ export default defineCourse({
     },
     {
       slug: "major-triad-quarter-eighth",
-      title: "Major Triad — Quarter & Eighth Notes",
-      summary: "Quarters + eighths across the major triad; syncopation visuals enabled.",
+      title: "Major Triad Quarters + Eighths",
+      summary: "Quarters and eighths across the triad with rests.",
       overrides: {
         scale: { name: "major", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
@@ -68,8 +67,8 @@ export default defineCourse({
     },
     {
       slug: "major-triad-triplet-and-quarter",
-      title: "Major Triad — Triplet Quarters & Quarters",
-      summary: "Triplet quarters against straight quarters for feel control on 1–3–5.",
+      title: "Major Triad Triplet Quarters + Quarters",
+      summary: "Practice switching between triplet and straight feels.",
       overrides: {
         scale: { name: "major", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
@@ -78,8 +77,8 @@ export default defineCourse({
     },
     {
       slug: "major-triad-all-of-the-above",
-      title: "Major Triad — All of the Above",
-      summary: "Mixed practice over the triad: quarter, eighth, triplet-quarter values.",
+      title: "Major Triad Mixed Values",
+      summary: "Quarter, eighth, and triplet-quarter values combined.",
       overrides: {
         scale: { name: "major", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
@@ -87,11 +86,11 @@ export default defineCourse({
       },
     },
 
-    // ---- Minor triad (allowed degrees: 1–♭3–5 in natural minor) ----
+    // Minor triad
     {
       slug: "minor-triad-quarters-only",
-      title: "Minor Triad — Quarters Only",
-      summary: "Random quarter-note prompts on 1–♭3–5; line & detect on; ~35% rests.",
+      title: "Minor Triad Quarters",
+      summary: "Quarter-note prompts with line and detection enabled.",
       overrides: {
         scale: { name: "natural_minor", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
@@ -100,8 +99,8 @@ export default defineCourse({
     },
     {
       slug: "minor-triad-quarter-eighth",
-      title: "Minor Triad — Quarter & Eighth Notes",
-      summary: "Quarters + eighths across the minor triad; syncopation visuals enabled.",
+      title: "Minor Triad Quarters + Eighths",
+      summary: "Quarters and eighths across the triad with rests.",
       overrides: {
         scale: { name: "natural_minor", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
@@ -110,8 +109,8 @@ export default defineCourse({
     },
     {
       slug: "minor-triad-triplet-and-quarter",
-      title: "Minor Triad — Triplet Quarters & Quarters",
-      summary: "Triplet quarters against straight quarters for feel control on 1–♭3–5.",
+      title: "Minor Triad Triplet Quarters + Quarters",
+      summary: "Switch cleanly between triplet and straight feels.",
       overrides: {
         scale: { name: "natural_minor", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
@@ -120,8 +119,8 @@ export default defineCourse({
     },
     {
       slug: "minor-triad-all-of-the-above",
-      title: "Minor Triad — All of the Above",
-      summary: "Mixed practice over the triad: quarter, eighth, triplet-quarter values.",
+      title: "Minor Triad Mixed Values",
+      summary: "Quarter, eighth, and triplet-quarter values combined.",
       overrides: {
         scale: { name: "natural_minor", tonicPc: 0 },
         allowedDegrees: [0, 2, 4],
