@@ -4,7 +4,7 @@ import type { SessionConfig } from "@/components/training/session/types";
 
 const BASE: Partial<SessionConfig> = {
   bpm: 80,
-  exerciseLoops: 3,
+  exerciseLoops: 4,
 
   // Run a short pretest before each exercise
   callResponse: true,
