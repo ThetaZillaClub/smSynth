@@ -19,7 +19,15 @@ export function shortIntervalLabel(semitones: number): string {
 
 export function aggregateForSubmission(
   scores: TakeScore[],
-  visibility?: { showMelodyRhythm?: boolean; showRhythmLine?: boolean; showIntervals?: boolean }
+  visibility?: { showMelodyRhythm?: boolean; showRhythmLine?: boolean; showIntervals?: boolean },
+  opts?: {
+    /** Map a duration (seconds) to a label ("Quarter", "Eighth", ...). */
+    melodyLabelFromSeconds?: (sec: number, noteIdx?: number, takeIdx?: number) => string | undefined;
+    /** Label a hand-line event by index/expected time. Return undefined to SKIP non-beat events. */
+    lineLabelByEvent?: (takeIdx: number, ev: { idx: number; expSec: number }) => string | undefined;
+    /** If melody coverage ignored head, add back the grace (e.g., 0.12). */
+    onsetGraceSec?: number;
+  }
 ): TakeScore {
   // Finals reflect what the user saw (visibility-aware per-take)
   const finalPct = mean(scores.map((s) => finalizeVisible(s, visibility).percent));
@@ -38,8 +46,8 @@ export function aggregateForSubmission(
       if (!Number.isFinite(midi)) continue;
       const g = byMidi.get(midi) ?? { n: 0, ratio: 0, mae: 0 };
       g.n += 1;
-      g.ratio += (p.ratio - g.ratio) / g.n;
-      g.mae   += (p.centsMae - g.mae) / g.n;
+      g.ratio += ((p as any).ratio - g.ratio) / g.n;
+      g.mae   += ((p as any).centsMae - g.mae) / g.n;
       byMidi.set(midi, g);
     }
   }
@@ -62,6 +70,10 @@ export function aggregateForSubmission(
   const lineAbsErrs: number[] = [];
   let anyLine = false;
 
+  // New totals for aggregated hit-rate
+  let lineAttemptsTotal = 0;
+  let lineSuccessesTotal = 0;
+
   for (const s of scores) {
     (s.rhythm.perNoteMelody ?? []).forEach(r => {
       if (typeof r.coverage === "number") melodyCoverages.push(r.coverage);
@@ -70,7 +82,10 @@ export function aggregateForSubmission(
     if (s.rhythm.lineEvaluated) {
       anyLine = true;
       (s.rhythm.linePerEvent ?? []).forEach(e => {
-        lineHits.push((e.credit ?? 0) > 0 ? 1 : 0);
+        const hit = (e.credit ?? 0) > 0;
+        lineAttemptsTotal += 1;
+        if (hit) lineSuccessesTotal += 1;
+        lineHits.push(hit ? 1 : 0);
         if (Number.isFinite(e.errMs)) lineAbsErrs.push(Math.abs(e.errMs!));
       });
     }
@@ -85,6 +100,59 @@ export function aggregateForSubmission(
 
   const lineHitRate     = lineHits.length ? clamp01(mean(lineHits)) : clamp01((avgLinePctRaw || 0) / 100);
   const lineMeanAbsMs   = lineAbsErrs.length ? Math.round(mean(lineAbsErrs)) : 0;
+
+  // ---- NEW: roll up rows for DB child tables (labels supplied by caller) ----
+  type MelAcc = { n: number; covSum: number; absSum: number };
+  type LineAcc = { n: number; hits: number; absSum: number };
+  const onsetGraceSec = Math.max(0, opts?.onsetGraceSec ?? 0);
+
+  const melMap = new Map<string, MelAcc>();
+  scores.forEach((s, takeIdx) => {
+    (s.rhythm.perNoteMelody ?? []).forEach((r, noteIdx) => {
+      const durSecForLabel = (r.dur ?? 0) + onsetGraceSec; // reverse the ignored head for labeling, if desired
+      const label =
+        opts?.melodyLabelFromSeconds?.(durSecForLabel, noteIdx, takeIdx) ??
+        (opts?.melodyLabelFromSeconds ? "Other" : "All");
+      const g = melMap.get(label) ?? { n: 0, covSum: 0, absSum: 0 };
+      g.n += 1;
+      g.covSum += (r.coverage ?? 0);
+      if (Number.isFinite(r.onsetErrMs)) g.absSum += Math.abs(r.onsetErrMs!);
+      melMap.set(label, g);
+    });
+  });
+  const melodyByDuration = Array.from(melMap.entries()).map(([durationLabel, g]) => ({
+    durationLabel,
+    attempts: g.n,
+    coveragePct: r2(clamp01(g.covSum / Math.max(1, g.n)) * 100),
+    firstVoiceMuAbsMs: Math.round(g.absSum / Math.max(1, g.n)),
+  }));
+
+  const lineMap = new Map<string, LineAcc>();
+  scores.forEach((s, takeIdx) => {
+    if (!s.rhythm.lineEvaluated) return;
+    (s.rhythm.linePerEvent ?? []).forEach((e) => {
+      // If a labeler is provided and returns undefined → SKIP (non-beat).
+      let label: string | undefined;
+      if (opts?.lineLabelByEvent) {
+        label = opts.lineLabelByEvent(takeIdx, { idx: e.idx, expSec: e.expSec });
+        if (!label) return; // do not include in rollup
+      } else {
+        label = "All";
+      }
+      const g = lineMap.get(label) ?? { n: 0, hits: 0, absSum: 0 };
+      g.n += 1;
+      g.hits += (e.credit ?? 0) > 0 ? 1 : 0;
+      if (Number.isFinite(e.errMs)) g.absSum += Math.abs(e.errMs!);
+      lineMap.set(label, g);
+    });
+  });
+  const lineByDuration = Array.from(lineMap.entries()).map(([durationLabel, g]) => ({
+    durationLabel,
+    attempts: g.n,
+    successes: g.hits,
+    hitPct: Math.round((g.hits / Math.max(1, g.n)) * 100),
+    muAbsMs: Math.round(g.absSum / Math.max(1, g.n)),
+  }));
 
   // Visibility-aware "combined" rhythm percent for analytics (not used for finalization).
   // Implemented inline to avoid the old helper.
@@ -141,8 +209,14 @@ export function aggregateForSubmission(
       lineHitRate,
       lineMeanAbsMs,
       combinedPercent,
+      // keep heavy arrays empty in the aggregate payload
       perNoteMelody: [],
       linePerEvent: [],
+      // new rollups for DB
+      melodyByDuration,
+      lineByDuration,
+      lineAttempts: lineAttemptsTotal,
+      lineSuccesses: lineSuccessesTotal,
     },
     intervals: intervalsPayload,
   };

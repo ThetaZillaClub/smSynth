@@ -3,7 +3,6 @@
 
 import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
-import { secondsToNoteName } from "../../side-panel/SidePanelScores/format";
 import MultiSeriesLines, { type Series } from "../MultiSeriesLines";
 
 export default function RhythmLineChart({
@@ -19,9 +18,20 @@ export default function RhythmLineChart({
   height?: number | string;
   introEpoch?: number;
 }) {
+  // Beat-only labeler (matches useScoringLifecycle)
+  const beatLabel = React.useMemo(() => {
+    const beatSec = 60 / Math.max(1, bpm);
+    const name = den === 4 ? "Quarter" : "Beat";
+    return (sec: number) => {
+      if (!Number.isFinite(sec) || sec <= 0) return undefined;
+      const ratio = sec / beatSec;
+      return Math.abs(ratio - 1) <= 0.25 ? name : undefined; // ±25% tolerance
+    };
+  }, [bpm, den]);
+
   const series: Series[] = React.useMemo(() => {
     const nT = scores.length;
-    const acc = new Map<string, Array<number | null>>();
+    const acc = new Map<string, Array<number | null>>(); // label -> values per take
     const order = new Map<string, number>(); let o = 0;
 
     for (let i = 0; i < nT; i++) {
@@ -30,17 +40,16 @@ export default function RhythmLineChart({
       const events = s.rhythm.linePerEvent ?? [];
       if (events.length < 2) continue;
 
-      // group by inter-onset duration label (IOI between expected beats)
+      // group by IOI between expected beats — BUT only keep the beat itself
       const perLabel = new Map<string, { sum: number; count: number }>();
       for (let j = 0; j < events.length - 1; j++) {
         const a = events[j]!;
         const b = events[j + 1]!;
         const durSec = Math.max(0, (b.expSec ?? 0) - (a.expSec ?? 0));
-        if (!(durSec > 0)) continue;
+        const label = beatLabel(durSec); // only "Quarter"/"Beat" or undefined
+        if (!label) continue;
 
-        const label = secondsToNoteName(durSec, bpm, den);
         if (!order.has(label)) order.set(label, o++);
-
         const creditPct = Math.max(0, Math.min(1, (a.credit ?? 0))) * 100;
         const cell = perLabel.get(label) ?? { sum: 0, count: 0 };
         cell.sum += creditPct;
@@ -54,27 +63,17 @@ export default function RhythmLineChart({
       }
     }
 
-    const all = Array.from(acc.entries()).map(([label, values]) => ({ label, values, ord: order.get(label) ?? 1e9 }))
+    const all = Array.from(acc.entries())
+      .map(([label, values]) => ({ label, values, ord: order.get(label) ?? 1e9 }))
       .sort((a, b) => a.ord - b.ord);
 
-    // prefer common subdivisions near the beat
-    const preferred = ["Quarter", "Eighth", "Dotted eighth", "Sixteenth"];
-    all.sort((a, b) => {
-      const ai = preferred.indexOf(a.label);
-      const bi = preferred.indexOf(b.label);
-      if (ai >= 0 && bi >= 0) return ai - bi;
-      if (ai >= 0) return -1;
-      if (bi >= 0) return 1;
-      return a.ord - b.ord;
-    });
-
-    const MAX_SERIES = 6;
+    const MAX_SERIES = 3; // in practice this will be 1 (“Quarter”/“Beat”)
     return all.slice(0, MAX_SERIES).map(({ label, values }) => ({ label, values }));
-  }, [scores, bpm, den]);
+  }, [scores, beatLabel]);
 
   return (
     <MultiSeriesLines
-      title="Rhythm line timing • by beat duration (per take)"
+      title="Rhythm line timing • by beat (per take)"
       series={series}
       height={height}
       yMin={0}

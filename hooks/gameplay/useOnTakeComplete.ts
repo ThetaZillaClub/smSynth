@@ -14,6 +14,42 @@ export type TakeSnapshot = {
   melodyRhythm: RhythmEvent[] | null;
 };
 
+// Note-labeler for melody coverage (unchanged behavior)
+function makeSecondsToNoteLabel(bpm: number, den: number) {
+  const beatSec = 60 / Math.max(1, bpm);
+  const quarterSec = beatSec * (4 / Math.max(1, den));
+  const candidates: Array<{ sec: number; name: string }> = [
+    { sec: quarterSec * 4, name: "Whole" },
+    { sec: quarterSec * 2, name: "Half" },
+    { sec: quarterSec * 1, name: "Quarter" },
+    { sec: quarterSec * 0.5, name: "Eighth" },
+    { sec: quarterSec * 0.25, name: "Sixteenth" },
+    { sec: quarterSec * 0.125, name: "Thirty-second" },
+  ];
+  return (sec: number) => {
+    if (!Number.isFinite(sec) || sec <= 0) return undefined;
+    let best = candidates[0];
+    let bestErr = Math.abs(sec - best.sec) / best.sec;
+    for (let i = 1; i < candidates.length; i++) {
+      const c = candidates[i];
+      const rel = Math.abs(sec - c.sec) / c.sec;
+      if (rel < bestErr) { best = c; bestErr = rel; }
+    }
+    return bestErr <= 0.25 ? best.name : "Other";
+  };
+}
+
+// NEW: beat-labeler for rhythm-line rollups — only accept true beats
+function makeSecondsToBeatLabel(bpm: number, den: number) {
+  const beatSec = 60 / Math.max(1, bpm); // true beat duration
+  const baseLabel = den === 4 ? "Quarter" : "Beat";
+  return (sec: number) => {
+    if (!Number.isFinite(sec) || sec <= 0) return undefined;
+    const ratio = sec / beatSec;
+    return Math.abs(ratio - 1) <= 0.25 ? baseLabel : undefined; // skip non-beats
+  };
+}
+
 export function useOnTakeComplete({
   active,
   loopPhase,
@@ -107,8 +143,34 @@ export function useOnTakeComplete({
       submittedRef.current = true;
       const all = [...sessionScores, score];
 
-      // ⬇️ VISIBILITY-AWARE SUBMISSION AGGREGATE
-      const agg = aggregateForSubmission(all, visibility);
+      // Build expected-onsets per take
+      const prevOnsets = snapshots.map((s) =>
+        s.rhythm ? makeOnsetsFromRhythm(s.rhythm, bpm, den) : []
+      );
+      const currOnsets = usedRhythm ? makeOnsetsFromRhythm(usedRhythm, bpm, den) : [];
+      const onsetsByTake = [...prevOnsets, currOnsets];
+
+      // Labelers
+      const melodyNoteLabel = makeSecondsToNoteLabel(bpm, den);
+      const beatLabel = makeSecondsToBeatLabel(bpm, den);
+
+      const melodyLabelFromSeconds = (sec: number) => melodyNoteLabel(sec);
+      const lineLabelByEvent = (takeIdx: number, ev: { idx: number; expSec: number }) => {
+        const arr = onsetsByTake[takeIdx] ?? [];
+        if (!arr.length) return undefined;
+        const i = ev.idx;
+        const next = i + 1 < arr.length ? arr[i + 1] : null;
+        const prev = i - 1 >= 0 ? arr[i] - arr[i - 1] : null;
+        const ioi = next != null ? next - arr[i] : prev != null ? prev : null;
+        return ioi && ioi > 0 ? beatLabel(ioi) : undefined; // only accept true beats
+      };
+
+      // ⬇️ VISIBILITY-AWARE SUBMISSION AGGREGATE (+labels)
+      const agg = aggregateForSubmission(all, visibility, {
+        melodyLabelFromSeconds,
+        lineLabelByEvent,
+        onsetGraceSec: 0.12,
+      });
 
       const snap = {
         perTakeFinals: all.map((s, i) => ({ i, final: s.final.percent })),
@@ -144,6 +206,7 @@ export function useOnTakeComplete({
     maxTakes,
     submitLesson,
     visibility, // ⬅️ include in deps so changes apply to the terminal aggregate
+    snapshots,
   ]);
 
   return { snapshots };

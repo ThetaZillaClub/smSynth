@@ -9,7 +9,6 @@ import { letterFromPercent } from "@/utils/scoring/grade";
 import { intervalLabel, secondsToNoteName } from "./format";
 import { midiLabelForKey } from "@/utils/pitch/enharmonics";
 import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
-import { noteValueToSeconds } from "@/utils/time/tempo";
 import { finalizeVisible } from "@/utils/scoring/final/finalize";
 
 type TakeSnap = { phrase: Phrase; rhythm: RhythmEvent[] | null };
@@ -61,7 +60,7 @@ export default function OverallReview({
 
   const finalLetter = Number.isFinite(finalPct) ? letterFromPercent(finalPct) : "—";
 
-  // Other aggregates (unchanged — raw pitch/rhythm/interval stats)
+  // Other aggregates
   const pitchPct = avg((s) => s.pitch.percent);
   const timeOnPitchPct = Math.round(
     (scores.reduce((a, s) => a + s.pitch.timeOnPitchRatio, 0) / n) * 100
@@ -104,7 +103,7 @@ export default function OverallReview({
 
   const [view, setView] = React.useState<View>("summary");
 
-  // ───────────────────────────────── Aggregations
+  // ───────────────────── Aggregations ─────────────────────
   type AccIC = { attempts: number; correct: number };
   const intervalByClass = React.useMemo(() => {
     const byClass = new Map<number, AccIC>();
@@ -195,35 +194,49 @@ export default function OverallReview({
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
   }, [scores, snapshots, bpm, den]);
 
+  // NEW: Beat-only aggregation for rhythm line (IOI between expected beats)
   const aggLineRows = React.useMemo(() => {
     type Acc = { label: string; order: number; n: number; meanHit: number; meanAbsErr: number };
     const m = new Map<string, Acc>();
     let orderCounter = 0;
+
+    const beatSec = 60 / Math.max(1, bpm);
+    const labelName = den === 4 ? "Quarter" : "Beat";
+    const labelFor = (sec: number) => {
+      if (!Number.isFinite(sec) || sec <= 0) return undefined;
+      const ratio = sec / beatSec;
+      return Math.abs(ratio - 1) <= 0.25 ? labelName : undefined; // ±25%
+    };
+
     for (let i = 0; i < scores.length; i++) {
       const s = scores[i]!;
       if (!s.rhythm.lineEvaluated) continue;
-      const snap = snapshots[i];
-      const events = snap?.rhythm ?? [];
+
       const rows = s.rhythm.linePerEvent ?? [];
-      for (const r of rows) {
-        const ev = events?.[r.idx];
-        if (!ev) continue;
-        const durSec = noteValueToSeconds(ev.value, bpm, den);
-        const label = secondsToNoteName(durSec, bpm, den);
+      for (let j = 0; j < rows.length - 1; j++) {
+        const a = rows[j]!;
+        const b = rows[j + 1]!;
+        const durSec = Math.max(0, (b.expSec ?? 0) - (a.expSec ?? 0));
+        const label = labelFor(durSec);
+        if (!label) continue;
+
         if (!m.has(label))
           m.set(label, { label, order: orderCounter++, n: 0, meanHit: 0, meanAbsErr: 0 });
         const g = m.get(label)!;
         g.n += 1;
-        const hit = (r.credit ?? 0) > 0 ? 1 : 0;
+
+        const hit = (a.credit ?? 0) > 0 ? 1 : 0;
         g.meanHit += (hit - g.meanHit) / g.n;
-        if (Number.isFinite(r.errMs)) {
-          const abs = Math.abs(r.errMs!);
+
+        if (Number.isFinite(a.errMs)) {
+          const abs = Math.abs(a.errMs!);
           g.meanAbsErr += (abs - g.meanAbsErr) / g.n;
         }
       }
     }
+
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
-  }, [scores, snapshots, bpm, den]);
+  }, [scores, bpm, den]);
 
   React.useEffect(() => {
     if (view === "melody" && !visibility.showMelodyRhythm) setView("summary");
@@ -568,7 +581,7 @@ function SubHeader({
       className={[
         "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
         "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0f0f0f]",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
       ].join(" ")}
     >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">

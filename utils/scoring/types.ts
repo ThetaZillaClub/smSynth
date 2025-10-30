@@ -57,6 +57,23 @@ export type RhythmScore = {
   combinedPercent: number;   // average of evaluated rhythm tracks
   perNoteMelody: PerNoteRhythm[]; // ⬅️ per-note coverage for melody
   linePerEvent: RhythmPerEvent[]; // ⬅️ per-beat table for rhythm line
+
+  // ---- Optional aggregated rollups for DB transport (computed in aggregate.ts) ----
+  lineAttempts?: number;
+  lineSuccesses?: number;
+  melodyByDuration?: Array<{
+    durationLabel: string;
+    attempts: number;
+    coveragePct: number;          // 0..100
+    firstVoiceMuAbsMs: number;    // mean absolute onset error (ms)
+  }>;
+  lineByDuration?: Array<{
+    durationLabel: string;
+    attempts: number;
+    successes: number;
+    hitPct: number;               // 0..100
+    muAbsMs: number;              // mean absolute timing error (ms)
+  }>;
 };
 
 // ---- Intervals ----

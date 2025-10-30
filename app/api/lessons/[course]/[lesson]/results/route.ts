@@ -155,33 +155,64 @@ export async function POST(
     console.warn("pitch_notes insert:", e);
   }
 
+  // Melody rhythm rollup: prefer aggregated rows; fallback to per-note table
   try {
-    const melArr = Array.isArray(s.rhythm?.perNoteMelody) ? (s.rhythm.perNoteMelody as unknown[]) : [];
-    const rows =
-      melArr.map((r, i: number) => ({
+    const melDur = Array.isArray((s as any)?.rhythm?.melodyByDuration)
+      ? (((s as any).rhythm.melodyByDuration as unknown[]) ?? [])
+      : [];
+    if (melDur.length) {
+      const rows = melDur.map((r) => ({
         result_id: resultId,
-        idx: i,
-        coverage: toNum(get(r, "coverage")),
-        onset_err_ms: toOptionalInt(get(r, "onsetErrMs")),
-      })) ?? [];
-    if (rows.length) await supabase.from("lesson_result_melody_per_note").insert(rows);
+        duration_label: String(get(r, "durationLabel") ?? "All"),
+        attempts: Math.max(0, toInt(get(r, "attempts"))),
+        coverage_pct: r2(toNum(get(r, "coveragePct"))),
+        first_voice_mu_abs_ms: toOptionalInt(get(r, "firstVoiceMuAbsMs")),
+      }));
+      await supabase.from("lesson_result_melody_durations").insert(rows);
+    } else {
+      const melArr = Array.isArray(s.rhythm?.perNoteMelody) ? (s.rhythm.perNoteMelody as unknown[]) : [];
+      const rows =
+        melArr.map((r, i: number) => ({
+          result_id: resultId,
+          idx: i,
+          coverage: toNum(get(r, "coverage")),
+          onset_err_ms: toOptionalInt(get(r, "onsetErrMs")),
+        })) ?? [];
+      if (rows.length) await supabase.from("lesson_result_melody_per_note").insert(rows);
+    }
   } catch (e) {
-    console.warn("melody_per_note insert:", e);
+    console.warn("melody_per_note/durations insert:", e);
   }
 
+  // Line rhythm rollup: prefer aggregated rows; fallback to per-event table
   try {
-    const lineArr = Array.isArray(s.rhythm?.linePerEvent) ? (s.rhythm.linePerEvent as unknown[]) : [];
-    const rows =
-      lineArr.map((r) => ({
+    const lineDur = Array.isArray((s as any)?.rhythm?.lineByDuration)
+      ? (((s as any).rhythm.lineByDuration as unknown[]) ?? [])
+      : [];
+    if (lineDur.length) {
+      const rows = lineDur.map((r) => ({
         result_id: resultId,
-        value: String(get(r, "value") ?? "unknown"),
-        n: Math.max(1, Math.round(toNum(get(r, "n") ?? 1))),
-        credit: toNum(get(r, "credit")),
-        err_ms: toOptionalInt(get(r, "errMs")),
-      })) ?? [];
-    if (rows.length) await supabase.from("lesson_result_rhythm_per_event").insert(rows);
+        duration_label: String(get(r, "durationLabel") ?? "All"),
+        attempts: Math.max(0, toInt(get(r, "attempts"))),
+        successes: Math.max(0, toInt(get(r, "successes"))),
+        hit_pct: r2(toNum(get(r, "hitPct"))),
+        mu_abs_ms: toOptionalInt(get(r, "muAbsMs")),
+      }));
+      await supabase.from("lesson_result_rhythm_durations").insert(rows);
+    } else {
+      const lineArr = Array.isArray(s.rhythm?.linePerEvent) ? (s.rhythm.linePerEvent as unknown[]) : [];
+      const rows =
+        lineArr.map((r) => ({
+          result_id: resultId,
+          value: String(get(r, "value") ?? "unknown"),
+          n: Math.max(1, Math.round(toNum(get(r, "n") ?? 1))),
+          credit: toNum(get(r, "credit")),
+          err_ms: toOptionalInt(get(r, "errMs")),
+        })) ?? [];
+      if (rows.length) await supabase.from("lesson_result_rhythm_per_event").insert(rows);
+    }
   } catch (e) {
-    console.warn("rhythm_per_event insert:", e);
+    console.warn("rhythm_per_event/durations insert:", e);
   }
 
   try {
