@@ -7,7 +7,7 @@ import type { Phrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import { midiLabelForKey } from "@/utils/pitch/enharmonics";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
-import MultiSeriesLines, { type Series } from "../MultiSeriesLines";
+import MultiSeriesLines, { type Series } from "../../../../../ui/MultiSeriesLines";
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 

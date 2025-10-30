@@ -3,7 +3,7 @@
 
 import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
-import MultiSeriesLines, { type Series } from "../MultiSeriesLines";
+import MultiSeriesLines, { type Series } from "../../../../../ui/MultiSeriesLines";
 
 type BreakdownRow = { color: string; label: string; value: string };
 

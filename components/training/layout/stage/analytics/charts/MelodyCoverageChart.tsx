@@ -6,7 +6,7 @@ import type { TakeScore } from "@/utils/scoring/score";
 import type { Phrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import { secondsToNoteName } from "../../side-panel/SidePanelScores/format";
-import MultiSeriesLines, { type Series } from "../MultiSeriesLines";
+import MultiSeriesLines, { type Series } from "../../../../../ui/MultiSeriesLines";
 
 type TakeSnap = { phrase: Phrase; rhythm: RhythmEvent[] | null };
 

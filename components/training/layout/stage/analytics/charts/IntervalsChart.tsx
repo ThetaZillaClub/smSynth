@@ -4,7 +4,7 @@
 import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
 import { intervalLabel } from "../../side-panel/SidePanelScores/format";
-import MultiSeriesLines, { type Series } from "../MultiSeriesLines";
+import MultiSeriesLines, { type Series } from "../../../../../ui/MultiSeriesLines";
 
 export default function IntervalsChart({
   scores,
