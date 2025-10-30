@@ -12,10 +12,13 @@ export default function HomeHeader({
   displayName,
   avatarUrl,
   studentImagePath, // passed from /home bootstrap
+  headlineMode = 'welcome', // 'welcome' | 'name'
 }: {
   displayName: string;
   avatarUrl: string | null;
   studentImagePath?: string | null;
+  /** Controls headline text. 'welcome' => "Welcome back, Name"; 'name' => "Name" */
+  headlineMode?: 'welcome' | 'name';
 }) {
   const [imgUrl, setImgUrl] = React.useState<string | null>(avatarUrl ?? null);
 
@@ -95,7 +98,9 @@ export default function HomeHeader({
           )}
         </div>
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Welcome back, {displayName}</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">
+            {headlineMode === 'name' ? displayName : <>Welcome back, {displayName}</>}
+          </h1>
         </div>
       </div>
     </header>

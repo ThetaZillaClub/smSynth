@@ -4,8 +4,8 @@
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { COURSES } from '@/lib/courses/registry';
-import ResultDetails from './ResultDetails';
-import ResultsList, { type ResultRow } from './ResultsList';
+import HeaderSummary from './HeaderSummary';
+import CombinedDetails from './CombinedDetails';
 
 type DbRow = {
   id: string;
@@ -14,18 +14,26 @@ type DbRow = {
   lesson_slug: string;
   final_percent: string | number | null;
   pitch_percent: string | number | null;
-  pitch_time_on_ratio: string | number | null;  // 0..1
-  pitch_cents_mae: string | number | null;      // cents
+  pitch_time_on_ratio: string | number | null;
+  pitch_cents_mae: string | number | null;
   rhythm_melody_percent: string | number | null;
   rhythm_line_percent: string | number | null;
-  intervals_correct_ratio: string | number | null; // 0..1
+  intervals_correct_ratio: string | number | null;
 };
 
-const titleByLessonSlug: Record<string, string> = (() => {
-  const m: Record<string, string> = {};
-  for (const c of COURSES) for (const l of c.lessons) m[l.slug] = l.title;
-  return m;
-})();
+type PitchNoteRow = { result_id: string; midi: number; n: number; ratio: number; cents_mae: number };
+type MelDurRow   = { result_id: string; duration_label: string; attempts: number; coverage_pct: number; first_voice_mu_abs_ms: number | null };
+type LineDurRow  = { result_id: string; duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null };
+type IcRow       = { result_id: string; semitones: number; attempts: number; correct: number };
+
+const RECENCY_OPTS = [
+  { key: '7d',   label: 'Last 7 days',  days: 7 },
+  { key: '30d',  label: 'Last 30 days', days: 30 },
+  { key: '90d',  label: 'Last 90 days', days: 90 },
+  { key: '180d', label: 'Last 6 months', days: 180 },
+  { key: '365d', label: 'Last 12 months', days: 365 },
+  { key: 'all',  label: 'All time', days: null as number | null },
+] as const;
 
 function safeNum(x: unknown): number | null {
   if (x == null) return null;
@@ -34,19 +42,42 @@ function safeNum(x: unknown): number | null {
 }
 
 export default function StudentStats() {
-  const [rows, setRows] = React.useState<ResultRow[]>([]);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [allRows, setAllRows] = React.useState<DbRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
+  // filters
+  const [recency, setRecency] = React.useState<(typeof RECENCY_OPTS)[number]['key']>('90d');
+  const [course, setCourse]   = React.useState<string | 'all'>('all');
+  const [lesson, setLesson]   = React.useState<string | 'all'>('all');
+
+  // aggregated detail state
+  const [pitchNotes, setPitchNotes] = React.useState<Array<{ midi: number; n: number; ratio: number; cents_mae: number }>>([]);
+  const [melodyDur, setMelodyDur]   = React.useState<Array<{ duration_label: string; attempts: number; coverage_pct: number; first_voice_mu_abs_ms: number | null }>>([]);
+  const [lineDur, setLineDur]       = React.useState<Array<{ duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null }>>([]);
+  const [intervals, setIntervals]   = React.useState<Array<{ semitones: number; attempts: number; correct: number }>>([]);
+  const [detailsLoading, setDetailsLoading] = React.useState(false);
+  const [detailsErr, setDetailsErr] = React.useState<string | null>(null);
+
+  // header summary numbers
+  const [finalPct, setFinalPct] = React.useState<number | null>(null);
+  const [pitchPct, setPitchPct] = React.useState<number | null>(null);
+  const [timeOnPitchPct, setTimeOnPitchPct] = React.useState<number | null>(null);
+  const [pitchMae, setPitchMae] = React.useState<number | null>(null);
+  const [melodyPct, setMelodyPct] = React.useState<number | null>(null);
+  const [linePct, setLinePct] = React.useState<number | null>(null);
+  const [intervalsPct, setIntervalsPct] = React.useState<number | null>(null);
+
+  // load all results once
   React.useEffect(() => {
     let cancel = false;
     (async () => {
       try {
+        setLoading(true);
         const supabase = createClient();
         const { data: { user }, error: uerr } = await supabase.auth.getUser();
         if (uerr) throw uerr;
-        if (!user) { setRows([]); setSelectedId(null); setLoading(false); return; }
+        if (!user) { setAllRows([]); return; }
 
         const { data, error } = await supabase
           .from('lesson_results')
@@ -59,44 +90,13 @@ export default function StudentStats() {
           `)
           .eq('uid', user.id)
           .order('created_at', { ascending: false })
-          .limit(200);
+          .limit(500);
 
         if (error) throw error;
-
-        const mapped: ResultRow[] = (data as DbRow[]).map((r) => {
-          const title = titleByLessonSlug[r.lesson_slug] ?? r.lesson_slug ?? 'Unknown Lesson';
-          const final = safeNum(r.final_percent);
-          const pitch = safeNum(r.pitch_percent);
-          const melody = safeNum(r.rhythm_melody_percent);
-          const line = safeNum(r.rhythm_line_percent);
-          const intervalsRatio = safeNum(r.intervals_correct_ratio);
-          const timeOn = safeNum(r.pitch_time_on_ratio);
-          const mae = safeNum(r.pitch_cents_mae);
-
-          return {
-            id: r.id,
-            when: new Date(r.created_at),
-            course: r.course_slug,
-            title,
-            final: final == null ? null : Math.round(Math.max(0, Math.min(100, final))),
-            pitch: pitch == null ? null : Math.round(pitch),
-            melody: melody == null ? null : Math.round(melody),
-            line: line == null ? null : Math.round(line),
-            intervals: intervalsRatio == null ? null : Math.round(Math.max(0, Math.min(1, intervalsRatio)) * 100),
-            pitchTimeOn: timeOn == null ? null : Math.round(Math.max(0, Math.min(1, timeOn)) * 100),
-            pitchMae: mae == null ? null : Math.round(mae),
-          };
-        });
-
         if (cancel) return;
-        setRows(mapped);
-        setSelectedId(mapped[0]?.id ?? null);
+        setAllRows((data ?? []) as DbRow[]);
       } catch (e: any) {
-        if (!cancel) {
-          setError(e?.message ?? 'Failed to load stats');
-          setRows([]);
-          setSelectedId(null);
-        }
+        if (!cancel) setError(e?.message ?? 'Failed to load stats');
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -104,57 +104,287 @@ export default function StudentStats() {
     return () => { cancel = true; };
   }, []);
 
-  const selected = React.useMemo(() => rows.find(r => r.id === selectedId) ?? null, [rows, selectedId]);
+  // compute filtered set of rows by recency/course/lesson
+  const filtered = React.useMemo(() => {
+    const now = Date.now();
+    const days = RECENCY_OPTS.find(o => o.key === recency)?.days ?? null;
+    const minTime = days == null ? null : now - days * 24 * 60 * 60 * 1000;
+
+    return allRows.filter(r => {
+      if (minTime != null && new Date(r.created_at).getTime() < minTime) return false;
+      if (course !== 'all' && r.course_slug !== course) return false;
+      if (lesson !== 'all' && r.lesson_slug !== lesson) return false;
+      return true;
+    });
+  }, [allRows, recency, course, lesson]);
+
+  // fetch + aggregate details whenever filtered result IDs change
+  React.useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        setDetailsErr(null);
+        setDetailsLoading(true);
+
+        const ids = filtered.map(r => r.id);
+        if (!ids.length) {
+          setPitchNotes([]); setMelodyDur([]); setLineDur([]); setIntervals([]);
+          // zero-out header metrics too
+          setFinalPct(null); setPitchPct(null); setTimeOnPitchPct(null);
+          setPitchMae(null); setMelodyPct(null); setLinePct(null); setIntervalsPct(null);
+          return;
+        }
+
+        const supabase = createClient();
+
+        const [pitchRes, melDurRes, lineDurRes, icRes] = await Promise.all([
+          supabase.from('lesson_result_pitch_notes')
+            .select('result_id,midi,n,ratio,cents_mae').in('result_id', ids),
+          supabase.from('lesson_result_melody_durations')
+            .select('result_id,duration_label,attempts,coverage_pct,first_voice_mu_abs_ms').in('result_id', ids),
+          supabase.from('lesson_result_rhythm_durations')
+            .select('result_id,duration_label,attempts,successes,hit_pct,mu_abs_ms').in('result_id', ids),
+          supabase.from('lesson_result_interval_classes')
+            .select('result_id,semitones,attempts,correct').in('result_id', ids),
+        ]);
+
+        if (pitchRes.error) throw new Error(pitchRes.error.message);
+        if (melDurRes.error) throw new Error(melDurRes.error.message);
+        if (lineDurRes.error) throw new Error(lineDurRes.error.message);
+        if (icRes.error) throw new Error(icRes.error.message);
+
+        // ---- Aggregate PITCH NOTES
+        const pitchRows = (pitchRes.data ?? []) as PitchNoteRow[];
+        const pmap = new Map<number, { n: number; ratio_w: number; mae_w: number }>();
+        for (const r of pitchRows) {
+          const cur = pmap.get(r.midi) ?? { n: 0, ratio_w: 0, mae_w: 0 };
+          cur.n += r.n;
+          cur.ratio_w += r.ratio * r.n;
+          cur.mae_w += r.cents_mae * r.n;
+          pmap.set(r.midi, cur);
+        }
+        const pitchAgg = Array.from(pmap.entries())
+          .map(([midi, v]) => ({
+            midi,
+            n: v.n,
+            ratio: v.n ? v.ratio_w / v.n : 0,
+            cents_mae: v.n ? v.mae_w / v.n : 0,
+          }))
+          .sort((a, b) => b.n - a.n);
+
+        // summary from pitch notes (preferred)
+        const totalN = pitchAgg.reduce((a, r) => a + r.n, 0);
+        const timeOnPct =
+          totalN ? Math.round((pitchAgg.reduce((a, r) => a + r.ratio * r.n, 0) / totalN) * 100) : null;
+        const maeCents =
+          totalN ? Math.round(pitchAgg.reduce((a, r) => a + r.cents_mae * r.n, 0) / totalN) : null;
+
+        // ---- Aggregate MELODY DURATIONS
+        const melRows = (melDurRes.data ?? []) as MelDurRow[];
+        type MelAcc = { attempts: number; coverage_w: number; mu_w: number; mu_w_denom: number };
+        const mmap = new Map<string, MelAcc>();
+        for (const r of melRows) {
+          const cur = mmap.get(r.duration_label) ?? { attempts: 0, coverage_w: 0, mu_w: 0, mu_w_denom: 0 };
+          cur.attempts += r.attempts;
+          cur.coverage_w += Number(r.coverage_pct) * r.attempts;
+          if (r.first_voice_mu_abs_ms != null) {
+            cur.mu_w += Number(r.first_voice_mu_abs_ms) * r.attempts;
+            cur.mu_w_denom += r.attempts;
+          }
+          mmap.set(r.duration_label, cur);
+        }
+        const melodyAgg = Array.from(mmap.entries()).map(([label, acc]) => ({
+          duration_label: label,
+          attempts: acc.attempts,
+          coverage_pct: acc.attempts ? acc.coverage_w / acc.attempts : 0,
+          first_voice_mu_abs_ms: acc.mu_w_denom ? acc.mu_w / acc.mu_w_denom : null,
+        })).sort((a, b) => b.attempts - a.attempts);
+
+        // ---- Aggregate RHYTHM LINE DURATIONS
+        const lineRows = (lineDurRes.data ?? []) as LineDurRow[];
+        type LineAcc = { attempts: number; successes: number; mu_w: number; mu_w_denom: number };
+        const lmap = new Map<string, LineAcc>();
+        for (const r of lineRows) {
+          const cur = lmap.get(r.duration_label) ?? { attempts: 0, successes: 0, mu_w: 0, mu_w_denom: 0 };
+          cur.attempts += r.attempts;
+          cur.successes += r.successes;
+          if (r.mu_abs_ms != null) {
+            cur.mu_w += Number(r.mu_abs_ms) * r.attempts;
+            cur.mu_w_denom += r.attempts;
+          }
+          lmap.set(r.duration_label, cur);
+        }
+        const lineAgg = Array.from(lmap.entries()).map(([label, acc]) => ({
+          duration_label: label,
+          attempts: acc.attempts,
+          successes: acc.successes,
+          hit_pct: acc.attempts ? (100 * acc.successes) / acc.attempts : 0,
+          mu_abs_ms: acc.mu_w_denom ? acc.mu_w / acc.mu_w_denom : null,
+        })).sort((a, b) => b.attempts - a.attempts);
+
+        // ---- Aggregate INTERVALS
+        const icRows = (icRes.data ?? []) as IcRow[];
+        type IcAcc = { attempts: number; correct: number };
+        const icmap = new Map<number, IcAcc>();
+        for (const r of icRows) {
+          const cur = icmap.get(r.semitones) ?? { attempts: 0, correct: 0 };
+          cur.attempts += r.attempts;
+          cur.correct += r.correct;
+          icmap.set(r.semitones, cur);
+        }
+        const intervalsAgg = Array.from(icmap.entries()).map(([semi, acc]) => ({
+          semitones: semi,
+          attempts: acc.attempts,
+          correct: acc.correct,
+        })).sort((a, b) => a.semitones - b.semitones);
+
+        // Push details
+        if (cancel) return;
+        setPitchNotes(pitchAgg);
+        setMelodyDur(melodyAgg);
+        setLineDur(lineAgg);
+        setIntervals(intervalsAgg);
+
+        // ---- Header summary from lesson_results + details
+        const avg = (nums: Array<number | null>) => {
+          const vals = nums.filter((v): v is number => v != null && Number.isFinite(v));
+          if (!vals.length) return null;
+          return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+        };
+
+        const final = avg(filtered.map(r => safeNum(r.final_percent)));
+        const mel   = avg(filtered.map(r => safeNum(r.rhythm_melody_percent)));
+        const line  = avg(filtered.map(r => safeNum(r.rhythm_line_percent)));
+
+        const attemptsTotal = intervalsAgg.reduce((a, r) => a + r.attempts, 0);
+        const correctTotal  = intervalsAgg.reduce((a, r) => a + r.correct, 0);
+        const intervalsPctAgg = attemptsTotal ? Math.round((100 * correctTotal) / attemptsTotal) : null;
+
+        setFinalPct(final);
+        setMelodyPct(mel);
+        setLinePct(line);
+        setIntervalsPct(intervalsPctAgg);
+
+        // Pitch headline from pitch notes aggregation (preferred)
+        setTimeOnPitchPct(timeOnPct);
+        setPitchMae(maeCents);
+        setPitchPct(timeOnPct); // align "Pitch" with on-pitch headline
+
+      } catch (e: any) {
+        if (!cancel) {
+          setDetailsErr(e?.message ?? 'Failed to load details');
+          setPitchNotes([]); setMelodyDur([]); setLineDur([]); setIntervals([]);
+          setFinalPct(null); setPitchPct(null); setTimeOnPitchPct(null);
+          setPitchMae(null); setMelodyPct(null); setLinePct(null); setIntervalsPct(null);
+        }
+      } finally {
+        if (!cancel) setDetailsLoading(false);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [filtered]);
+
+  const courseOptions = React.useMemo(
+    () => COURSES.map(c => ({ slug: c.slug, title: c.title, lessons: c.lessons.map(l => ({ slug: l.slug, title: l.title })) })),
+    []
+  );
+
+  const selectedCourse = courseOptions.find(c => c.slug === course) || null;
+  const lessonOptions = selectedCourse?.lessons ?? [];
+
+  // if course changes to 'all', ensure lesson resets to 'all'
+  React.useEffect(() => {
+    if (course === 'all') setLesson('all');
+  }, [course]);
 
   return (
     <section className="w-full h-full">
-      {/* Full-width row like GameStage; pb-2 gives room for bottom shadows */}
-      <div className="w-full h-full flex gap-3 isolate pb-2">
-        {/* STAGE (left) */}
-        <div className="flex-1 min-w-0 min-h-0 rounded-xl shadow-md relative z-0">
-          <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xl font-semibold">Details</h3>
-              {selected ? (
-                <div className="text-xs text-[#0f0f0f]/70">
-                  {selected.when.toISOString().slice(0,10)} • {selected.course} • {selected.title}
-                </div>
-              ) : null}
-            </div>
+      {/* Minimal header row: JUST the 3 dropdowns on the left; no title, no counts, no outer card */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Recency */}
+        <select
+          aria-label="Recency"
+          value={recency}
+          onChange={(e) => setRecency(e.target.value as any)}
+          className="rounded-lg border border-[#d2d2d2] bg-[#f4f4f4] px-2 py-1 text-xs outline-none hover:bg-[#f8f8f8]"
+        >
+          {RECENCY_OPTS.map(opt => (
+            <option key={opt.key} value={opt.key}>{opt.label}</option>
+          ))}
+        </select>
 
-            {!selected ? (
-              <div className="text-sm text-[#6b6b6b]">Select a lesson from the right to see details.</div>
-            ) : (
-              <ResultDetails
-                resultId={selected.id}
-                pitchSummary={{ timeOnPct: selected.pitchTimeOn ?? null, maeCents: selected.pitchMae ?? null }}
-              />
-            )}
+        {/* Course */}
+        <select
+          aria-label="Course"
+          value={course}
+          onChange={(e) => setCourse(e.target.value)}
+          className="rounded-lg border border-[#d2d2d2] bg-[#f4f4f4] px-2 py-1 text-xs outline-none hover:bg-[#f8f8f8]"
+        >
+          <option value="all">All courses</option>
+          {courseOptions.map(c => (
+            <option key={c.slug} value={c.slug}>{c.title}</option>
+          ))}
+        </select>
 
-            {error ? <div className="mt-2 text-sm text-[#dc2626]">{error}</div> : null}
-          </div>
-        </div>
-
-        {/* SIDEPANEL (right) */}
-        <aside className="shrink-0 w-[clamp(260px,20vw,380px)] h-full rounded-xl shadow-md relative z-10 pointer-events-auto">
-          <div className="w-full h-full rounded-xl bg-transparent border border-[#dcdcdc] p-3 md:p-4">
-            {loading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="h-10 rounded bg-[#e8e8e8] animate-pulse" />
-                ))}
-              </div>
-            ) : (
-              <ResultsList
-                rows={rows}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                className="h-full"
-              />
-            )}
-          </div>
-        </aside>
+        {/* Lesson */}
+        <select
+          aria-label="Lesson"
+          value={lesson}
+          onChange={(e) => setLesson(e.target.value)}
+          disabled={course === 'all'}
+          className="rounded-lg border border-[#d2d2d2] bg-[#f4f4f4] px-2 py-1 text-xs outline-none hover:bg-[#f8f8f8] disabled:opacity-50"
+        >
+          <option value="all">All lessons</option>
+          {lessonOptions.map(l => (
+            <option key={l.slug} value={l.slug}>{l.title}</option>
+          ))}
+        </select>
       </div>
+
+      {/* Summary row */}
+      <div className="mt-3">
+        <HeaderSummary
+          finalPct={finalPct}
+          pitchPct={pitchPct}
+          timeOnPitchPct={timeOnPitchPct}
+          pitchMae={pitchMae}
+          melodyPct={melodyPct}
+          linePct={linePct}
+          intervalsPct={intervalsPct}
+        />
+      </div>
+
+      {/* Details grid */}
+      <div className="mt-3">
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-28 rounded-2xl border shadow-sm animate-pulse"
+                style={{
+                  borderColor: '#d2d2d2',
+                  backgroundImage: 'linear-gradient(to bottom, #f2f2f2, #eeeeee)',
+                }}
+              />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-sm text-[#6b6b6b]">No results match your filters.</div>
+        ) : (
+          <CombinedDetails
+            pitchNotes={pitchNotes}
+            melodyDur={melodyDur}
+            lineDur={lineDur}
+            intervals={intervals}
+            pitchSummary={{ timeOnPct: timeOnPitchPct, maeCents: pitchMae }}
+            loading={detailsLoading}
+            err={detailsErr}
+          />
+        )}
+      </div>
+
+      {error ? <div className="mt-2 text-sm text-[#dc2626]">{error}</div> : null}
     </section>
   );
 }

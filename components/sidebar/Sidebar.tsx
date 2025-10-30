@@ -1,3 +1,4 @@
+// components/sidebar/Sidebar.tsx
 'use client';
 
 import * as React from 'react';
@@ -9,7 +10,7 @@ import BrandRow from './ui/BrandRow';
 import NavButton from './ui/NavButton';
 import CTAGroup from './ui/CTAGroup';
 import AvatarSettingsButton from './ui/AvatarSettingsButton';
-import { CoursesIcon, SetupIcon, PremiumIcon } from './svg/Icons';
+import { CoursesIcon, SetupIcon, PremiumIcon, StatsIcon, HistoryIcon } from './svg/Icons';
 import CollapseToggleRow from './ui/CollapseToggleRow';
 
 export default function Sidebar() {
@@ -50,6 +51,20 @@ export default function Sidebar() {
       label: 'Courses',
       icon: <CoursesIcon />,
       match: (p) => p === '/courses' || p.startsWith('/courses/'),
+      requireAuth: true,
+    },
+    {
+      href: '/stats',
+      label: 'Stats',
+      icon: <StatsIcon />,
+      match: (p) => p === '/stats' || p.startsWith('/stats/'),
+      requireAuth: true,
+    },
+    {
+      href: '/history',
+      label: 'History',
+      icon: <HistoryIcon />,
+      match: (p) => p === '/history' || p.startsWith('/history/'),
       requireAuth: true,
     },
     {

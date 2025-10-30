@@ -5,12 +5,20 @@ import * as React from 'react';
 // Courses: blue + indigo
 // Setup:   green + purple
 // Premium: red  + darkorange
+// Stats:   configurable via --icon-stats-a / --icon-stats-b
+// History: configurable via --icon-history-a / --icon-history-b
 const COURSES_ST0 = 'var(--icon-courses-a, black)';
 const COURSES_ST1 = 'var(--icon-courses-b, black)';
 const SETUP_ST0   = 'var(--icon-setup-a, black)';
 const SETUP_ST1   = 'var(--icon-setup-b, black)';
 const PREMIUM_ST0 = 'var(--icon-premium-a, black)';
 const PREMIUM_ST1 = 'var(--icon-premium-b, black)';
+
+// New palettes
+const STATS_ST0   = 'var(--icon-stats-a, black)';
+const STATS_ST1   = 'var(--icon-stats-b, black)';
+const HISTORY_ST0 = 'var(--icon-history-a, black)';
+const HISTORY_ST1 = 'var(--icon-history-b, black)';
 
 // Profile neutrals
 const PROFILE_ST0 = 'var(--icon-profile-a, black)';
@@ -55,6 +63,57 @@ export const PremiumIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <path d="M410.5,120c-2.8,0-5,2.2-5,5s2.2,5,5,5c23.4,0,42.4,19,42.4,42.4s-19,42.4-42.4,42.4c-2.8,0-5,2.2-5,5 s2.2,5,5,5c28.9,0,52.4-23.5,52.4-52.4S439.4,120,410.5,120z" fill={PREMIUM_ST1}/>
     <path d="M106.5,219.8c0-2.8-2.2-5-5-5c-23.4,0-42.4-19-42.4-42.4s19-42.4,42.4-42.4c2.8,0,5-2.2,5-5 c-28.9,0-52.4,23.5-52.4,52.4s23.5,52.4,52.4,52.4C104.3,224.8,106.5,222.5,106.5,219.8z" fill={PREMIUM_ST1}/>
     <path d="M336.9,308c-21.7,21.4-50.4,33.2-80.9,33.2s-59.2-11.8-80.9-33.2c-17.6-17.4-28.9-39.4-32.7-63.7l-38,6 c5.1,32.4,20.2,61.8,43.7,85.1c23.9,23.7,54.3,38.5,87.1,42.9v53.6c-26,5-48.8,19.2-64.7,39.1h64.7h41.7h64.7 c-15.9-19.9-38.7-34.1-64.7-39.1v-53.6c32.8-4.4,63.2-19.3,87.1-42.9c23.5-23.2,38.6-52.7,43.7-85.1l-38-6 C365.8,268.5,354.5,290.6,336.9,308z" fill={PREMIUM_ST1}/>
+  </svg>
+);
+
+/** STATS — duotone */
+export const StatsIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 512 512" aria-hidden width={32} height={32} preserveAspectRatio="xMidYMid meet" {...props}>
+    {/* Left column (st1) */}
+    <rect x={41} y={388} width={87.8} height={32.7} fill={STATS_ST1} />
+    <rect x={41} y={328.7} width={87.8} height={32.7} fill={STATS_ST1} />
+    <rect x={41} y={269.3} width={87.8} height={32.7} fill={STATS_ST1} />
+    <rect x={41} y={210} width={87.8} height={32.7} fill={STATS_ST1} />
+    {/* Mid-left (st0) */}
+    <rect x={155.1} y={388} width={87.8} height={32.7} fill={STATS_ST0} />
+    <rect x={155.1} y={328.7} width={87.8} height={32.7} fill={STATS_ST0} />
+    <rect x={155.1} y={269.3} width={87.8} height={32.7} fill={STATS_ST0} />
+    {/* Mid-right (st1) */}
+    <rect x={269.2} y={388} width={87.8} height={32.7} fill={STATS_ST1} />
+    <rect x={269.2} y={328.7} width={87.8} height={32.7} fill={STATS_ST1} />
+    <rect x={269.2} y={269.3} width={87.8} height={32.7} fill={STATS_ST1} />
+    <rect x={269.2} y={210} width={87.8} height={32.7} fill={STATS_ST1} />
+    {/* Right column (st0) */}
+    <rect x={383.2} y={388} width={87.8} height={32.7} fill={STATS_ST0} />
+    <rect x={383.2} y={328.7} width={87.8} height={32.7} fill={STATS_ST0} />
+    <rect x={383.2} y={269.3} width={87.8} height={32.7} fill={STATS_ST0} />
+    <rect x={383.2} y={210} width={87.8} height={32.7} fill={STATS_ST0} />
+    <rect x={383.2} y={150.7} width={87.8} height={32.7} fill={STATS_ST0} />
+    <rect x={383.2} y={91.3} width={87.8} height={32.7} fill={STATS_ST0} />
+  </svg>
+);
+
+/** HISTORY — duotone */
+export const HistoryIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 512 512" aria-hidden width={32} height={32} preserveAspectRatio="xMidYMid meet" {...props}>
+    {/* Document and bars */}
+    <path
+      d="M41,147.5v217.1c0,12.7,10.3,23,23,23h240v-263H64C51.3,124.5,41,134.8,41,147.5z M95.1,292.3
+         c5.7-2,11.4-2.8,16.7-2.6V182.7l26.1-2.8l80.4-8.7l26.1-2.8v134.1c0,4.7-1.7,9.6-4.7,14c-4.5,6.6-11.9,12.3-21.2,15.6
+         c-18.4,6.4-37.1,0.6-41.7-12.8c-4.7-13.4,6.4-29.5,24.8-35.9c5.7-2,11.4-2.8,16.7-2.6v-83.3l-80.4,8.7v105.4c0,4.7-1.7,9.6-4.7,14
+         c-4.5,6.6-11.9,12.3-21.2,15.6c-18.4,6.4-37.1,0.6-41.7-12.8C65.7,314.8,76.8,298.7,95.1,292.3z"
+      fill={HISTORY_ST1}
+    />
+    {/* Outer arcs / timeline */}
+    <path d="M435.5,346.4c22-23.7,35.5-55.5,35.5-90.4s-13.5-66.7-35.5-90.4l-66.7,66.7l-3.5-3.5c7,7,11.3,16.6,11.3,27.3 s-4.3,20.3-11.3,27.3l3.5-3.5L435.5,346.4z" fill={HISTORY_ST1}/>
+    {/* Clock wedges (duotone) */}
+    <path d="M365.3,283.3c-7,7-16.6,11.3-27.3,11.3c-9.1,0-17.4-3.1-24-8.4v100.6c7.8,1.4,15.8,2.2,24,2.2 c34.9,0,66.7-13.5,90.4-35.5l-66.7-66.7L365.3,283.3z" fill={HISTORY_ST0}/>
+    <path d="M428.4,158.5c-23.7-22-55.5-35.5-90.4-35.5c-8.2,0-16.2,0.7-24,2.2v100.6c6.6-5.2,14.9-8.4,24-8.4 c10.7,0,20.3,4.3,27.3,11.3l-3.5-3.5L428.4,158.5z" fill={HISTORY_ST0}/>
+    {/* Small joins (kept to preserve original outline) */}
+    <path d="M432,161.9c0,0-0.1-0.1-0.1-0.1l0.3,0.3C432.1,162,432.1,162,432,161.9z" fill={HISTORY_ST1}/>
+    <path d="M432,350.1c0,0,0.1-0.1,0.1-0.1l-0.3,0.3C432,350.1,432,350.1,432,350.1z" fill={HISTORY_ST1}/>
+    <path d="M428.5,353.6l3.4-3.4C430.8,351.3,429.6,352.4,428.5,353.6L428.5,353.6z" fill={HISTORY_ST1}/>
+    <path d="M432.2,349.9l3.4-3.4l-0.1-0.1C434.4,347.6,433.3,348.8,432.2,349.9z" fill={HISTORY_ST1}/>
   </svg>
 );
 

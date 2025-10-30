@@ -1,4 +1,4 @@
-// app/stats/page.tsx
+// app/history/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import HomeHeader from '@/components/home/HomeHeader';
 import { STUDENT_IMAGE_HINT_KEY } from '@/components/sidebar/types';
 import { HomeBootstrapProvider } from '@/components/home/HomeBootstrap';
-import StudentStats from '@/components/stats/StudentStats';
+import StudentHistory from '@/components/history/StudentHistory';
 
 function pickDisplayNameFromEmail(email?: string | null) {
   return email?.split('@')?.[0] ?? 'You';
@@ -21,7 +21,7 @@ function pickAvatarUrlFromMeta(user: { user_metadata?: unknown }): string | null
   return null;
 }
 
-export default function StatsPage() {
+export default function HistoryPage() {
   const supabase = React.useMemo(() => createClient(), []);
   const router = useRouter();
 
@@ -38,7 +38,7 @@ export default function StatsPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) {
-        router.replace('/auth/login?next=/stats');
+        router.replace('/auth/login?next=/history');
         return;
       }
 
@@ -89,7 +89,7 @@ export default function StatsPage() {
         </div>
 
         <div className="flex-1 min-h-0 px-0 md:px-6 pb-4">
-          <StudentStats />
+          <StudentHistory />
         </div>
       </main>
     </HomeBootstrapProvider>
