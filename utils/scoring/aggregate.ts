@@ -1,7 +1,7 @@
 // utils/scoring/aggregate.ts
 import type { TakeScore } from "@/utils/scoring/score";
 import { letterFromPercent } from "@/utils/scoring/grade";
-import { finalizeVisible, combinedRhythmPercentVisible } from "./final/finalize";
+import { finalizeVisible } from "./final/finalize";
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -55,7 +55,7 @@ export function aggregateForSubmission(
       centsMae: r2(g.mae),
     }));
 
-  // ---- rhythm (existing + visibility-aware combined) ----
+  // ---- rhythm (existing; keep separate in payload; compute a simple visibility-aware combined for analytics only) ----
   const melodyCoverages: number[] = [];
   const melodyAbsErrs: number[] = [];
   const lineHits: number[] = [];
@@ -86,8 +86,16 @@ export function aggregateForSubmission(
   const lineHitRate     = lineHits.length ? clamp01(mean(lineHits)) : clamp01((avgLinePctRaw || 0) / 100);
   const lineMeanAbsMs   = lineAbsErrs.length ? Math.round(mean(lineAbsErrs)) : 0;
 
-  // Combined rhythm mirrors visibility exactly (combine per-take, then average)
-  const combinedPercent = r2(mean(scores.map(s => combinedRhythmPercentVisible(s.rhythm, visibility))));
+  // Visibility-aware "combined" rhythm percent for analytics (not used for finalization).
+  // Implemented inline to avoid the old helper.
+  const useMelody = visibility?.showMelodyRhythm !== false;
+  const useLine   = visibility?.showRhythmLine   !== false;
+  const combinedPercent = r2(mean(scores.map(s => {
+    const parts: number[] = [];
+    if (useMelody) parts.push(s.rhythm.melodyPercent);
+    if (useLine && s.rhythm.lineEvaluated) parts.push(s.rhythm.linePercent);
+    return parts.length ? parts.reduce((a,b)=>a+b,0) / parts.length : 0;
+  })));
 
   // ---- intervals (existing; zero out if hidden) ----
   const byClass = new Map<number, { attempts: number; correct: number }>();

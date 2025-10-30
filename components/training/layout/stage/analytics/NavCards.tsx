@@ -1,7 +1,13 @@
 // components/training/layout/stage/analytics/NavCards.tsx
 "use client";
 
-export type ViewKey = "performance" | "pitch-acc" | "pitch-prec" | "melody" | "intervals";
+export type ViewKey =
+  | "performance"
+  | "pitch-acc"
+  | "pitch-prec"
+  | "melody"
+  | "line"
+  | "intervals";
 
 function PickerButton({
   title,
@@ -67,7 +73,7 @@ export default function NavCards({
   active,
   setActive,
   /** NEW: restrict which views are shown */
-  available = ["performance", "pitch-acc", "pitch-prec", "melody", "intervals"],
+  available = ["performance", "pitch-acc", "pitch-prec", "melody", "line", "intervals"],
 }: {
   active: ViewKey;
   setActive: (v: ViewKey) => void;
@@ -78,6 +84,7 @@ export default function NavCards({
     "pitch-acc": { title: "Pitch accuracy", subtitle: "On-pitch% per note" },
     "pitch-prec": { title: "Pitch precision", subtitle: "MAE (¢) per note" },
     melody: { title: "Melody coverage", subtitle: "By duration per take" },
+    line: { title: "Rhythm line timing", subtitle: "Average credit by beat duration" },
     intervals: { title: "Intervals", subtitle: "Class accuracy per take" },
   };
 

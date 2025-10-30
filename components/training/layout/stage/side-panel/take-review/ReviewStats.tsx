@@ -2,10 +2,7 @@
 "use client";
 import React, { useMemo } from "react";
 import type { TakeScore } from "@/utils/scoring/score";
-import {
-  finalizeVisible,
-  combinedRhythmPercentVisible,
-} from "@/utils/scoring/final/finalize";
+import { finalizeVisible } from "@/utils/scoring/final/finalize";
 
 export default function ReviewStats({
   score,
@@ -28,7 +25,6 @@ export default function ReviewStats({
   };
 }) {
   const masked = score ? finalizeVisible(score, visibility) : undefined;
-  const rhythmVisible = visibility.showMelodyRhythm || visibility.showRhythmLine;
 
   const totals = useMemo(() => {
     if (!sessionScores.length) return null;
@@ -36,14 +32,23 @@ export default function ReviewStats({
     const avg = (xs: number[]) =>
       Math.round(((xs.reduce((a, b) => a + b, 0) / n) || 0) * 10) / 10;
 
+    const lineEligible = sessionScores.filter((s) => s.rhythm.lineEvaluated);
+
     return {
       takes: n,
       pitchPct: avg(sessionScores.map((s) => s.pitch.percent)),
-      rhythmPct: avg(
-        sessionScores.map((s) =>
-          combinedRhythmPercentVisible(s.rhythm, visibility)
-        )
-      ),
+      melRhythmPct:
+        visibility.showMelodyRhythm
+          ? avg(sessionScores.map((s) => s.rhythm.melodyPercent))
+          : undefined,
+      lineRhythmPct:
+        visibility.showRhythmLine && lineEligible.length > 0
+          ? Math.round(
+              ((lineEligible.reduce((a, s) => a + s.rhythm.linePercent, 0) /
+                lineEligible.length) ||
+                0) * 10
+            ) / 10
+          : undefined,
       finalPct: avg(sessionScores.map((s) => finalizeVisible(s, visibility).percent)),
     };
   }, [sessionScores, visibility]);
@@ -120,7 +125,12 @@ export default function ReviewStats({
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
             {visibility.showPitch && <span>Pitch {totals.pitchPct}%</span>}
-            {rhythmVisible && <span>Rhythm {totals.rhythmPct}%</span>}
+            {visibility.showMelodyRhythm && totals.melRhythmPct != null && (
+              <span>Rhythm (melody) {totals.melRhythmPct}%</span>
+            )}
+            {visibility.showRhythmLine && totals.lineRhythmPct != null && (
+              <span>Rhythm (blue line) {totals.lineRhythmPct}%</span>
+            )}
             <span>Final {totals.finalPct}%</span>
           </div>
         </div>

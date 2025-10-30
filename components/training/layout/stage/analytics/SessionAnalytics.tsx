@@ -16,6 +16,7 @@ import PerformanceOverTakesChart from "./charts/PerformanceOverTakesChart";
 import PitchAccuracyChart from "./charts/PitchAccuracyChart";
 import PitchPrecisionChart from "./charts/PitchPrecisionChart";
 import MelodyCoverageChart from "./charts/MelodyCoverageChart";
+import RhythmLineChart from "./charts/RhythmLineChart";
 import IntervalsChart from "./charts/IntervalsChart";
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
@@ -26,7 +27,7 @@ type Visibility = {
   showPitch: boolean;
   showIntervals: boolean;
   showMelodyRhythm: boolean;
-  showRhythmLine: boolean; // only affects performance tooltip (no separate chart)
+  showRhythmLine: boolean; // now enables dedicated chart + header card
 };
 
 export default function SessionAnalytics({
@@ -68,6 +69,13 @@ export default function SessionAnalytics({
   const melHit = Math.round((sScores.reduce((a, s) => a + s.rhythm.melodyHitRate, 0) / n) * 100);
   const melMeanAbs = Math.round(sScores.reduce((a, s) => a + s.rhythm.melodyMeanAbsMs, 0) / n);
 
+  // rhythm line (only consider takes where lineEvaluated)
+  const lineTakes = sScores.filter((s) => s.rhythm.lineEvaluated);
+  const anyLine = lineTakes.length > 0;
+  const linePct = anyLine ? Math.round((lineTakes.reduce((a, s) => a + s.rhythm.linePercent, 0) / lineTakes.length) * 10) / 10 : 0;
+  const lineHit = anyLine ? Math.round((lineTakes.reduce((a, s) => a + s.rhythm.lineHitRate, 0) / lineTakes.length) * 100) : 0;
+  const lineMeanAbs = anyLine ? Math.round(lineTakes.reduce((a, s) => a + s.rhythm.lineMeanAbsMs, 0) / lineTakes.length) : 0;
+
   const intervalsPct = avg((s) => clamp01(s.intervals.correctRatio) * 100);
 
   /* ─────────── dashboard state ─────────── */
@@ -80,9 +88,10 @@ export default function SessionAnalytics({
     const out: ViewKey[] = ["performance"];
     if (visibility.showPitch) { out.push("pitch-acc", "pitch-prec"); }
     if (visibility.showMelodyRhythm) { out.push("melody"); }
+    if (visibility.showRhythmLine && anyLine) { out.push("line"); }
     if (visibility.showIntervals) { out.push("intervals"); }
     return out;
-  }, [visibility]);
+  }, [visibility, anyLine]);
 
   // If current view is hidden by config, jump to the first available
   React.useEffect(() => {
@@ -112,8 +121,12 @@ export default function SessionAnalytics({
         melPct={melPct}
         melHit={melHit}
         melMeanAbs={melMeanAbs}
+        linePct={linePct}
+        lineHit={lineHit}
+        lineMeanAbs={lineMeanAbs}
         intervalsPct={intervalsPct}
         visibility={visibility}
+        lineEnabled={anyLine}
       />
 
       {/* Two-column layout from md up: fixed picker rail + capped chart height */}
@@ -135,6 +148,7 @@ export default function SessionAnalytics({
                 "pitch-acc": "Pitch accuracy",
                 "pitch-prec": "Pitch precision",
                 melody: "Melody coverage",
+                line: "Rhythm line timing",
                 intervals: "Intervals",
               }[view]}</h3>
               <div className="text-xs md:text-sm text-[#373737]">{{
@@ -142,6 +156,7 @@ export default function SessionAnalytics({
                 "pitch-acc": "On-pitch% per note",
                 "pitch-prec": "MAE (¢) per note",
                 melody: "By duration per take",
+                line: "Average credit by beat duration",
                 intervals: "Class accuracy per take",
               }[view]}</div>
             </div>
@@ -176,6 +191,14 @@ export default function SessionAnalytics({
                 <MelodyCoverageChart
                   scores={sScores}
                   snapshots={sSnaps}
+                  bpm={bpm}
+                  den={den}
+                  introEpoch={introEpoch}
+                />
+              )}
+              {view === "line" && visibility.showRhythmLine && anyLine && (
+                <RhythmLineChart
+                  scores={sScores}
                   bpm={bpm}
                   den={den}
                   introEpoch={introEpoch}

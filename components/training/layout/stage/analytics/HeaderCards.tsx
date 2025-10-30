@@ -65,9 +65,14 @@ export default function HeaderCards({
   melPct,
   melHit,
   melMeanAbs,
+  linePct,
+  lineHit,
+  lineMeanAbs,
   intervalsPct,
   /** NEW: visibility gating */
   visibility = { showPitch: true, showIntervals: true, showMelodyRhythm: true, showRhythmLine: true },
+  /** whether any take actually had a rhythm-line evaluation */
+  lineEnabled = false,
 }: {
   finalPct: number;
   finalLetter: string;
@@ -77,8 +82,12 @@ export default function HeaderCards({
   melPct: number;
   melHit: number;
   melMeanAbs: number;
+  linePct?: number;
+  lineHit?: number;
+  lineMeanAbs?: number;
   intervalsPct: number;
   visibility?: Visibility;
+  lineEnabled?: boolean;
 }) {
   return (
     <div className="w-full flex flex-nowrap gap-2 sm:gap-3">
@@ -97,6 +106,14 @@ export default function HeaderCards({
           title="Melody rhythm"
           main={`${melPct.toFixed(1)}%`}
           sub={`Hit ${melHit}% • μ|Δt| ${melMeanAbs}ms`}
+        />
+      )}
+
+      {visibility.showRhythmLine && lineEnabled && typeof linePct === "number" && (
+        <StatCard
+          title="Rhythm line"
+          main={`${linePct.toFixed(1)}%`}
+          sub={`Hit ${lineHit ?? 0}% • μ|Δt| ${lineMeanAbs ?? 0}ms`}
         />
       )}
 

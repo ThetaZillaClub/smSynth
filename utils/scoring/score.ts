@@ -9,7 +9,7 @@ import type {
 import { computePitchScore } from "./pitch/computePitch";
 import { computeRhythmScore } from "./rhythm";
 import { computeIntervalScore } from "./intervals/computeIntervals";
-import { finalizeScore } from "./final/finalize"; // ⬅️ use harmonic mean
+import { finalizeScoreN } from "./final/finalize"; // n-ary harmonic mean
 
 export type { PitchSample, TakeScore } from "./types";
 
@@ -47,9 +47,10 @@ export function computeTakeScore({
   const voiced: PitchSample[] = filterVoiced(samples, confMin);
   const intervals = computeIntervalScore(phrase, voiced, centsOk);
 
-  // ---- Finalize via harmonic mean (pitch ⨉ rhythm) ----
-  const rhythmPctForFinal = rhythm.combinedPercent; // melody-only or avg with line
-  const final = finalizeScore(pitch.percent, rhythmPctForFinal);
+  // ---- Finalize via harmonic mean over *all* available components (no pre-combining) ----
+  const parts: number[] = [pitch.percent, rhythm.melodyPercent];
+  if (rhythm.lineEvaluated) parts.push(rhythm.linePercent);
+  const final = finalizeScoreN(...parts);
 
   return { pitch, rhythm, intervals, final };
 }
