@@ -83,8 +83,8 @@ export default function NavCards({
     performance: { title: "Performance over takes", subtitle: "Final score trend" },
     "pitch-acc": { title: "Pitch accuracy", subtitle: "On-pitch% per note" },
     "pitch-prec": { title: "Pitch precision", subtitle: "MAE (¢) per note" },
-    melody: { title: "Melody coverage", subtitle: "By duration per take" },
-    line: { title: "Rhythm line timing", subtitle: "Average credit by beat duration" },
+    melody: { title: "Melody Timing", subtitle: "On-beat % per hit" },
+    line: { title: "Rhythm line timing", subtitle: "On-beat % per hit" },
     intervals: { title: "Intervals", subtitle: "Class accuracy per take" },
   };
 

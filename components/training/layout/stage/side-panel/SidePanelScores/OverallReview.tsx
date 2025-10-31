@@ -161,40 +161,76 @@ export default function OverallReview({
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
   }, [scores, snapshots, tonicPc, scaleName]);
 
+  // NEW: Melody timing aggregated using melodyByDuration (with legacy fallback)
   const aggMelodyRows = React.useMemo(() => {
     type Acc = {
-      label: string;
+      attempts: number;
+      hitsApprox: number;
+      muSum: number; muDen: number;
       order: number;
-      n: number;
-      meanCoverage: number;
-      meanAbsOnset: number;
     };
     const m = new Map<string, Acc>();
-    let orderCounter = 0;
-    for (let i = 0; i < scores.length; i++) {
-      const s = scores[i]!;
-      const snap = snapshots[i];
-      const per = s.rhythm.perNoteMelody;
-      const notes = snap?.phrase?.notes ?? [];
-      for (let j = 0; j < notes.length; j++) {
-        const r = per?.[j];
-        if (!r) continue;
-        const label = secondsToNoteName(notes[j]!.durSec, bpm, den);
-        if (!m.has(label))
-          m.set(label, { label, order: orderCounter++, n: 0, meanCoverage: 0, meanAbsOnset: 0 });
+    let ord = 0;
+
+    // Preferred path: use per-take aggregated rows
+    let usedByDuration = false;
+    for (const s of scores) {
+      const byDur = Array.isArray((s as any)?.rhythm?.melodyByDuration)
+        ? (((s as any).rhythm.melodyByDuration as unknown[]) ?? [])
+        : [];
+      if (!byDur.length) continue;
+      usedByDuration = true;
+      for (const r of byDur) {
+        const label = String((r as any)?.durationLabel ?? "All");
+        const attempts = Math.max(0, Number((r as any)?.attempts ?? 0));
+        const hits = (r as any)?.hits != null
+          ? Math.max(0, Number((r as any).hits))
+          : attempts * Math.max(0, Number((r as any)?.hitPct ?? 0)) / 100;
+
+        if (!m.has(label)) m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
         const g = m.get(label)!;
-        g.n += 1;
-        g.meanCoverage += (r.coverage - g.meanCoverage) / g.n;
-        if (Number.isFinite(r.onsetErrMs)) {
-          const abs = Math.abs(r.onsetErrMs!);
-          g.meanAbsOnset += (abs - g.meanAbsOnset) / g.n;
+        g.attempts += attempts;
+        g.hitsApprox += hits;
+        if ((r as any)?.firstVoiceMuAbsMs != null) {
+          g.muSum += Math.abs(Number((r as any).firstVoiceMuAbsMs)) * attempts;
+          g.muDen += attempts;
         }
       }
     }
-    return Array.from(m.values()).sort((a, b) => a.order - b.order);
+
+    if (!usedByDuration) {
+      // Fallback: legacy per-note coverage grouped by duration
+      for (let i = 0; i < scores.length; i++) {
+        const s = scores[i]!;
+        const per = (s as any)?.rhythm?.perNoteMelody ?? [];
+        const notes = snapshots[i]?.phrase?.notes ?? [];
+        for (let j = 0; j < notes.length; j++) {
+          const r = per?.[j];
+          if (!r || typeof r.coverage !== "number") continue;
+          const label = secondsToNoteName(notes[j]!.durSec, bpm, den);
+          if (!m.has(label)) m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
+          const g = m.get(label)!;
+          g.attempts += 1;
+          g.hitsApprox += Math.max(0, Math.min(1, Number(r.coverage))); // treat coverage as hit-probability proxy
+          if (Number.isFinite(r.onsetErrMs)) {
+            g.muSum += Math.abs(Number(r.onsetErrMs));
+            g.muDen += 1;
+          }
+        }
+      }
+    }
+
+    return Array.from(m.entries())
+      .map(([label, g]) => ({
+        label,
+        order: g.order,
+        hitPct: g.attempts ? Math.round((100 * g.hitsApprox) / g.attempts) : 0,
+        muAbsMs: g.muDen ? Math.round(g.muSum / g.muDen) : 0,
+      }))
+      .sort((a, b) => a.order - b.order);
   }, [scores, snapshots, bpm, den]);
 
-  // NEW: Beat-only aggregation for rhythm line (IOI between expected beats)
+  // NEW: Beat-only aggregation for rhythm line (unchanged)
   const aggLineRows = React.useMemo(() => {
     type Acc = { label: string; order: number; n: number; meanHit: number; meanAbsErr: number };
     const m = new Map<string, Acc>();
@@ -428,7 +464,7 @@ export default function OverallReview({
                 <thead>
                   <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
                     <th className="px-2 py-2">Duration</th>
-                    <th className="px-2 py-2">Coverage %</th>
+                    <th className="px-2 py-2">Hit %</th>
                     <th className="px-2 py-2">First-voice μ|Δt|</th>
                   </tr>
                 </thead>
@@ -446,10 +482,10 @@ export default function OverallReview({
                           {r.label}
                         </td>
                         <td className="px-2 py-1.5 align-middle">
-                          {(r.meanCoverage * 100).toFixed(1)}%
+                          {r.hitPct}%
                         </td>
                         <td className="px-2 py-1.5 align-middle">
-                          {Math.round(r.meanAbsOnset)}ms
+                          {r.muAbsMs}ms
                         </td>
                       </tr>
                     ))

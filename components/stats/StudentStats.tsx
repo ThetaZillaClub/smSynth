@@ -22,7 +22,7 @@ type DbRow = {
 };
 
 type PitchNoteRow = { result_id: string; midi: number; n: number; ratio: number; cents_mae: number };
-type MelDurRow   = { result_id: string; duration_label: string; attempts: number; coverage_pct: number; first_voice_mu_abs_ms: number | null };
+type MelDurRow   = { result_id: string; duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null };
 type LineDurRow  = { result_id: string; duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null };
 type IcRow       = { result_id: string; semitones: number; attempts: number; correct: number };
 
@@ -53,7 +53,7 @@ export default function StudentStats() {
 
   // aggregated detail state
   const [pitchNotes, setPitchNotes] = React.useState<Array<{ midi: number; n: number; ratio: number; cents_mae: number }>>([]);
-  const [melodyDur, setMelodyDur]   = React.useState<Array<{ duration_label: string; attempts: number; coverage_pct: number; first_voice_mu_abs_ms: number | null }>>([]);
+  const [melodyDur, setMelodyDur]   = React.useState<Array<{ duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null }>>([]);
   const [lineDur, setLineDur]       = React.useState<Array<{ duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null }>>([]);
   const [intervals, setIntervals]   = React.useState<Array<{ semitones: number; attempts: number; correct: number }>>([]);
   const [detailsLoading, setDetailsLoading] = React.useState(false);
@@ -141,7 +141,7 @@ export default function StudentStats() {
           supabase.from('lesson_result_pitch_notes')
             .select('result_id,midi,n,ratio,cents_mae').in('result_id', ids),
           supabase.from('lesson_result_melody_durations')
-            .select('result_id,duration_label,attempts,coverage_pct,first_voice_mu_abs_ms').in('result_id', ids),
+            .select('result_id,duration_label,attempts,hits,hit_pct,first_voice_mu_abs_ms').in('result_id', ids),
           supabase.from('lesson_result_rhythm_durations')
             .select('result_id,duration_label,attempts,successes,hit_pct,mu_abs_ms').in('result_id', ids),
           supabase.from('lesson_result_interval_classes')
@@ -179,14 +179,20 @@ export default function StudentStats() {
         const maeCents =
           totalN ? Math.round(pitchAgg.reduce((a, r) => a + r.cents_mae * r.n, 0) / totalN) : null;
 
-        // ---- Aggregate MELODY DURATIONS
+        // ---- Aggregate MELODY DURATIONS to Hit %
         const melRows = (melDurRes.data ?? []) as MelDurRow[];
-        type MelAcc = { attempts: number; coverage_w: number; mu_w: number; mu_w_denom: number };
+        type MelAcc = { attempts: number; hits_approx: number; mu_w: number; mu_w_denom: number };
         const mmap = new Map<string, MelAcc>();
         for (const r of melRows) {
-          const cur = mmap.get(r.duration_label) ?? { attempts: 0, coverage_w: 0, mu_w: 0, mu_w_denom: 0 };
+          const cur = mmap.get(r.duration_label) ?? { attempts: 0, hits_approx: 0, mu_w: 0, mu_w_denom: 0 };
+          // attempts
           cur.attempts += r.attempts;
-          cur.coverage_w += Number(r.coverage_pct) * r.attempts;
+          // hits: prefer integer hits; else approximate from hit_pct * attempts
+          const addHits =
+            r.hits != null ? Number(r.hits) :
+            r.hit_pct != null ? (Number(r.hit_pct) / 100) * r.attempts : 0;
+          cur.hits_approx += addHits;
+          // average offset (attempt-weighted when present)
           if (r.first_voice_mu_abs_ms != null) {
             cur.mu_w += Number(r.first_voice_mu_abs_ms) * r.attempts;
             cur.mu_w_denom += r.attempts;
@@ -196,7 +202,8 @@ export default function StudentStats() {
         const melodyAgg = Array.from(mmap.entries()).map(([label, acc]) => ({
           duration_label: label,
           attempts: acc.attempts,
-          coverage_pct: acc.attempts ? acc.coverage_w / acc.attempts : 0,
+          hits: acc.attempts ? Math.round(acc.hits_approx) : null,
+          hit_pct: acc.attempts ? (100 * acc.hits_approx) / acc.attempts : null,
           first_voice_mu_abs_ms: acc.mu_w_denom ? acc.mu_w / acc.mu_w_denom : null,
         })).sort((a, b) => b.attempts - a.attempts);
 

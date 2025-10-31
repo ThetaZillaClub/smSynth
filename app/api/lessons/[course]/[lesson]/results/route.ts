@@ -161,13 +161,20 @@ export async function POST(
       ? (((s as any).rhythm.melodyByDuration as unknown[]) ?? [])
       : [];
     if (melDur.length) {
-      const rows = melDur.map((r) => ({
-        result_id: resultId,
-        duration_label: String(get(r, "durationLabel") ?? "All"),
-        attempts: Math.max(0, toInt(get(r, "attempts"))),
-        coverage_pct: r2(toNum(get(r, "coveragePct"))),
-        first_voice_mu_abs_ms: toOptionalInt(get(r, "firstVoiceMuAbsMs")),
-      }));
+      const rows = melDur.map((r) => {
+        const attempts = Math.max(0, toInt(get(r, "attempts")));
+        const hitsVal = toOptionalInt(get(r, "hits"));
+        const hitPctVal = r2(toNum(get(r, "hitPct") ?? get(r, "coveragePct")));
+        return {
+          result_id: resultId,
+          duration_label: String(get(r, "durationLabel") ?? "All"),
+          attempts,
+          // keep constraints: 0 <= hits <= attempts, 0 <= hit_pct <= 100
+          hits: hitsVal != null ? Math.max(0, Math.min(attempts, hitsVal)) : null,
+          hit_pct: Math.max(0, Math.min(100, hitPctVal)),
+          first_voice_mu_abs_ms: toOptionalInt(get(r, "firstVoiceMuAbsMs")),
+        };
+      });
       await supabase.from("lesson_result_melody_durations").insert(rows);
     } else {
       const melArr = Array.isArray(s.rhythm?.perNoteMelody) ? (s.rhythm.perNoteMelody as unknown[]) : [];
@@ -263,7 +270,7 @@ export async function POST(
 
   // 3) Ratings — pool = `lesson:${courseSlug}/${lessonSlug}` (namespaced)
   const periodStart = new Date(); periodStart.setUTCHours(0, 0, 0, 0);
-  const periodEnd   = new Date(); periodEnd.setUTCHours(23, 59, 59, 999);
+  const periodEnd = new Date(); periodEnd.setUTCHours(23, 59, 59, 999);
 
   const { data: todaysBestsRaw, error: qErr } = await supabase
     .from("lesson_results")

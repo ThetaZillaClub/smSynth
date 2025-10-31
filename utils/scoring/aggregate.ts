@@ -64,7 +64,8 @@ export function aggregateForSubmission(
     }));
 
   // ---- rhythm (existing; keep separate in payload; compute a simple visibility-aware combined for analytics only) ----
-  const melodyCoverages: number[] = [];
+  let melodyAttemptsTotal = 0;
+  let melodyHitsTotal = 0;
   const melodyAbsErrs: number[] = [];
   const lineHits: number[] = [];
   const lineAbsErrs: number[] = [];
@@ -76,7 +77,8 @@ export function aggregateForSubmission(
 
   for (const s of scores) {
     (s.rhythm.perNoteMelody ?? []).forEach(r => {
-      if (typeof r.coverage === "number") melodyCoverages.push(r.coverage);
+      melodyAttemptsTotal += 1;
+      if ((r.coverage ?? 0) > 0) melodyHitsTotal += 1; // hit = any voicing in window
       if (Number.isFinite(r.onsetErrMs)) melodyAbsErrs.push(Math.abs(r.onsetErrMs!));
     });
     if (s.rhythm.lineEvaluated) {
@@ -91,7 +93,8 @@ export function aggregateForSubmission(
     }
   }
 
-  const melodyHitRate   = melodyCoverages.length ? clamp01(mean(melodyCoverages)) : clamp01(melPct / 100);
+  const melodyHitRate   =
+    melodyAttemptsTotal ? clamp01(melodyHitsTotal / melodyAttemptsTotal) : clamp01(melPct / 100);
   const melodyMeanAbsMs = melodyAbsErrs.length ? Math.round(mean(melodyAbsErrs)) : 0;
 
   const avgLinePctRaw   = mean(scores.filter(s => s.rhythm.lineEvaluated).map(s => s.rhythm.linePercent));
@@ -102,7 +105,7 @@ export function aggregateForSubmission(
   const lineMeanAbsMs   = lineAbsErrs.length ? Math.round(mean(lineAbsErrs)) : 0;
 
   // ---- NEW: roll up rows for DB child tables (labels supplied by caller) ----
-  type MelAcc = { n: number; covSum: number; absSum: number };
+  type MelAcc = { n: number; hits: number; absSum: number };
   type LineAcc = { n: number; hits: number; absSum: number };
   const onsetGraceSec = Math.max(0, opts?.onsetGraceSec ?? 0);
 
@@ -113,9 +116,9 @@ export function aggregateForSubmission(
       const label =
         opts?.melodyLabelFromSeconds?.(durSecForLabel, noteIdx, takeIdx) ??
         (opts?.melodyLabelFromSeconds ? "Other" : "All");
-      const g = melMap.get(label) ?? { n: 0, covSum: 0, absSum: 0 };
+      const g = melMap.get(label) ?? { n: 0, hits: 0, absSum: 0 };
       g.n += 1;
-      g.covSum += (r.coverage ?? 0);
+      if ((r.coverage ?? 0) > 0) g.hits += 1;
       if (Number.isFinite(r.onsetErrMs)) g.absSum += Math.abs(r.onsetErrMs!);
       melMap.set(label, g);
     });
@@ -123,7 +126,8 @@ export function aggregateForSubmission(
   const melodyByDuration = Array.from(melMap.entries()).map(([durationLabel, g]) => ({
     durationLabel,
     attempts: g.n,
-    coveragePct: r2(clamp01(g.covSum / Math.max(1, g.n)) * 100),
+    hits: g.hits,
+    hitPct: Math.round((g.hits / Math.max(1, g.n)) * 100),
     firstVoiceMuAbsMs: Math.round(g.absSum / Math.max(1, g.n)),
   }));
 
@@ -155,7 +159,6 @@ export function aggregateForSubmission(
   }));
 
   // Visibility-aware "combined" rhythm percent for analytics (not used for finalization).
-  // Implemented inline to avoid the old helper.
   const useMelody = visibility?.showMelodyRhythm !== false;
   const useLine   = visibility?.showRhythmLine   !== false;
   const combinedPercent = r2(mean(scores.map(s => {

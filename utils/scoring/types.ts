@@ -47,7 +47,7 @@ export type RhythmEval = {
 };
 
 export type RhythmScore = {
-  melodyPercent: number;     // 0..100 (coverage-based)
+  melodyPercent: number;     // 0..100 (coverage-based, legacy)
   melodyHitRate: number;     // 0..1
   melodyMeanAbsMs: number;   // ms
   lineEvaluated: boolean;
@@ -64,15 +64,16 @@ export type RhythmScore = {
   melodyByDuration?: Array<{
     durationLabel: string;
     attempts: number;
-    coveragePct: number;          // 0..100
-    firstVoiceMuAbsMs: number;    // mean absolute onset error (ms)
+    hits?: number;               // count of notes with any voicing in window
+    hitPct?: number;             // 0..100
+    firstVoiceMuAbsMs: number;   // mean absolute onset error (ms)
   }>;
   lineByDuration?: Array<{
     durationLabel: string;
     attempts: number;
     successes: number;
-    hitPct: number;               // 0..100
-    muAbsMs: number;              // mean absolute timing error (ms)
+    hitPct: number;              // 0..100
+    muAbsMs: number;             // mean absolute timing error (ms)
   }>;
 };
 

@@ -3,7 +3,7 @@
 import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
 import type { Phrase } from "@/utils/stage";
-import { secondsToNoteLabel } from "./format";
+import { secondsToNoteName } from "./format";
 
 export default function MelodyRhythmReview({
   score,
@@ -16,21 +16,58 @@ export default function MelodyRhythmReview({
   bpm: number;
   den: number;
 }) {
-  const per = score.rhythm.perNoteMelody;
-  const notes = phrase?.notes ?? [];
+  // Preferred: aggregated rows provided by scoring
+  const rows = React.useMemo(() => {
+    const byDur = Array.isArray((score as any)?.rhythm?.melodyByDuration)
+      ? (((score as any).rhythm.melodyByDuration as unknown[]) ?? [])
+      : [];
 
-  // Remove " (~XX% match)" from secondsToNoteLabel output
-  const cleanNoteLabel = React.useCallback(
-    (sec: number) =>
-      secondsToNoteLabel(sec, bpm, den).replace(/\s*\(~\d+% match\)\s*/i, ""),
-    [bpm, den]
-  );
+    if (byDur.length) {
+      return byDur.map((r: any) => {
+        const attempts = Math.max(0, Number(r.attempts ?? 0));
+        const hits =
+          r.hits != null ? Math.max(0, Number(r.hits)) : Math.max(0, Number(r.hitPct ?? 0)) * attempts / 100;
+        const pct = attempts ? Math.round((100 * hits) / attempts) : null;
+        return {
+          label: String(r.durationLabel ?? "All"),
+          hitPct: pct,
+          muAbsMs: r.firstVoiceMuAbsMs != null ? Math.round(Number(r.firstVoiceMuAbsMs)) : null,
+        };
+      });
+    }
+
+    // Fallback: derive from legacy per-note coverage grouped by duration
+    const notes = phrase?.notes ?? [];
+    const per = (score as any)?.rhythm?.perNoteMelody ?? [];
+    type Acc = { sumPct: number; n: number; muSum: number; muN: number };
+    const m = new Map<string, Acc>();
+
+    for (let i = 0; i < notes.length; i++) {
+      const r = per?.[i];
+      if (!r || typeof r.coverage !== "number") continue;
+      const label = secondsToNoteName(notes[i]!.durSec, bpm, den);
+      const a = m.get(label) ?? { sumPct: 0, n: 0, muSum: 0, muN: 0 };
+      a.sumPct += Math.round(Number(r.coverage) * 100);
+      a.n += 1;
+      if (Number.isFinite(r.onsetErrMs)) {
+        a.muSum += Math.abs(Number(r.onsetErrMs));
+        a.muN += 1;
+      }
+      m.set(label, a);
+    }
+
+    return Array.from(m.entries()).map(([label, a]) => ({
+      label,
+      hitPct: a.n ? Math.round(a.sumPct / a.n) : null,
+      muAbsMs: a.muN ? Math.round(a.muSum / a.muN) : null,
+    }));
+  }, [score, phrase, bpm, den]);
 
   return (
     <div className="flex flex-col gap-2">
       <Header
-        title="Melody rhythm (voicing in note windows)"
-        main={`${score.rhythm.melodyPercent.toFixed(1)}%`}
+        title="Melody rhythm (hit rate by note value)"
+        main={`${(score.rhythm.melodyPercent ?? 0).toFixed(1)}%`}
         sub={`Hit ${(score.rhythm.melodyHitRate * 100).toFixed(0)}% • μ|Δt| ${Math.round(
           score.rhythm.melodyMeanAbsMs
         )}ms`}
@@ -45,30 +82,27 @@ export default function MelodyRhythmReview({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
-              <th className="px-2 py-2">#</th>
               <th className="px-2 py-2">Duration</th>
-              <th className="px-2 py-2">Coverage %</th>
-              <th className="px-2 py-2">First-voice Δt</th>
+              <th className="px-2 py-2">Hit %</th>
+              <th className="px-2 py-2">First-voice μ|Δt|</th>
             </tr>
           </thead>
           <tbody>
-            {notes.map((n, i) => {
-              const r = per?.[i];
-              return (
-                <tr key={i} className="border-t border-[#eee]">
-                  <td className="px-2 py-1.5 align-middle text-[#555]">{i + 1}</td>
-                  <td className="px-2 py-1.5 align-middle text-[#444]">
-                    {cleanNoteLabel(n.durSec)}
-                  </td>
-                  <td className="px-2 py-1.5 align-middle">
-                    {r ? `${(r.coverage * 100).toFixed(1)}%` : "—"}
-                  </td>
-                  <td className="px-2 py-1.5 align-middle">
-                    {r?.onsetErrMs == null ? "—" : `${Math.round(Math.abs(r.onsetErrMs))}ms`}
-                  </td>
+            {rows.length === 0 ? (
+              <tr className="border-t border-[#eee]">
+                <td className="px-2 py-1.5" colSpan={3}>
+                  No melody timing rows to show.
+                </td>
+              </tr>
+            ) : (
+              rows.map((r, i) => (
+                <tr key={`${r.label}-${i}`} className="border-t border-[#eee]">
+                  <td className="px-2 py-1.5 align-middle font-medium">{r.label}</td>
+                  <td className="px-2 py-1.5 align-middle">{r.hitPct == null ? "—" : `${r.hitPct}%`}</td>
+                  <td className="px-2 py-1.5 align-middle">{r.muAbsMs == null ? "—" : `${r.muAbsMs}ms`}</td>
                 </tr>
-              );
-            })}
+              ))
+            )}
           </tbody>
         </table>
       </div>

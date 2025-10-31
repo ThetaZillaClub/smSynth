@@ -1,3 +1,4 @@
+// utils/scoring/rhythm/melodyCoverage.ts
 import type { PitchSample, PerNoteRhythm } from "../types";
 import { estimateAvgDt, clamp01, mean } from "../helpers";
 

@@ -4,7 +4,7 @@
 import * as React from 'react';
 
 type PitchNoteRow = { midi: number; n: number; ratio: number; cents_mae: number };
-type MelDurRow   = { duration_label: string; attempts: number; coverage_pct: number; first_voice_mu_abs_ms: number | null };
+type MelDurRow   = { duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null };
 type LineDurRow  = { duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null };
 type IcRow       = { semitones: number; attempts: number; correct: number };
 
@@ -85,7 +85,6 @@ function SortableTable<Row extends object>({
     return arr;
   }, [rows, columns, activeIdx, sort.dir]);
 
-  // Only show active-column highlight when there are 2+ rows
   const shouldHighlight = sorted.length > 1;
 
   return (
@@ -214,27 +213,29 @@ export default function CombinedDetails({
             />
           </Panel>
 
-          {/* Row 2, Col 1: Melody timing (moved down) */}
+          {/* Row 2, Col 1: Melody timing (Hit %) */}
           <Panel title="Melody timing">
             <SortableTable
-              defaultSort={{ key: 'coveragePct', dir: 'desc' }}
+              defaultSort={{ key: 'hitPct', dir: 'desc' }}
               empty="No melody rows."
               columns={[
                 { key: 'dur', label: 'Note Value', get: (r) => (r as any).dur, align: 'left' },
                 { key: 'attempts', label: 'Attempts', get: (r) => (r as any).attempts, align: 'right' },
-                { key: 'coveragePct', label: 'Coverage %', get: (r) => (r as any).coveragePct, align: 'right' },
+                { key: 'hitPct', label: 'Hit %', get: (r) => (r as any).hitPct, align: 'right' },
                 { key: 'avgOffset', label: 'Average Offset', get: (r) => (r as any).avgOffset, align: 'right' },
               ]}
               rows={(melodyDur ?? []).map((r) => ({
                 dur: r.duration_label,
                 attempts: r.attempts,
-                coveragePct: Math.round(Number(r.coverage_pct)),
+                hitPct:
+                  r.hits != null && r.attempts ? Math.round((100 * Number(r.hits)) / Number(r.attempts)) :
+                  r.hit_pct != null ? Math.round(Number(r.hit_pct)) : null,
                 avgOffset: r.first_voice_mu_abs_ms == null ? null : Math.round(Number(r.first_voice_mu_abs_ms)),
               }))}
             />
           </Panel>
 
-          {/* Row 2, Col 2: Rhythm line (moved right) */}
+          {/* Row 2, Col 2: Rhythm line */}
           <Panel title="Rhythm line">
             <SortableTable
               defaultSort={{ key: 'hitPct', dir: 'desc' }}

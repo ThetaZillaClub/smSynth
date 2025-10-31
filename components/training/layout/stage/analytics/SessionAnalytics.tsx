@@ -147,7 +147,7 @@ export default function SessionAnalytics({
                 performance: "Performance over takes",
                 "pitch-acc": "Pitch accuracy",
                 "pitch-prec": "Pitch precision",
-                melody: "Melody coverage",
+                melody: "Melody timing",
                 line: "Rhythm line timing",
                 intervals: "Intervals",
               }[view]}</h3>
@@ -155,7 +155,7 @@ export default function SessionAnalytics({
                 performance: "Final score trend",
                 "pitch-acc": "On-pitch% per note",
                 "pitch-prec": "MAE (¢) per note",
-                melody: "By duration per take",
+                melody: "Hit % by duration (per take)",
                 line: "Average credit by beat duration",
                 intervals: "Class accuracy per take",
               }[view]}</div>

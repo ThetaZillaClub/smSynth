@@ -26,36 +26,71 @@ export default function MelodyCoverageChart({
   introEpoch?: number;
 }) {
   const series: Series[] = React.useMemo(() => {
-    const nT = scores.length;
+    const nT = Math.max(0, Math.min(scores.length, snapshots.length));
     const acc = new Map<string, Array<number | null>>();
     const order = new Map<string, number>(); let o = 0;
+
+    const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+    const pct = (x: number) => Math.round(clamp01(x) * 100);
 
     for (let i = 0; i < nT; i++) {
       const s = scores[i]!;
       const snap = snapshots[i];
-      const per = s.rhythm.perNoteMelody ?? [];
       const notes = snap?.phrase?.notes ?? [];
 
+      // Preferred source: aggregated per-duration from scoring
+      const byDur = Array.isArray((s as any)?.rhythm?.melodyByDuration)
+        ? (((s as any).rhythm.melodyByDuration as unknown[]) ?? [])
+        : [];
+
+      if (byDur.length) {
+        const perLabel = new Map<string, { attempts: number; hitsApprox: number }>();
+        for (const r of byDur) {
+          const label = String((r as any)?.durationLabel ?? "All");
+          const attempts = Math.max(0, Number((r as any)?.attempts ?? 0));
+          // prefer integer hits; fallback to hitPct * attempts
+          const hits =
+            (r as any)?.hits != null
+              ? Math.max(0, Number((r as any).hits))
+              : attempts * Math.max(0, Number((r as any)?.hitPct ?? 0)) / 100;
+
+          if (!order.has(label)) order.set(label, o++);
+          const g = perLabel.get(label) ?? { attempts: 0, hitsApprox: 0 };
+          g.attempts += attempts;
+          g.hitsApprox += hits;
+          perLabel.set(label, g);
+        }
+        for (const [label, g] of perLabel) {
+          if (!acc.has(label)) acc.set(label, Array.from({ length: nT }, () => null));
+          acc.get(label)![i] = g.attempts ? Math.round((100 * g.hitsApprox) / g.attempts) : null;
+        }
+        continue;
+      }
+
+      // Fallback: approximate using legacy per-note coverage grouped by duration
+      const per = (s as any)?.rhythm?.perNoteMelody ?? [];
       const perLabel = new Map<string, { sum: number; count: number }>();
       for (let j = 0; j < notes.length; j++) {
-        const r = per[j];
+        const r = per?.[j];
         if (!r || typeof r.coverage !== "number") continue;
         const label = secondsToNoteName(notes[j]!.durSec, bpm, den);
         if (!order.has(label)) order.set(label, o++);
         const g = perLabel.get(label) ?? { sum: 0, count: 0 };
-        g.sum += r.coverage * 100;
+        g.sum += pct(Number(r.coverage));
         g.count += 1;
         perLabel.set(label, g);
       }
       for (const [label, g] of perLabel) {
         if (!acc.has(label)) acc.set(label, Array.from({ length: nT }, () => null));
-        acc.get(label)![i] = g.count ? g.sum / g.count : null;
+        acc.get(label)![i] = g.count ? Math.round(g.sum / g.count) : null;
       }
     }
 
-    const all = Array.from(acc.entries()).map(([label, values]) => ({ label, values, ord: order.get(label) ?? 1e9 }))
+    const all = Array.from(acc.entries())
+      .map(([label, values]) => ({ label, values, ord: order.get(label) ?? 1e9 }))
       .sort((a, b) => a.ord - b.ord);
 
+    // Prefer common durations first
     const preferred = ["Quarter", "Eighth", "Dotted eighth", "Sixteenth"];
     all.sort((a, b) => {
       const ai = preferred.indexOf(a.label);
@@ -72,7 +107,8 @@ export default function MelodyCoverageChart({
 
   return (
     <MultiSeriesLines
-      title="Melody coverage • by duration (per take)"
+      // Title updated to reflect hit-rate scoring
+      title="Melody hit rate • by duration (per take)"
       series={series}
       height={height}
       yMin={0}
