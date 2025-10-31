@@ -160,7 +160,7 @@ function StatCard({ title, main, valuePct, stripeBG }: StatCardProps) {
   const { ref, left } = useStripeOffset<HTMLDivElement>();
 
   const cardStyle: React.CSSProperties & Record<'--stripe-offset', string> = {
-    height: 'clamp(70px, 9vw, 128px)', // room for taller segments
+    height: 'clamp(100px, 6vw, 120px)', // room for taller segments
     borderColor: '#d2d2d2',
     backgroundImage: 'linear-gradient(to bottom, #f2f2f2, #eeeeee)',
     '--stripe-offset': `${left}px`,
