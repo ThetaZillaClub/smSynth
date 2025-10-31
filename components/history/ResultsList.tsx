@@ -89,7 +89,7 @@ export default function ResultsList({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => {
+                  {rows.map((r, idx) => {
                     const sel = r.id === selectedId;
                     return (
                       <tr
@@ -97,8 +97,12 @@ export default function ResultsList({
                         aria-selected={sel}
                         onClick={() => onSelect(r.id)}
                         className={[
+                          // base borders
                           'border-t-2 border-b-2 border-[#dddddd] cursor-pointer transition-colors',
-                          'hover:bg-[#f4f4f4]',
+                          // zebra striping starts at first row
+                          'odd:bg-[#f4f4f4]',
+                          // hover + selected states override zebra visually
+                          'hover:bg-[#efefef]',
                           sel ? 'bg-[#f6f6f6]' : '',
                         ].join(' ')}
                       >

@@ -28,6 +28,13 @@ const titleByLessonSlug: Record<string, string> = (() => {
   return m;
 })();
 
+// Pretty course titles by slug
+const courseTitleBySlug: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const c of COURSES) m[c.slug] = c.title;
+  return m;
+})();
+
 function safeNum(x: unknown): number | null {
   if (x == null) return null;
   const n = typeof x === 'number' ? x : Number(x);
@@ -129,11 +136,21 @@ export default function StudentHistory() {
   return (
     <section className="w-full h-full">
       <div className="h-full grid grid-cols-1 md:grid-cols-8 gap-3 isolate pb-2">
-        {/* LEFT: Details (6/8) — no outer card; bigger selected line */}
+        {/* LEFT: Details (6/8) — stacked header: Lesson / Course / Date */}
         <div className="md:col-span-6 min-h-0">
           {selected ? (
-            <div className="text-xl font-semibold text-[#0f0f0f]">
-              {selected.when.toISOString().slice(0,10)} • {selected.course} • {selected.title}
+            <div className="min-w-0">
+              <div className="flex flex-col leading-tight min-w-0">
+                <div className="text-xl font-semibold text-[#0f0f0f] truncate">
+                  {selected.title}
+                </div>
+                <div className="text-sm text-[#0f0f0f]/80 truncate">
+                  {courseTitleBySlug[selected.course] ?? selected.course}
+                </div>
+                <div className="text-xs text-[#0f0f0f]/60 tabular-nums">
+                  {selected.when.toISOString().slice(0, 10)}
+                </div>
+              </div>
             </div>
           ) : (
             <div className="text-sm text-[#6b6b6b]">
@@ -166,7 +183,7 @@ export default function StudentHistory() {
           </div>
         </div>
 
-        {/* RIGHT: Recent Results (2/8) — no big stage bg/border; table is its own card inside ResultsList */}
+        {/* RIGHT: Recent Results (2/8) — table is its own card inside ResultsList */}
         <div className="md:col-span-2 min-h-0">
           {loading ? (
             <div
