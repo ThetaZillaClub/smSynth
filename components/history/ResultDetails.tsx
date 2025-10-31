@@ -102,7 +102,7 @@ function SortableTable<Row extends object>({
               return (
                 <th
                   key={c.key}
-                  className={`px-2 py-1 cursor-pointer select-none ${thAlign}`}
+                  className={`px-2 py-1 border-t border-[#dddddd] bg-[#eaeaea] cursor-pointer select-none ${thAlign}`}
                   onClick={() => toggle(c.key)}
                   title={`Sort by ${c.label}`}
                   style={active && shouldHighlight ? { backgroundColor: HI_BG } : undefined}
