@@ -9,16 +9,16 @@ import * as React from 'react';
 // History: configurable via --icon-history-a / --icon-history-b
 const COURSES_ST0 = 'var(--icon-courses-a, black)';
 const COURSES_ST1 = 'var(--icon-courses-b, black)';
-const SETUP_ST0   = 'var(--icon-setup-a, black)';
-const SETUP_ST1   = 'var(--icon-setup-b, black)';
+const SETUP_ST0   = 'var(--icon-setup-a, purple)';
+const SETUP_ST1   = 'var(--icon-setup-b, darkpurple)';
 const PREMIUM_ST0 = 'var(--icon-premium-a, black)';
 const PREMIUM_ST1 = 'var(--icon-premium-b, black)';
 
 // New palettes
-const STATS_ST0   = 'var(--icon-stats-a, black)';
-const STATS_ST1   = 'var(--icon-stats-b, black)';
-const HISTORY_ST0 = 'var(--icon-history-a, black)';
-const HISTORY_ST1 = 'var(--icon-history-b, black)';
+const STATS_ST0   = 'var(--icon-stats-a, green)';
+const STATS_ST1   = 'var(--icon-stats-b, darkgreen)';
+const HISTORY_ST0 = 'var(--icon-history-a, gray)';
+const HISTORY_ST1 = 'var(--icon-history-b, darkblue)';
 
 // Profile neutrals
 const PROFILE_ST0 = 'var(--icon-profile-a, black)';
