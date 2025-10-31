@@ -172,7 +172,7 @@ function StatCard({ title, main, valuePct, stripeBG }: StatCardProps) {
       className="relative rounded-2xl border bg-gradient-to-b shadow-sm overflow-hidden flex-1 min-w-[140px]"
       style={cardStyle}
     >
-      <div className="relative z-10 h-full px-6 py-2 flex flex-col justify-center">
+      <div className="relative z-10 h-full px-3 py-2 flex flex-col justify-center">
         {/* Row 1: title — softer color so row 2 pops */}
         <div
           className="font-semibold text-[#6b6b6b] truncate leading-tight tracking-tight"

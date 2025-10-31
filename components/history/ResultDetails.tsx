@@ -82,6 +82,9 @@ function SortableTable<Row extends object>({
     return arr;
   }, [rows, columns, activeIdx, sort.dir]);
 
+  // Only show active-column highlight when there are 2+ rows
+  const shouldHighlight = sorted.length > 1;
+
   return (
     <div className="overflow-auto">
       <table className="w-full text-xs table-fixed">
@@ -102,7 +105,7 @@ function SortableTable<Row extends object>({
                   className={`px-2 py-1 cursor-pointer select-none ${thAlign}`}
                   onClick={() => toggle(c.key)}
                   title={`Sort by ${c.label}`}
-                  style={active ? { backgroundColor: HI_BG } : undefined} // no underline
+                  style={active && shouldHighlight ? { backgroundColor: HI_BG } : undefined}
                 >
                   <span className={active ? 'text-[#6b6b6b]' : ''}>{c.label}</span>
                 </th>
@@ -121,7 +124,7 @@ function SortableTable<Row extends object>({
             sorted.map((r, i) => (
               <tr
                 key={i}
-                className="border-t border-b border-[#dddddd] odd:bg-[#f4f4f4] hover:bg-[#efefef] transition-colors"
+                className="border-t border-b border-[#dddddd] odd:bg-[#f4f4f4] hover:bg-[#f9f9f9] transition-colors"
               >
                 {columns.map((c, j) => {
                   const tdAlign =
@@ -130,7 +133,7 @@ function SortableTable<Row extends object>({
                     <td
                       key={c.key}
                       className={`px-2 py-1.5 align-middle ${tdAlign} ${c.align === 'right' ? 'tabular-nums' : ''}`}
-                      style={j === activeIdx ? { backgroundColor: HI_BG } : undefined}
+                      style={j === activeIdx && shouldHighlight ? { backgroundColor: HI_BG } : undefined}
                     >
                       {c.render ? c.render(r) : String((r as any)[c.key] ?? '—')}
                     </td>
@@ -204,7 +207,7 @@ export default function ResultDetails(props: ResultDetailsProps) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {/* Pitch */}
+          {/* Row 1, Col 1: Pitch */}
           <Panel title="Pitch">
             <SortableTable
               defaultSort={{ key: 'ratioPct', dir: 'desc' }} // On-pitch %
@@ -225,47 +228,7 @@ export default function ResultDetails(props: ResultDetailsProps) {
             />
           </Panel>
 
-          {/* Melody timing */}
-          <Panel title="Melody timing">
-            <SortableTable
-              defaultSort={{ key: 'coveragePct', dir: 'desc' }}
-              empty="No melody rows."
-              columns={[
-                { key: 'dur', label: 'Note Value', get: (r) => (r as any).dur, align: 'left' },
-                { key: 'attempts', label: 'Attempts', get: (r) => (r as any).attempts, align: 'right' },
-                { key: 'coveragePct', label: 'Coverage %', get: (r) => (r as any).coveragePct, align: 'right' },
-                { key: 'avgOffset', label: 'Average Offset', get: (r) => (r as any).avgOffset, align: 'right' },
-              ]}
-              rows={(melodyDur ?? []).map((r) => ({
-                dur: r.duration_label,
-                attempts: r.attempts,
-                coveragePct: Math.round(Number(r.coverage_pct)),
-                avgOffset: r.first_voice_mu_abs_ms == null ? null : Math.round(Number(r.first_voice_mu_abs_ms)),
-              }))}
-            />
-          </Panel>
-
-          {/* Rhythm line */}
-          <Panel title="Rhythm line">
-            <SortableTable
-              defaultSort={{ key: 'hitPct', dir: 'desc' }}
-              empty="No rhythm rows."
-              columns={[
-                { key: 'dur', label: 'Note Value', get: (r) => (r as any).dur, align: 'left' },
-                { key: 'attempts', label: 'Attempts', get: (r) => (r as any).attempts, align: 'right' },
-                { key: 'hitPct', label: 'Hit %', get: (r) => (r as any).hitPct, align: 'right' },
-                { key: 'avgOffset', label: 'Average Offset', get: (r) => (r as any).avgOffset, align: 'right' },
-              ]}
-              rows={(lineDur ?? []).map((r) => ({
-                dur: r.duration_label,
-                attempts: r.attempts,
-                hitPct: Math.round(Number(r.hit_pct)),
-                avgOffset: r.mu_abs_ms == null ? null : Math.round(Number(r.mu_abs_ms)),
-              }))}
-            />
-          </Panel>
-
-          {/* Intervals */}
+          {/* Row 1, Col 2: Intervals (moved up) */}
           <Panel title="Intervals">
             <SortableTable
               defaultSort={{ key: 'pct', dir: 'desc' }}
@@ -286,6 +249,46 @@ export default function ResultDetails(props: ResultDetailsProps) {
                   pct,
                 };
               })}
+            />
+          </Panel>
+
+          {/* Row 2, Col 1: Melody timing (moved down) */}
+          <Panel title="Melody timing">
+            <SortableTable
+              defaultSort={{ key: 'coveragePct', dir: 'desc' }}
+              empty="No melody rows."
+              columns={[
+                { key: 'dur', label: 'Note Value', get: (r) => (r as any).dur, align: 'left' },
+                { key: 'attempts', label: 'Attempts', get: (r) => (r as any).attempts, align: 'right' },
+                { key: 'coveragePct', label: 'Coverage %', get: (r) => (r as any).coveragePct, align: 'right' },
+                { key: 'avgOffset', label: 'Average Offset', get: (r) => (r as any).avgOffset, align: 'right' },
+              ]}
+              rows={(melodyDur ?? []).map((r) => ({
+                dur: r.duration_label,
+                attempts: r.attempts,
+                coveragePct: Math.round(Number(r.coverage_pct)),
+                avgOffset: r.first_voice_mu_abs_ms == null ? null : Math.round(Number(r.first_voice_mu_abs_ms)),
+              }))}
+            />
+          </Panel>
+
+          {/* Row 2, Col 2: Rhythm line (moved right) */}
+          <Panel title="Rhythm line">
+            <SortableTable
+              defaultSort={{ key: 'hitPct', dir: 'desc' }}
+              empty="No rhythm rows."
+              columns={[
+                { key: 'dur', label: 'Note Value', get: (r) => (r as any).dur, align: 'left' },
+                { key: 'attempts', label: 'Attempts', get: (r) => (r as any).attempts, align: 'right' },
+                { key: 'hitPct', label: 'Hit %', get: (r) => (r as any).hitPct, align: 'right' },
+                { key: 'avgOffset', label: 'Average Offset', get: (r) => (r as any).avgOffset, align: 'right' },
+              ]}
+              rows={(lineDur ?? []).map((r) => ({
+                dur: r.duration_label,
+                attempts: r.attempts,
+                hitPct: Math.round(Number(r.hit_pct)),
+                avgOffset: r.mu_abs_ms == null ? null : Math.round(Number(r.mu_abs_ms)),
+              }))}
             />
           </Panel>
         </div>

@@ -32,6 +32,11 @@ export default function HistoryPage() {
     studentImagePath: string | null;
   }>(null);
 
+  // Right-side header 3-row meta from StudentHistory (Title / Course / Date)
+  const [headerMeta, setHeaderMeta] = React.useState<null | {
+    title: string; courseTitle: string; date: string;
+  }>(null);
+
   React.useEffect(() => {
     let cancel = false;
     (async () => {
@@ -76,6 +81,29 @@ export default function HistoryPage() {
     return <div className="min-h-screen bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2]" />;
   }
 
+  const rightRows = headerMeta
+    ? {
+        // Row 1: Lesson Title — smaller + tight leading
+        top: (
+          <div className="px-3 text-[13px] font-medium text-[#0f0f0f] leading-tight truncate">
+            {headerMeta.title}
+          </div>
+        ),
+        // Row 2: Course — compact
+        middle: (
+          <div className="px-3 text-[12px] text-[#0f0f0f]/80 leading-tight truncate">
+            {headerMeta.courseTitle}
+          </div>
+        ),
+        // Row 3: Date — extra small + tabular
+        bottom: (
+          <div className="px-3 text-[11px] text-[#0f0f0f]/60 leading-tight tabular-nums">
+            {headerMeta.date}
+          </div>
+        ),
+      }
+    : undefined;
+
   return (
     <HomeBootstrapProvider value={{ uid: bootstrap.uid }}>
       <main className="min-h-dvh h-dvh flex flex-col bg-gradient-to-b from-[#f0f0f0] to-[#d2d2d2] text-[#0f0f0f]">
@@ -85,11 +113,12 @@ export default function HistoryPage() {
             avatarUrl={bootstrap.avatarUrl}
             studentImagePath={bootstrap.studentImagePath}
             headlineMode="name"
+            rightRows={rightRows}
           />
         </div>
 
         <div className="flex-1 min-h-0 px-0 md:px-6 pb-4">
-          <StudentHistory />
+          <StudentHistory onHeaderMetaChange={setHeaderMeta} />
         </div>
       </main>
     </HomeBootstrapProvider>

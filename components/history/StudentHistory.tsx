@@ -41,7 +41,12 @@ function safeNum(x: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export default function StudentHistory() {
+export default function StudentHistory({
+  onHeaderMetaChange,
+}: {
+  /** Emits the selected lesson's Title + Course title + YYYY-MM-DD date for the top header's right 3-row slot. */
+  onHeaderMetaChange?: (meta: { title: string; courseTitle: string; date: string } | null) => void;
+}) {
   const [rows, setRows] = React.useState<ResultRow[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -83,7 +88,7 @@ export default function StudentHistory() {
           const timeOn = safeNum(r.pitch_time_on_ratio);
           const mae = safeNum(r.pitch_cents_mae);
 
-          return {
+        return {
             id: r.id,
             when: new Date(r.created_at),
             course: r.course_slug,
@@ -128,6 +133,16 @@ export default function StudentHistory() {
 
   const selected = filteredRows.find(r => r.id === selectedId) ?? null;
 
+  // Emit title + course + date to the header (3-row block)
+  React.useEffect(() => {
+    if (!onHeaderMetaChange) return;
+    if (!selected) { onHeaderMetaChange(null); return; }
+    const title = selected.title;
+    const courseTitle = courseTitleBySlug[selected.course] ?? selected.course;
+    const date = selected.when.toISOString().slice(0, 10);
+    onHeaderMetaChange({ title, courseTitle, date });
+  }, [selected, onHeaderMetaChange]);
+
   const courseOptions = React.useMemo(
     () => COURSES.map(c => ({ slug: c.slug, title: c.title })),
     []
@@ -136,30 +151,10 @@ export default function StudentHistory() {
   return (
     <section className="w-full h-full">
       <div className="h-full grid grid-cols-1 md:grid-cols-8 gap-3 isolate pb-2">
-        {/* LEFT: Details (6/8) — stacked header: Lesson / Course / Date */}
+        {/* LEFT: Details (6/8) — header text moved to top header; keep metrics here */}
         <div className="md:col-span-6 min-h-0">
           {selected ? (
-            <div className="min-w-0">
-              <div className="flex flex-col leading-tight min-w-0">
-                <div className="text-xl font-semibold text-[#0f0f0f] truncate">
-                  {selected.title}
-                </div>
-                <div className="text-sm text-[#0f0f0f]/80 truncate">
-                  {courseTitleBySlug[selected.course] ?? selected.course}
-                </div>
-                <div className="text-xs text-[#0f0f0f]/60 tabular-nums">
-                  {selected.when.toISOString().slice(0, 10)}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-sm text-[#6b6b6b]">
-              Select a lesson from the right to see details.
-            </div>
-          )}
-
-          {selected ? (
-            <div className="mt-3">
+            <div className="mt-0">
               <HeaderSummary
                 finalPct={selected.final}
                 pitchPct={selected.pitch}
@@ -170,7 +165,11 @@ export default function StudentHistory() {
                 intervalsPct={selected.intervals}
               />
             </div>
-          ) : null}
+          ) : (
+            <div className="text-sm text-[#6b6b6b]">
+              Select a lesson from the right to see details.
+            </div>
+          )}
 
           <div className="mt-3">
             {selected ? (

@@ -49,7 +49,7 @@ export default function ResultsList({
       ].join(' ')}
     >
       {/* Top row: ONLY the dropdown, aligned left */}
-      <div className="flex items-center justify-start gap-2 px-6 pb-2 pt-1">
+      <div className="flex items-center justify-start gap-2 px-6 pb-2">
         <select
           aria-label="Course"
           value={courseFilter}
@@ -89,7 +89,7 @@ export default function ResultsList({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, idx) => {
+                  {rows.map((r) => {
                     const sel = r.id === selectedId;
                     return (
                       <tr
@@ -101,9 +101,10 @@ export default function ResultsList({
                           'border-t-2 border-b-2 border-[#dddddd] cursor-pointer transition-colors',
                           // zebra striping starts at first row
                           'odd:bg-[#f4f4f4]',
-                          // hover + selected states override zebra visually
-                          'hover:bg-[#efefef]',
-                          sel ? 'bg-[#f6f6f6]' : '',
+                          // hover state
+                          'hover:bg-[#eaeaea]',
+                          // selection state: force it to win over zebra & hover
+                          'aria-selected:!bg-[#f9f9f9]',
                         ].join(' ')}
                       >
                         <td className="px-3 py-2 tabular-nums">

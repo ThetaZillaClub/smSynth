@@ -13,12 +13,15 @@ export default function HomeHeader({
   avatarUrl,
   studentImagePath, // passed from /home bootstrap
   headlineMode = 'welcome', // 'welcome' | 'name'
+  /** Right-side header content split into 3 rows (top/middle/bottom). */
+  rightRows,
 }: {
   displayName: string;
   avatarUrl: string | null;
   studentImagePath?: string | null;
   /** Controls headline text. 'welcome' => "Welcome back, Name"; 'name' => "Name" */
   headlineMode?: 'welcome' | 'name';
+  rightRows?: { top?: React.ReactNode; middle?: React.ReactNode; bottom?: React.ReactNode };
 }) {
   const [imgUrl, setImgUrl] = React.useState<string | null>(avatarUrl ?? null);
 
@@ -84,23 +87,49 @@ export default function HomeHeader({
   const initial = (displayName?.trim()?.[0] ?? '?').toUpperCase();
 
   return (
-    <header className="flex items-center justify-between gap-4">
-      <div className="flex items-center gap-4">
-        <div className="h-12 w-12 md:h-14 md:w-14 rounded-full overflow-hidden bg-[#f9f9f9] border border-[#d2d2d2] grid place-items-center">
-          {imgUrl ? (
-            <div className="w-full h-full">
-              <StudentImage imgUrl={imgUrl} alt={`${displayName} avatar`} />
+    <header className="w-full">
+      {/* Constrain header content to the same 6/8 width as the left stage panel for bento alignment */}
+      <div className="grid grid-cols-8 gap-3">
+        <div className="col-span-8 md:col-span-6">
+          {/* 2 columns (left = avatar+name, right = 3 stacked rows) and 3 equal rows on md+ */}
+          <div className="grid grid-cols-1 md:grid-cols-2 md:grid-rows-3 gap-x-3 md:gap-y-0.5 items-center">
+            {/* Left: Avatar + Name spans all 3 rows on md+ */}
+            <div className="flex items-center gap-3 min-w-0 md:row-span-3">
+              <div className="h-12 w-12 md:h-14 md:w-14 rounded-full overflow-hidden bg-[#f9f9f9] border border-[#d2d2d2] grid place-items-center flex-shrink-0">
+                {imgUrl ? (
+                  <div className="w-full h-full">
+                    <StudentImage imgUrl={imgUrl} alt={`${displayName} avatar`} />
+                  </div>
+                ) : (
+                  <span className="text-base md:text-lg font-semibold text-[#373737] select-none">
+                    {initial}
+                  </span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-2xl md:text-3xl font-bold truncate">
+                  {headlineMode === 'name' ? displayName : <>Welcome back, {displayName}</>}
+                </h1>
+              </div>
             </div>
-          ) : (
-            <span className="text-base md:text-lg font-semibold text-[#373737] select-none">
-              {initial}
-            </span>
-          )}
-        </div>
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold">
-            {headlineMode === 'name' ? displayName : <>Welcome back, {displayName}</>}
-          </h1>
+
+            {/* Right: 3 rows (Title / Course / Date), aligned to the right edge of this 6-col region */}
+            {rightRows?.top ? (
+              <div className="justify-self-end text-right md:row-start-1 md:col-start-2 min-w-0 leading-tight">
+                {rightRows.top}
+              </div>
+            ) : null}
+            {rightRows?.middle ? (
+              <div className="justify-self-end text-right md:row-start-2 md:col-start-2 min-w-0 leading-tight">
+                {rightRows.middle}
+              </div>
+            ) : null}
+            {rightRows?.bottom ? (
+              <div className="justify-self-end text-right md:row-start-3 md:col-start-2 min-w-0 leading-tight">
+                {rightRows.bottom}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </header>
