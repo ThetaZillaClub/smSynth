@@ -17,6 +17,7 @@ const BASE: Partial<SessionConfig> = {
   metronome: true,
   exerciseLoops: 4,
   regenerateBetweenTakes: true,
+  bpm: 60,
   callResponse: true,
   callResponseSequence: [{ kind: "single_tonic" }, { kind: "guided_arpeggio" }],
   ts: { num: 4, den: 4 },

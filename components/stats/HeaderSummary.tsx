@@ -1,8 +1,6 @@
 // components/stats/HeaderSummary.tsx
 'use client';
-
 import * as React from 'react';
-
 type StatCardProps = {
   title: string;
   main: string;
@@ -10,10 +8,8 @@ type StatCardProps = {
   valuePct: number;
   stripeBG: string; // shared page-wide gradient
 };
-
 /** Brand gradient colors (ROYGBIV variant). */
 const LOGO_COLORS = ['#ff3b3b', '#ff8c00', '#ffa500', '#22c55e', '#3b82f6', '#a855f7', '#6366f1'];
-
 function withAlpha(hex: string, alpha = 0.45) {
   const h = hex.replace('#', '');
   let r: number, g: number, b: number;
@@ -21,7 +17,6 @@ function withAlpha(hex: string, alpha = 0.45) {
   else { r = parseInt(h.slice(0, 2), 16); g = parseInt(h.slice(2, 4), 16); b = parseInt(h.slice(4, 6), 16); }
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
-
 /** Elongated & overlapping radial ribbons that read as a single stripe across the page. */
 function buildPageStripeBG(colors = LOGO_COLORS) {
   const n = colors.length - 1;
@@ -30,12 +25,10 @@ function buildPageStripeBG(colors = LOGO_COLORS) {
     return `radial-gradient(30% 140% at ${x}% 50%, ${withAlpha(c, 0.52)} 0%, ${withAlpha(c, 0.26)} 34%, transparent 66%)`;
   }).join(', ');
 }
-
 /** Measures element’s viewport-left so the gradient can align page-wide. */
 function useStripeOffset<T extends HTMLElement>() {
   const ref = React.useRef<T | null>(null);
   const [left, setLeft] = React.useState(0);
-
   React.useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -44,10 +37,8 @@ function useStripeOffset<T extends HTMLElement>() {
       setLeft(Math.round(rect.left));
     };
     update();
-
     const ro = new ResizeObserver(update);
     ro.observe(el);
-
     let ticking = false;
     const onEvt = () => {
       if (!ticking) {
@@ -57,17 +48,14 @@ function useStripeOffset<T extends HTMLElement>() {
     };
     window.addEventListener('scroll', onEvt, { passive: true });
     window.addEventListener('resize', onEvt, { passive: true });
-
     return () => {
       ro.disconnect();
       window.removeEventListener('scroll', onEvt);
       window.removeEventListener('resize', onEvt);
     };
   }, []);
-
   return { ref, left };
 }
-
 /** Segmented progress bar (27 thinner pills), each pill draws its own slice of the page stripe. */
 function SegmentedBar({
   pct,
@@ -78,14 +66,12 @@ function SegmentedBar({
   const total = 27; // ~33% more than 20; ~3.7% per pill
   const filled = Math.round((clamped / 100) * total);
   const gapPx = 2;
-
   // per-segment refs + measured viewport-left for correct gradient slice
   const segRefs = React.useRef<Array<HTMLDivElement | null>>([]);
   const setSegRef = React.useCallback((idx: number) => (el: HTMLDivElement | null): void => {
     segRefs.current[idx] = el; // return void to satisfy React.Ref type
   }, []);
   const [segLefts, setSegLefts] = React.useState<number[]>([]);
-
   React.useEffect(() => {
     const update = () => {
       setSegLefts(
@@ -93,7 +79,6 @@ function SegmentedBar({
       );
     };
     update();
-
     let ticking = false;
     const onEvt = () => {
       if (!ticking) {
@@ -101,20 +86,16 @@ function SegmentedBar({
         requestAnimationFrame(() => { ticking = false; update(); });
       }
     };
-
     const ro = new ResizeObserver(onEvt);
     segRefs.current.forEach((el) => el && ro.observe(el));
-
     window.addEventListener('scroll', onEvt, { passive: true });
-    window.addEventListener('resize', onEvt, { passive: true });
-
+    window.addEventListener('resize',onEvt, { passive: true });
     return () => {
       ro.disconnect();
       window.removeEventListener('scroll', onEvt);
       window.removeEventListener('resize', onEvt);
     };
   }, [total]);
-
   return (
     <div
       className="relative mt-1.5"
@@ -155,17 +136,14 @@ function SegmentedBar({
     </div>
   );
 }
-
 function StatCard({ title, main, valuePct, stripeBG }: StatCardProps) {
   const { ref, left } = useStripeOffset<HTMLDivElement>();
-
   const cardStyle: React.CSSProperties & Record<'--stripe-offset', string> = {
     height: 'clamp(100px, 6vw, 120px)', // room for taller segments
     borderColor: '#d2d2d2',
     backgroundImage: 'linear-gradient(to bottom, #f2f2f2, #eeeeee)',
     '--stripe-offset': `${left}px`,
   };
-
   return (
     <div
       ref={ref}
@@ -193,12 +171,13 @@ function StatCard({ title, main, valuePct, stripeBG }: StatCardProps) {
     </div>
   );
 }
-
 export default function HeaderSummary({
   finalPct,
   pitchPct,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   timeOnPitchPct, // retained for future tooltips
-  pitchMae,       // ^
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  pitchMae, // ^
   melodyPct,
   linePct,
   intervalsPct,
@@ -212,25 +191,20 @@ export default function HeaderSummary({
   intervalsPct: number | null;
 }) {
   const stripeBG = React.useMemo(() => buildPageStripeBG(), []);
-
   return (
     <div className="w-full flex flex-nowrap gap-2 sm:gap-3">
       {finalPct != null && (
         <StatCard title="Final" main={`${finalPct.toFixed(0)}%`} valuePct={finalPct} stripeBG={stripeBG} />
       )}
-
       {pitchPct != null && (
         <StatCard title="Pitch" main={`${pitchPct.toFixed(0)}%`} valuePct={pitchPct} stripeBG={stripeBG} />
       )}
-
       {melodyPct != null && (
         <StatCard title="Melody rhythm" main={`${melodyPct.toFixed(0)}%`} valuePct={melodyPct} stripeBG={stripeBG} />
       )}
-
       {linePct != null && (
         <StatCard title="Rhythm line" main={`${linePct.toFixed(0)}%`} valuePct={linePct} stripeBG={stripeBG} />
       )}
-
       {intervalsPct != null && (
         <StatCard title="Intervals" main={`${intervalsPct.toFixed(0)}%`} valuePct={intervalsPct} stripeBG={stripeBG} />
       )}

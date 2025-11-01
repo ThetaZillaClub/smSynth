@@ -1,12 +1,10 @@
 // components/stats/StudentStats.tsx
 'use client';
-
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { COURSES } from '@/lib/courses/registry';
 import HeaderSummary from './HeaderSummary';
 import CombinedDetails from './CombinedDetails';
-
 type DbRow = {
   id: string;
   created_at: string;
@@ -20,45 +18,39 @@ type DbRow = {
   rhythm_line_percent: string | number | null;
   intervals_correct_ratio: string | number | null;
 };
-
 type PitchNoteRow = { result_id: string; midi: number; n: number; ratio: number; cents_mae: number };
-type MelDurRow   = { result_id: string; duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null };
-type LineDurRow  = { result_id: string; duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null };
-type IcRow       = { result_id: string; semitones: number; attempts: number; correct: number };
-
+type MelDurRow = { result_id: string; duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null };
+type LineDurRow = { result_id: string; duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null };
+type IcRow = { result_id: string; semitones: number; attempts: number; correct: number };
 const RECENCY_OPTS = [
-  { key: '7d',   label: 'Last 7 days',  days: 7 },
-  { key: '30d',  label: 'Last 30 days', days: 30 },
-  { key: '90d',  label: 'Last 90 days', days: 90 },
+  { key: '7d', label: 'Last 7 days', days: 7 },
+  { key: '30d', label: 'Last 30 days', days: 30 },
+  { key: '90d', label: 'Last 90 days', days: 90 },
   { key: '180d', label: 'Last 6 months', days: 180 },
   { key: '365d', label: 'Last 12 months', days: 365 },
-  { key: 'all',  label: 'All time', days: null as number | null },
+  { key: 'all', label: 'All time', days: null as number | null },
 ] as const;
-
+type RecencyKey = (typeof RECENCY_OPTS)[number]['key'];
 function safeNum(x: unknown): number | null {
   if (x == null) return null;
   const n = typeof x === 'number' ? x : Number(x);
   return Number.isFinite(n) ? n : null;
 }
-
 export default function StudentStats() {
   const [allRows, setAllRows] = React.useState<DbRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-
   // filters
-  const [recency, setRecency] = React.useState<(typeof RECENCY_OPTS)[number]['key']>('90d');
-  const [course, setCourse]   = React.useState<string | 'all'>('all');
-  const [lesson, setLesson]   = React.useState<string | 'all'>('all');
-
+  const [recency, setRecency] = React.useState<RecencyKey>('90d');
+  const [course, setCourse] = React.useState<string | 'all'>('all');
+  const [lesson, setLesson] = React.useState<string | 'all'>('all');
   // aggregated detail state
   const [pitchNotes, setPitchNotes] = React.useState<Array<{ midi: number; n: number; ratio: number; cents_mae: number }>>([]);
-  const [melodyDur, setMelodyDur]   = React.useState<Array<{ duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null }>>([]);
-  const [lineDur, setLineDur]       = React.useState<Array<{ duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null }>>([]);
-  const [intervals, setIntervals]   = React.useState<Array<{ semitones: number; attempts: number; correct: number }>>([]);
+  const [melodyDur, setMelodyDur] = React.useState<Array<{ duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null }>>([]);
+  const [lineDur, setLineDur] = React.useState<Array<{ duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null }>>([]);
+  const [intervals, setIntervals] = React.useState<Array<{ semitones: number; attempts: number; correct: number }>>([]);
   const [detailsLoading, setDetailsLoading] = React.useState(false);
   const [detailsErr, setDetailsErr] = React.useState<string | null>(null);
-
   // header summary numbers
   const [finalPct, setFinalPct] = React.useState<number | null>(null);
   const [pitchPct, setPitchPct] = React.useState<number | null>(null);
@@ -67,7 +59,6 @@ export default function StudentStats() {
   const [melodyPct, setMelodyPct] = React.useState<number | null>(null);
   const [linePct, setLinePct] = React.useState<number | null>(null);
   const [intervalsPct, setIntervalsPct] = React.useState<number | null>(null);
-
   // load all results once
   React.useEffect(() => {
     let cancel = false;
@@ -78,7 +69,6 @@ export default function StudentStats() {
         const { data: { user }, error: uerr } = await supabase.auth.getUser();
         if (uerr) throw uerr;
         if (!user) { setAllRows([]); return; }
-
         const { data, error } = await supabase
           .from('lesson_results')
           .select(`
@@ -91,25 +81,22 @@ export default function StudentStats() {
           .eq('uid', user.id)
           .order('created_at', { ascending: false })
           .limit(500);
-
         if (error) throw error;
         if (cancel) return;
         setAllRows((data ?? []) as DbRow[]);
-      } catch (e: any) {
-        if (!cancel) setError(e?.message ?? 'Failed to load stats');
+      } catch (e: unknown) {
+        if (!cancel) setError(e instanceof Error ? e.message : 'Failed to load stats');
       } finally {
         if (!cancel) setLoading(false);
       }
     })();
     return () => { cancel = true; };
   }, []);
-
   // compute filtered set of rows by recency/course/lesson
   const filtered = React.useMemo(() => {
     const now = Date.now();
     const days = RECENCY_OPTS.find(o => o.key === recency)?.days ?? null;
     const minTime = days == null ? null : now - days * 24 * 60 * 60 * 1000;
-
     return allRows.filter(r => {
       if (minTime != null && new Date(r.created_at).getTime() < minTime) return false;
       if (course !== 'all' && r.course_slug !== course) return false;
@@ -117,7 +104,6 @@ export default function StudentStats() {
       return true;
     });
   }, [allRows, recency, course, lesson]);
-
   // fetch + aggregate details whenever filtered result IDs change
   React.useEffect(() => {
     let cancel = false;
@@ -125,7 +111,6 @@ export default function StudentStats() {
       try {
         setDetailsErr(null);
         setDetailsLoading(true);
-
         const ids = filtered.map(r => r.id);
         if (!ids.length) {
           setPitchNotes([]); setMelodyDur([]); setLineDur([]); setIntervals([]);
@@ -134,9 +119,7 @@ export default function StudentStats() {
           setPitchMae(null); setMelodyPct(null); setLinePct(null); setIntervalsPct(null);
           return;
         }
-
         const supabase = createClient();
-
         const [pitchRes, melDurRes, lineDurRes, icRes] = await Promise.all([
           supabase.from('lesson_result_pitch_notes')
             .select('result_id,midi,n,ratio,cents_mae').in('result_id', ids),
@@ -147,12 +130,10 @@ export default function StudentStats() {
           supabase.from('lesson_result_interval_classes')
             .select('result_id,semitones,attempts,correct').in('result_id', ids),
         ]);
-
         if (pitchRes.error) throw new Error(pitchRes.error.message);
         if (melDurRes.error) throw new Error(melDurRes.error.message);
         if (lineDurRes.error) throw new Error(lineDurRes.error.message);
         if (icRes.error) throw new Error(icRes.error.message);
-
         // ---- Aggregate PITCH NOTES
         const pitchRows = (pitchRes.data ?? []) as PitchNoteRow[];
         const pmap = new Map<number, { n: number; ratio_w: number; mae_w: number }>();
@@ -171,14 +152,12 @@ export default function StudentStats() {
             cents_mae: v.n ? v.mae_w / v.n : 0,
           }))
           .sort((a, b) => b.n - a.n);
-
         // summary from pitch notes (preferred)
         const totalN = pitchAgg.reduce((a, r) => a + r.n, 0);
         const timeOnPct =
           totalN ? Math.round((pitchAgg.reduce((a, r) => a + r.ratio * r.n, 0) / totalN) * 100) : null;
         const maeCents =
           totalN ? Math.round(pitchAgg.reduce((a, r) => a + r.cents_mae * r.n, 0) / totalN) : null;
-
         // ---- Aggregate MELODY DURATIONS to Hit %
         const melRows = (melDurRes.data ?? []) as MelDurRow[];
         type MelAcc = { attempts: number; hits_approx: number; mu_w: number; mu_w_denom: number };
@@ -206,7 +185,6 @@ export default function StudentStats() {
           hit_pct: acc.attempts ? (100 * acc.hits_approx) / acc.attempts : null,
           first_voice_mu_abs_ms: acc.mu_w_denom ? acc.mu_w / acc.mu_w_denom : null,
         })).sort((a, b) => b.attempts - a.attempts);
-
         // ---- Aggregate RHYTHM LINE DURATIONS
         const lineRows = (lineDurRes.data ?? []) as LineDurRow[];
         type LineAcc = { attempts: number; successes: number; mu_w: number; mu_w_denom: number };
@@ -228,7 +206,6 @@ export default function StudentStats() {
           hit_pct: acc.attempts ? (100 * acc.successes) / acc.attempts : 0,
           mu_abs_ms: acc.mu_w_denom ? acc.mu_w / acc.mu_w_denom : null,
         })).sort((a, b) => b.attempts - a.attempts);
-
         // ---- Aggregate INTERVALS
         const icRows = (icRes.data ?? []) as IcRow[];
         type IcAcc = { attempts: number; correct: number };
@@ -244,42 +221,35 @@ export default function StudentStats() {
           attempts: acc.attempts,
           correct: acc.correct,
         })).sort((a, b) => a.semitones - b.semitones);
-
         // Push details
         if (cancel) return;
         setPitchNotes(pitchAgg);
         setMelodyDur(melodyAgg);
         setLineDur(lineAgg);
         setIntervals(intervalsAgg);
-
         // ---- Header summary from lesson_results + details
         const avg = (nums: Array<number | null>) => {
           const vals = nums.filter((v): v is number => v != null && Number.isFinite(v));
           if (!vals.length) return null;
           return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
         };
-
         const final = avg(filtered.map(r => safeNum(r.final_percent)));
-        const mel   = avg(filtered.map(r => safeNum(r.rhythm_melody_percent)));
-        const line  = avg(filtered.map(r => safeNum(r.rhythm_line_percent)));
-
+        const mel = avg(filtered.map(r => safeNum(r.rhythm_melody_percent)));
+        const line = avg(filtered.map(r => safeNum(r.rhythm_line_percent)));
         const attemptsTotal = intervalsAgg.reduce((a, r) => a + r.attempts, 0);
-        const correctTotal  = intervalsAgg.reduce((a, r) => a + r.correct, 0);
+        const correctTotal = intervalsAgg.reduce((a, r) => a + r.correct, 0);
         const intervalsPctAgg = attemptsTotal ? Math.round((100 * correctTotal) / attemptsTotal) : null;
-
         setFinalPct(final);
         setMelodyPct(mel);
         setLinePct(line);
         setIntervalsPct(intervalsPctAgg);
-
         // Pitch headline from pitch notes aggregation (preferred)
         setTimeOnPitchPct(timeOnPct);
         setPitchMae(maeCents);
         setPitchPct(timeOnPct); // align "Pitch" with on-pitch headline
-
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancel) {
-          setDetailsErr(e?.message ?? 'Failed to load details');
+          setDetailsErr(e instanceof Error ? e.message : 'Failed to load details');
           setPitchNotes([]); setMelodyDur([]); setLineDur([]); setIntervals([]);
           setFinalPct(null); setPitchPct(null); setTimeOnPitchPct(null);
           setPitchMae(null); setMelodyPct(null); setLinePct(null); setIntervalsPct(null);
@@ -290,20 +260,16 @@ export default function StudentStats() {
     })();
     return () => { cancel = true; };
   }, [filtered]);
-
   const courseOptions = React.useMemo(
     () => COURSES.map(c => ({ slug: c.slug, title: c.title, lessons: c.lessons.map(l => ({ slug: l.slug, title: l.title })) })),
     []
   );
-
   const selectedCourse = courseOptions.find(c => c.slug === course) || null;
   const lessonOptions = selectedCourse?.lessons ?? [];
-
   // if course changes to 'all', ensure lesson resets to 'all'
   React.useEffect(() => {
     if (course === 'all') setLesson('all');
   }, [course]);
-
   return (
     <section className="w-full h-full">
       {/* Minimal header row: JUST the 3 dropdowns on the left; no title, no counts, no outer card */}
@@ -312,14 +278,13 @@ export default function StudentStats() {
         <select
           aria-label="Recency"
           value={recency}
-          onChange={(e) => setRecency(e.target.value as any)}
+          onChange={(e) => setRecency(e.target.value as RecencyKey)}
           className="rounded-lg border border-[#d2d2d2] bg-[#f4f4f4] px-2 py-1 text-xs outline-none hover:bg-[#f8f8f8]"
         >
           {RECENCY_OPTS.map(opt => (
             <option key={opt.key} value={opt.key}>{opt.label}</option>
           ))}
         </select>
-
         {/* Course */}
         <select
           aria-label="Course"
@@ -332,7 +297,6 @@ export default function StudentStats() {
             <option key={c.slug} value={c.slug}>{c.title}</option>
           ))}
         </select>
-
         {/* Lesson */}
         <select
           aria-label="Lesson"
@@ -347,7 +311,6 @@ export default function StudentStats() {
           ))}
         </select>
       </div>
-
       {/* Summary row */}
       <div className="mt-3">
         <HeaderSummary
@@ -360,7 +323,6 @@ export default function StudentStats() {
           intervalsPct={intervalsPct}
         />
       </div>
-
       {/* Details grid */}
       <div className="mt-3">
         {loading ? (
@@ -390,7 +352,6 @@ export default function StudentStats() {
           />
         )}
       </div>
-
       {error ? <div className="mt-2 text-sm text-[#dc2626]">{error}</div> : null}
     </section>
   );

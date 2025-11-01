@@ -4,7 +4,17 @@ import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
 import type { Phrase } from "@/utils/stage";
 import { secondsToNoteName } from "./format";
-
+type MelodyDurationRow = {
+  durationLabel?: string;
+  attempts?: number;
+  hits?: number;
+  hitPct?: number;
+  firstVoiceMuAbsMs?: number;
+};
+type PerNoteMelodyRow = {
+  coverage?: number;
+  onsetErrMs?: number | null;
+};
 export default function MelodyRhythmReview({
   score,
   phrase,
@@ -18,12 +28,11 @@ export default function MelodyRhythmReview({
 }) {
   // Preferred: aggregated rows provided by scoring
   const rows = React.useMemo(() => {
-    const byDur = Array.isArray((score as any)?.rhythm?.melodyByDuration)
-      ? (((score as any).rhythm.melodyByDuration as unknown[]) ?? [])
+    const byDur = Array.isArray(score.rhythm?.melodyByDuration)
+      ? (score.rhythm.melodyByDuration ?? [])
       : [];
-
     if (byDur.length) {
-      return byDur.map((r: any) => {
+      return byDur.map((r: MelodyDurationRow) => {
         const attempts = Math.max(0, Number(r.attempts ?? 0));
         const hits =
           r.hits != null ? Math.max(0, Number(r.hits)) : Math.max(0, Number(r.hitPct ?? 0)) * attempts / 100;
@@ -35,16 +44,14 @@ export default function MelodyRhythmReview({
         };
       });
     }
-
     // Fallback: derive from legacy per-note coverage grouped by duration
     const notes = phrase?.notes ?? [];
-    const per = (score as any)?.rhythm?.perNoteMelody ?? [];
+    const per = Array.isArray(score.rhythm?.perNoteMelody) ? score.rhythm.perNoteMelody : [];
     type Acc = { sumPct: number; n: number; muSum: number; muN: number };
     const m = new Map<string, Acc>();
-
     for (let i = 0; i < notes.length; i++) {
-      const r = per?.[i];
-      if (!r || typeof r.coverage !== "number") continue;
+      const r: PerNoteMelodyRow = per?.[i] ?? {};
+      if (typeof r.coverage !== "number") continue;
       const label = secondsToNoteName(notes[i]!.durSec, bpm, den);
       const a = m.get(label) ?? { sumPct: 0, n: 0, muSum: 0, muN: 0 };
       a.sumPct += Math.round(Number(r.coverage) * 100);
@@ -55,14 +62,12 @@ export default function MelodyRhythmReview({
       }
       m.set(label, a);
     }
-
     return Array.from(m.entries()).map(([label, a]) => ({
       label,
       hitPct: a.n ? Math.round(a.sumPct / a.n) : null,
       muAbsMs: a.muN ? Math.round(a.muSum / a.muN) : null,
     }));
   }, [score, phrase, bpm, den]);
-
   return (
     <div className="flex flex-col gap-2">
       <Header
@@ -109,7 +114,6 @@ export default function MelodyRhythmReview({
     </div>
   );
 }
-
 function Header({ title, main, sub }: { title: string; main: string; sub?: string }) {
   return (
     <div

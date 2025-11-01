@@ -15,6 +15,7 @@ const RHYTHM_FLAGS = {
 
 const BASE: Partial<SessionConfig> = {
   metronome: true,
+  bpm: 60,
   exerciseLoops: 4,
   regenerateBetweenTakes: true,
   callResponse: true,

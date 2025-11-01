@@ -15,6 +15,58 @@ type TakeSnap = { phrase: Phrase; rhythm: RhythmEvent[] | null };
 
 type View = "summary" | "pitch" | "melody" | "line" | "intervals";
 
+/** ───────────────────── Helpers to avoid `any` ───────────────────── */
+type MelodyByDurationRow = {
+  durationLabel?: string;
+  attempts?: number;
+  hits?: number;
+  hitPct?: number;
+  firstVoiceMuAbsMs?: number;
+};
+
+type PerNoteMelodyRow = {
+  coverage?: number;
+  onsetErrMs?: number;
+};
+
+type WithOptionalRhythmExtras = {
+  rhythm?: {
+    melodyByDuration?: unknown;
+    perNoteMelody?: unknown;
+  };
+};
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function isMelodyByDurationRow(v: unknown): v is MelodyByDurationRow {
+  return isObject(v);
+}
+
+function isMelodyByDurationRowArray(v: unknown): v is MelodyByDurationRow[] {
+  return Array.isArray(v) && v.every(isMelodyByDurationRow);
+}
+
+function isPerNoteMelodyRow(v: unknown): v is PerNoteMelodyRow {
+  return isObject(v);
+}
+
+function isPerNoteMelodyRowArray(v: unknown): v is PerNoteMelodyRow[] {
+  return Array.isArray(v) && v.every(isPerNoteMelodyRow);
+}
+
+function getMelodyByDuration(s: TakeScore): MelodyByDurationRow[] {
+  const maybe = (s as unknown as WithOptionalRhythmExtras).rhythm?.melodyByDuration;
+  return isMelodyByDurationRowArray(maybe) ? maybe : [];
+}
+
+function getPerNoteMelody(s: TakeScore): PerNoteMelodyRow[] {
+  const maybe = (s as unknown as WithOptionalRhythmExtras).rhythm?.perNoteMelody;
+  return isPerNoteMelodyRowArray(maybe) ? maybe : [];
+}
+/** ───────────────────────────────────────────────────────────────── */
+
 export default function OverallReview({
   scores,
   snapshots = [],
@@ -55,7 +107,7 @@ export default function OverallReview({
       (a, s) => a + finalizeVisible(s, visibility).percent,
       0
     );
-    return Math.round(((sum / scores.length) * 10)) / 10;
+    return Math.round((sum / scores.length) * 10) / 10;
   }, [scores, visibility]);
 
   const finalLetter = Number.isFinite(finalPct) ? letterFromPercent(finalPct) : "—";
@@ -175,24 +227,25 @@ export default function OverallReview({
     // Preferred path: use per-take aggregated rows
     let usedByDuration = false;
     for (const s of scores) {
-      const byDur = Array.isArray((s as any)?.rhythm?.melodyByDuration)
-        ? (((s as any).rhythm.melodyByDuration as unknown[]) ?? [])
-        : [];
+      const byDur = getMelodyByDuration(s);
       if (!byDur.length) continue;
       usedByDuration = true;
       for (const r of byDur) {
-        const label = String((r as any)?.durationLabel ?? "All");
-        const attempts = Math.max(0, Number((r as any)?.attempts ?? 0));
-        const hits = (r as any)?.hits != null
-          ? Math.max(0, Number((r as any).hits))
-          : attempts * Math.max(0, Number((r as any)?.hitPct ?? 0)) / 100;
+        const label = String(r.durationLabel ?? "All");
+        const attempts =
+          Math.max(0, typeof r.attempts === "number" ? r.attempts : 0);
+        const hits =
+          typeof r.hits === "number"
+            ? Math.max(0, r.hits)
+            : attempts *
+              (Math.max(0, typeof r.hitPct === "number" ? r.hitPct : 0) / 100);
 
         if (!m.has(label)) m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
         const g = m.get(label)!;
         g.attempts += attempts;
         g.hitsApprox += hits;
-        if ((r as any)?.firstVoiceMuAbsMs != null) {
-          g.muSum += Math.abs(Number((r as any).firstVoiceMuAbsMs)) * attempts;
+        if (typeof r.firstVoiceMuAbsMs === "number" && Number.isFinite(r.firstVoiceMuAbsMs)) {
+          g.muSum += Math.abs(r.firstVoiceMuAbsMs) * attempts;
           g.muDen += attempts;
         }
       }
@@ -202,7 +255,7 @@ export default function OverallReview({
       // Fallback: legacy per-note coverage grouped by duration
       for (let i = 0; i < scores.length; i++) {
         const s = scores[i]!;
-        const per = (s as any)?.rhythm?.perNoteMelody ?? [];
+        const per = getPerNoteMelody(s);
         const notes = snapshots[i]?.phrase?.notes ?? [];
         for (let j = 0; j < notes.length; j++) {
           const r = per?.[j];
@@ -211,9 +264,9 @@ export default function OverallReview({
           if (!m.has(label)) m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
           const g = m.get(label)!;
           g.attempts += 1;
-          g.hitsApprox += Math.max(0, Math.min(1, Number(r.coverage))); // treat coverage as hit-probability proxy
-          if (Number.isFinite(r.onsetErrMs)) {
-            g.muSum += Math.abs(Number(r.onsetErrMs));
+          g.hitsApprox += Math.max(0, Math.min(1, r.coverage)); // treat coverage as hit-probability proxy
+          if (typeof r.onsetErrMs === "number" && Number.isFinite(r.onsetErrMs)) {
+            g.muSum += Math.abs(r.onsetErrMs);
             g.muDen += 1;
           }
         }
@@ -410,7 +463,7 @@ export default function OverallReview({
           >
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
+                <tr className="text-left text+[11px] uppercase tracking-wide text-[#6b6b6b]">
                   <th className="px-2 py-2">Note</th>
                   <th className="px-2 py-2">Solfege</th>
                   <th className="px-2 py-2">On-pitch %</th>
@@ -617,7 +670,7 @@ function SubHeader({
       className={[
         "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
         "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0f0f0f]",
       ].join(" ")}
     >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">

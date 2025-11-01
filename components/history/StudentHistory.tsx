@@ -1,13 +1,11 @@
 // components/history/StudentHistory.tsx
 'use client';
-
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { COURSES } from '@/lib/courses/registry';
 import ResultDetails from './ResultDetails';
 import ResultsList, { type ResultRow } from './ResultsList';
 import HeaderSummary from './HeaderSummary';
-
 type DbRow = {
   id: string;
   created_at: string;
@@ -21,26 +19,22 @@ type DbRow = {
   rhythm_line_percent: string | number | null;
   intervals_correct_ratio: string | number | null;
 };
-
 const titleByLessonSlug: Record<string, string> = (() => {
   const m: Record<string, string> = {};
   for (const c of COURSES) for (const l of c.lessons) m[l.slug] = l.title;
   return m;
 })();
-
 // Pretty course titles by slug
 const courseTitleBySlug: Record<string, string> = (() => {
   const m: Record<string, string> = {};
   for (const c of COURSES) m[c.slug] = c.title;
   return m;
 })();
-
 function safeNum(x: unknown): number | null {
   if (x == null) return null;
   const n = typeof x === 'number' ? x : Number(x);
   return Number.isFinite(n) ? n : null;
 }
-
 export default function StudentHistory({
   onHeaderMetaChange,
 }: {
@@ -51,9 +45,7 @@ export default function StudentHistory({
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-
   const [courseFilter, setCourseFilter] = React.useState<string | 'all'>('all');
-
   React.useEffect(() => {
     let cancel = false;
     (async () => {
@@ -62,7 +54,6 @@ export default function StudentHistory({
         const { data: { user }, error: uerr } = await supabase.auth.getUser();
         if (uerr) throw uerr;
         if (!user) { setRows([]); setSelectedId(null); setLoading(false); return; }
-
         const { data, error } = await supabase
           .from('lesson_results')
           .select(`
@@ -75,9 +66,7 @@ export default function StudentHistory({
           .eq('uid', user.id)
           .order('created_at', { ascending: false })
           .limit(200);
-
         if (error) throw error;
-
         const mapped: ResultRow[] = (data as DbRow[]).map((r) => {
           const title = titleByLessonSlug[r.lesson_slug] ?? r.lesson_slug ?? 'Unknown Lesson';
           const final = safeNum(r.final_percent);
@@ -87,7 +76,6 @@ export default function StudentHistory({
           const intervalsRatio = safeNum(r.intervals_correct_ratio);
           const timeOn = safeNum(r.pitch_time_on_ratio);
           const mae = safeNum(r.pitch_cents_mae);
-
         return {
             id: r.id,
             when: new Date(r.created_at),
@@ -102,13 +90,12 @@ export default function StudentHistory({
             pitchMae: mae == null ? null : Math.round(mae),
           };
         });
-
         if (cancel) return;
         setRows(mapped);
         setSelectedId(mapped[0]?.id ?? null);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancel) {
-          setError(e?.message ?? 'Failed to load history');
+          setError(e instanceof Error ? e.message : 'Failed to load history');
           setRows([]);
           setSelectedId(null);
         }
@@ -118,21 +105,17 @@ export default function StudentHistory({
     })();
     return () => { cancel = true; };
   }, []);
-
   const filteredRows = React.useMemo(
     () => rows.filter(r => courseFilter === 'all' ? true : r.course === courseFilter),
     [rows, courseFilter]
   );
-
   React.useEffect(() => {
     if (!filteredRows.length) { setSelectedId(null); return; }
     if (!selectedId || !filteredRows.some(r => r.id === selectedId)) {
       setSelectedId(filteredRows[0].id);
     }
   }, [courseFilter, filteredRows, selectedId]);
-
   const selected = filteredRows.find(r => r.id === selectedId) ?? null;
-
   // Emit title + course + date to the header (3-row block)
   React.useEffect(() => {
     if (!onHeaderMetaChange) return;
@@ -142,12 +125,10 @@ export default function StudentHistory({
     const date = selected.when.toISOString().slice(0, 10);
     onHeaderMetaChange({ title, courseTitle, date });
   }, [selected, onHeaderMetaChange]);
-
   const courseOptions = React.useMemo(
     () => COURSES.map(c => ({ slug: c.slug, title: c.title })),
     []
   );
-
   return (
     <section className="w-full h-full">
       <div className="h-full grid grid-cols-1 md:grid-cols-8 gap-3 isolate pb-2">
@@ -170,7 +151,6 @@ export default function StudentHistory({
               Select a lesson from the right to see details.
             </div>
           )}
-
           <div className="mt-3">
             {selected ? (
               <ResultDetails
@@ -181,7 +161,6 @@ export default function StudentHistory({
             {error ? <div className="mt-2 text-sm text-[#dc2626]">{error}</div> : null}
           </div>
         </div>
-
         {/* RIGHT: Recent Results (2/8) — table is its own card inside ResultsList */}
         <div className="md:col-span-2 min-h-0">
           {loading ? (
