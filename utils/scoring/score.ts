@@ -28,7 +28,9 @@ export function computeTakeScore({
     onsetGraceMs = 120,
     maxAlignMs = 300,
     goodAlignMs = 150,
-  } = options;
+    // NEW: default to evaluating melody rhythm unless explicitly disabled by caller
+    evaluateMelodyRhythm = true,
+  } = options as Options & { evaluateMelodyRhythm?: boolean };
 
   // ---- Pitch ----
   const pitch = computePitchScore(phrase, samples, { confMin, centsOk, onsetGraceMs });
@@ -41,14 +43,16 @@ export function computeTakeScore({
     melodyOnsetsSec,
     rhythmLineOnsetsSec,
     options: { confMin, onsetGraceMs, maxAlignMs, goodAlignMs },
+    evaluateMelody: !!evaluateMelodyRhythm,
   });
 
   // ---- Intervals (same centsOk behavior) ----
   const voiced: PitchSample[] = filterVoiced(samples, confMin);
   const intervals = computeIntervalScore(phrase, voiced, centsOk);
 
-  // ---- Finalize via harmonic mean over *all* available components (no pre-combining) ----
-  const parts: number[] = [pitch.percent, rhythm.melodyPercent];
+  // ---- Finalize via harmonic mean over available components (no pre-combining) ----
+  const parts: number[] = [pitch.percent];
+  if (evaluateMelodyRhythm) parts.push(rhythm.melodyPercent);
   if (rhythm.lineEvaluated) parts.push(rhythm.linePercent);
   const final = finalizeScoreN(...parts);
 

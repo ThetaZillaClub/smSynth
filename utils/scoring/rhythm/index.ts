@@ -14,6 +14,7 @@ export function computeRhythmScore({
   melodyOnsetsSec, // (kept for API parity; not used in coverage model)
   rhythmLineOnsetsSec,
   options,
+  evaluateMelody = true,
 }: {
   phrase: Phrase;
   samples: PitchSample[];
@@ -21,14 +22,21 @@ export function computeRhythmScore({
   melodyOnsetsSec: number[];
   rhythmLineOnsetsSec?: number[];
   options: Required<Pick<Options, "confMin" | "onsetGraceMs" | "maxAlignMs" | "goodAlignMs">>;
+  /** NEW: when false, completely skip melody rhythm evaluation (used for timing-free response). */
+  evaluateMelody?: boolean;
 }): RhythmScore {
-  const melR = evalMelodyCoverageRhythm({
-    notes: phrase.notes.map((n) => ({ startSec: n.startSec, durSec: n.durSec })),
-    samples,
-    confMin: options.confMin,
-    onsetGraceMs: options.onsetGraceMs,
-    maxAlignMs: options.maxAlignMs,
-  });
+  const melR = evaluateMelody
+    ? evalMelodyCoverageRhythm({
+        notes: phrase.notes.map((n) => ({ startSec: n.startSec, durSec: n.durSec })),
+        samples,
+        confMin: options.confMin,
+        onsetGraceMs: options.onsetGraceMs,
+        maxAlignMs: options.maxAlignMs,
+      })
+    : {
+        summary: { pct: 0, hitRate: 0, meanAbs: options.maxAlignMs, evaluated: false },
+        perNote: [],
+      };
 
   // ❗No extra adjustment here — events are already aligned in realtime.
   const line = evalHandLineRhythm({

@@ -359,6 +359,8 @@ export default function useTakeScoring() {
         onsetGraceMs: opts.onsetGraceMs,
         maxAlignMs: opts.maxAlignMs,
         goodAlignMs: opts.goodAlignMs,
+        // ⬇️ NEW: disable melody rhythm scoring in timing-free mode
+        evaluateMelodyRhythm: !isTimingFree,
       },
     });
 

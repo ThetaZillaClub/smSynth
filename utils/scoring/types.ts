@@ -118,6 +118,8 @@ export type Options = {
   maxAlignMs?: number;
   /** Full credit inside this band; smooth falloff to maxAlignMs. Default 120ms. */
   goodAlignMs?: number;
+  /** NEW: when false, Melody Rhythm is not evaluated or used in finalization. */
+  evaluateMelodyRhythm?: boolean;
 };
 
 export type ComputeTakeScoreArgs = {
