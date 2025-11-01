@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { COURSES } from '@/lib/courses/registry';
 import HeaderSummary from './HeaderSummary';
 import CombinedDetails from './CombinedDetails';
+
 type DbRow = {
   id: string;
   created_at: string;
@@ -22,6 +23,7 @@ type PitchNoteRow = { result_id: string; midi: number; n: number; ratio: number;
 type MelDurRow = { result_id: string; duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null };
 type LineDurRow = { result_id: string; duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null };
 type IcRow = { result_id: string; semitones: number; attempts: number; correct: number };
+
 const RECENCY_OPTS = [
   { key: '7d', label: 'Last 7 days', days: 7 },
   { key: '30d', label: 'Last 30 days', days: 30 },
@@ -31,26 +33,32 @@ const RECENCY_OPTS = [
   { key: 'all', label: 'All time', days: null as number | null },
 ] as const;
 type RecencyKey = (typeof RECENCY_OPTS)[number]['key'];
+
 function safeNum(x: unknown): number | null {
   if (x == null) return null;
   const n = typeof x === 'number' ? x : Number(x);
   return Number.isFinite(n) ? n : null;
 }
+
 export default function StudentStats() {
   const [allRows, setAllRows] = React.useState<DbRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+
   // filters
   const [recency, setRecency] = React.useState<RecencyKey>('90d');
   const [course, setCourse] = React.useState<string | 'all'>('all');
   const [lesson, setLesson] = React.useState<string | 'all'>('all');
+
   // aggregated detail state
   const [pitchNotes, setPitchNotes] = React.useState<Array<{ midi: number; n: number; ratio: number; cents_mae: number }>>([]);
   const [melodyDur, setMelodyDur] = React.useState<Array<{ duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null }>>([]);
   const [lineDur, setLineDur] = React.useState<Array<{ duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null }>>([]);
   const [intervals, setIntervals] = React.useState<Array<{ semitones: number; attempts: number; correct: number }>>([]);
+
   const [detailsLoading, setDetailsLoading] = React.useState(false);
   const [detailsErr, setDetailsErr] = React.useState<string | null>(null);
+
   // header summary numbers
   const [finalPct, setFinalPct] = React.useState<number | null>(null);
   const [pitchPct, setPitchPct] = React.useState<number | null>(null);
@@ -59,6 +67,7 @@ export default function StudentStats() {
   const [melodyPct, setMelodyPct] = React.useState<number | null>(null);
   const [linePct, setLinePct] = React.useState<number | null>(null);
   const [intervalsPct, setIntervalsPct] = React.useState<number | null>(null);
+
   // load all results once
   React.useEffect(() => {
     let cancel = false;
@@ -92,6 +101,7 @@ export default function StudentStats() {
     })();
     return () => { cancel = true; };
   }, []);
+
   // compute filtered set of rows by recency/course/lesson
   const filtered = React.useMemo(() => {
     const now = Date.now();
@@ -104,6 +114,7 @@ export default function StudentStats() {
       return true;
     });
   }, [allRows, recency, course, lesson]);
+
   // fetch + aggregate details whenever filtered result IDs change
   React.useEffect(() => {
     let cancel = false;
@@ -134,6 +145,7 @@ export default function StudentStats() {
         if (melDurRes.error) throw new Error(melDurRes.error.message);
         if (lineDurRes.error) throw new Error(lineDurRes.error.message);
         if (icRes.error) throw new Error(icRes.error.message);
+
         // ---- Aggregate PITCH NOTES
         const pitchRows = (pitchRes.data ?? []) as PitchNoteRow[];
         const pmap = new Map<number, { n: number; ratio_w: number; mae_w: number }>();
@@ -152,12 +164,14 @@ export default function StudentStats() {
             cents_mae: v.n ? v.mae_w / v.n : 0,
           }))
           .sort((a, b) => b.n - a.n);
+
         // summary from pitch notes (preferred)
         const totalN = pitchAgg.reduce((a, r) => a + r.n, 0);
         const timeOnPct =
           totalN ? Math.round((pitchAgg.reduce((a, r) => a + r.ratio * r.n, 0) / totalN) * 100) : null;
         const maeCents =
           totalN ? Math.round(pitchAgg.reduce((a, r) => a + r.cents_mae * r.n, 0) / totalN) : null;
+
         // ---- Aggregate MELODY DURATIONS to Hit %
         const melRows = (melDurRes.data ?? []) as MelDurRow[];
         type MelAcc = { attempts: number; hits_approx: number; mu_w: number; mu_w_denom: number };
@@ -185,6 +199,7 @@ export default function StudentStats() {
           hit_pct: acc.attempts ? (100 * acc.hits_approx) / acc.attempts : null,
           first_voice_mu_abs_ms: acc.mu_w_denom ? acc.mu_w / acc.mu_w_denom : null,
         })).sort((a, b) => b.attempts - a.attempts);
+
         // ---- Aggregate RHYTHM LINE DURATIONS
         const lineRows = (lineDurRes.data ?? []) as LineDurRow[];
         type LineAcc = { attempts: number; successes: number; mu_w: number; mu_w_denom: number };
@@ -206,6 +221,7 @@ export default function StudentStats() {
           hit_pct: acc.attempts ? (100 * acc.successes) / acc.attempts : 0,
           mu_abs_ms: acc.mu_w_denom ? acc.mu_w / acc.mu_w_denom : null,
         })).sort((a, b) => b.attempts - a.attempts);
+
         // ---- Aggregate INTERVALS
         const icRows = (icRes.data ?? []) as IcRow[];
         type IcAcc = { attempts: number; correct: number };
@@ -221,12 +237,14 @@ export default function StudentStats() {
           attempts: acc.attempts,
           correct: acc.correct,
         })).sort((a, b) => a.semitones - b.semitones);
+
         // Push details
         if (cancel) return;
         setPitchNotes(pitchAgg);
         setMelodyDur(melodyAgg);
         setLineDur(lineAgg);
         setIntervals(intervalsAgg);
+
         // ---- Header summary from lesson_results + details
         const avg = (nums: Array<number | null>) => {
           const vals = nums.filter((v): v is number => v != null && Number.isFinite(v));
@@ -239,10 +257,12 @@ export default function StudentStats() {
         const attemptsTotal = intervalsAgg.reduce((a, r) => a + r.attempts, 0);
         const correctTotal = intervalsAgg.reduce((a, r) => a + r.correct, 0);
         const intervalsPctAgg = attemptsTotal ? Math.round((100 * correctTotal) / attemptsTotal) : null;
+
         setFinalPct(final);
         setMelodyPct(mel);
         setLinePct(line);
         setIntervalsPct(intervalsPctAgg);
+
         // Pitch headline from pitch notes aggregation (preferred)
         setTimeOnPitchPct(timeOnPct);
         setPitchMae(maeCents);
@@ -260,16 +280,25 @@ export default function StudentStats() {
     })();
     return () => { cancel = true; };
   }, [filtered]);
+
   const courseOptions = React.useMemo(
     () => COURSES.map(c => ({ slug: c.slug, title: c.title, lessons: c.lessons.map(l => ({ slug: l.slug, title: l.title })) })),
     []
   );
   const selectedCourse = courseOptions.find(c => c.slug === course) || null;
   const lessonOptions = selectedCourse?.lessons ?? [];
+
   // if course changes to 'all', ensure lesson resets to 'all'
   React.useEffect(() => {
     if (course === 'all') setLesson('all');
   }, [course]);
+
+  // Visibility flags mirror detail-card presence
+  const showPitch = pitchNotes.length > 0;
+  const showMelody = melodyDur.length > 0;
+  const showLine = lineDur.length > 0;
+  const showIntervals = intervals.length > 0;
+
   return (
     <section className="w-full h-full">
       {/* Minimal header row: JUST the 3 dropdowns on the left; no title, no counts, no outer card */}
@@ -285,6 +314,7 @@ export default function StudentStats() {
             <option key={opt.key} value={opt.key}>{opt.label}</option>
           ))}
         </select>
+
         {/* Course */}
         <select
           aria-label="Course"
@@ -297,6 +327,7 @@ export default function StudentStats() {
             <option key={c.slug} value={c.slug}>{c.title}</option>
           ))}
         </select>
+
         {/* Lesson */}
         <select
           aria-label="Lesson"
@@ -311,6 +342,7 @@ export default function StudentStats() {
           ))}
         </select>
       </div>
+
       {/* Summary row */}
       <div className="mt-3">
         <HeaderSummary
@@ -321,8 +353,13 @@ export default function StudentStats() {
           melodyPct={melodyPct}
           linePct={linePct}
           intervalsPct={intervalsPct}
+          showPitch={showPitch}
+          showMelody={showMelody}
+          showLine={showLine}
+          showIntervals={showIntervals}
         />
       </div>
+
       {/* Details grid */}
       <div className="mt-3">
         {loading ? (
@@ -352,6 +389,7 @@ export default function StudentStats() {
           />
         )}
       </div>
+
       {error ? <div className="mt-2 text-sm text-[#dc2626]">{error}</div> : null}
     </section>
   );

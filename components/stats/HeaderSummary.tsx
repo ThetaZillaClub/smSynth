@@ -1,6 +1,7 @@
 // components/stats/HeaderSummary.tsx
 'use client';
 import * as React from 'react';
+
 type StatCardProps = {
   title: string;
   main: string;
@@ -8,8 +9,10 @@ type StatCardProps = {
   valuePct: number;
   stripeBG: string; // shared page-wide gradient
 };
+
 /** Brand gradient colors (ROYGBIV variant). */
 const LOGO_COLORS = ['#ff3b3b', '#ff8c00', '#ffa500', '#22c55e', '#3b82f6', '#a855f7', '#6366f1'];
+
 function withAlpha(hex: string, alpha = 0.45) {
   const h = hex.replace('#', '');
   let r: number, g: number, b: number;
@@ -17,6 +20,7 @@ function withAlpha(hex: string, alpha = 0.45) {
   else { r = parseInt(h.slice(0, 2), 16); g = parseInt(h.slice(2, 4), 16); b = parseInt(h.slice(4, 6), 16); }
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
+
 /** Elongated & overlapping radial ribbons that read as a single stripe across the page. */
 function buildPageStripeBG(colors = LOGO_COLORS) {
   const n = colors.length - 1;
@@ -25,6 +29,7 @@ function buildPageStripeBG(colors = LOGO_COLORS) {
     return `radial-gradient(30% 140% at ${x}% 50%, ${withAlpha(c, 0.52)} 0%, ${withAlpha(c, 0.26)} 34%, transparent 66%)`;
   }).join(', ');
 }
+
 /** Measures element’s viewport-left so the gradient can align page-wide. */
 function useStripeOffset<T extends HTMLElement>() {
   const ref = React.useRef<T | null>(null);
@@ -56,6 +61,7 @@ function useStripeOffset<T extends HTMLElement>() {
   }, []);
   return { ref, left };
 }
+
 /** Segmented progress bar (27 thinner pills), each pill draws its own slice of the page stripe. */
 function SegmentedBar({
   pct,
@@ -66,6 +72,7 @@ function SegmentedBar({
   const total = 27; // ~33% more than 20; ~3.7% per pill
   const filled = Math.round((clamped / 100) * total);
   const gapPx = 2;
+
   // per-segment refs + measured viewport-left for correct gradient slice
   const segRefs = React.useRef<Array<HTMLDivElement | null>>([]);
   const setSegRef = React.useCallback((idx: number) => (el: HTMLDivElement | null): void => {
@@ -96,6 +103,7 @@ function SegmentedBar({
       window.removeEventListener('resize', onEvt);
     };
   }, [total]);
+
   return (
     <div
       className="relative mt-1.5"
@@ -136,6 +144,7 @@ function SegmentedBar({
     </div>
   );
 }
+
 function StatCard({ title, main, valuePct, stripeBG }: StatCardProps) {
   const { ref, left } = useStripeOffset<HTMLDivElement>();
   const cardStyle: React.CSSProperties & Record<'--stripe-offset', string> = {
@@ -171,6 +180,7 @@ function StatCard({ title, main, valuePct, stripeBG }: StatCardProps) {
     </div>
   );
 }
+
 export default function HeaderSummary({
   finalPct,
   pitchPct,
@@ -181,6 +191,11 @@ export default function HeaderSummary({
   melodyPct,
   linePct,
   intervalsPct,
+  /** NEW: control visibility to mirror detail-table presence */
+  showPitch = true,
+  showMelody = true,
+  showLine = true,
+  showIntervals = true,
 }: {
   finalPct: number | null;
   pitchPct: number | null;
@@ -189,6 +204,10 @@ export default function HeaderSummary({
   melodyPct: number | null;
   linePct: number | null;
   intervalsPct: number | null;
+  showPitch?: boolean;
+  showMelody?: boolean;
+  showLine?: boolean;
+  showIntervals?: boolean;
 }) {
   const stripeBG = React.useMemo(() => buildPageStripeBG(), []);
   return (
@@ -196,16 +215,16 @@ export default function HeaderSummary({
       {finalPct != null && (
         <StatCard title="Final" main={`${finalPct.toFixed(0)}%`} valuePct={finalPct} stripeBG={stripeBG} />
       )}
-      {pitchPct != null && (
+      {pitchPct != null && showPitch && (
         <StatCard title="Pitch" main={`${pitchPct.toFixed(0)}%`} valuePct={pitchPct} stripeBG={stripeBG} />
       )}
-      {melodyPct != null && (
+      {melodyPct != null && showMelody && (
         <StatCard title="Melody rhythm" main={`${melodyPct.toFixed(0)}%`} valuePct={melodyPct} stripeBG={stripeBG} />
       )}
-      {linePct != null && (
+      {linePct != null && showLine && (
         <StatCard title="Rhythm line" main={`${linePct.toFixed(0)}%`} valuePct={linePct} stripeBG={stripeBG} />
       )}
-      {intervalsPct != null && (
+      {intervalsPct != null && showIntervals && (
         <StatCard title="Intervals" main={`${intervalsPct.toFixed(0)}%`} valuePct={intervalsPct} stripeBG={stripeBG} />
       )}
     </div>

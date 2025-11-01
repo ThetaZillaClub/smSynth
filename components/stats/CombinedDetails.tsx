@@ -1,10 +1,12 @@
 // components/stats/CombinedDetails.tsx
 'use client';
 import * as React from 'react';
+
 type PitchNoteRow = { midi: number; n: number; ratio: number; cents_mae: number };
 type MelDurRow = { duration_label: string; attempts: number; hits: number | null; hit_pct: number | null; first_voice_mu_abs_ms: number | null };
 type LineDurRow = { duration_label: string; attempts: number; successes: number; hit_pct: number; mu_abs_ms: number | null };
 type IcRow = { semitones: number; attempts: number; correct: number };
+
 export interface CombinedDetailsProps {
   pitchNotes: PitchNoteRow[];
   melodyDur: MelDurRow[];
@@ -14,6 +16,7 @@ export interface CombinedDetailsProps {
   loading?: boolean;
   err?: string | null;
 }
+
 /** MIDI → note name (C octave, flats preferred). */
 function midiToNoteFlat(m: number): string {
   const pc = ((m % 12) + 12) % 12;
@@ -21,6 +24,7 @@ function midiToNoteFlat(m: number): string {
   const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'] as const;
   return `${names[pc]}${oct}`;
 }
+
 function intervalName(semi: number): string {
   const s = Math.abs(Math.round(semi));
   const map: Record<number, string> = {
@@ -34,6 +38,7 @@ function intervalName(semi: number): string {
   const octs = Math.floor(s / 12);
   return octs ? `${base} + ${octs} Octave${octs > 1 ? 's' : ''}` : base;
 }
+
 /** ---------- Generic sortable table with column highlight & fixed widths ---------- */
 type Col<Row> = {
   key: string;
@@ -44,6 +49,7 @@ type Col<Row> = {
 };
 type SortState = { key: string; dir: 'asc' | 'desc' };
 const HI_BG = 'rgba(132,179,246,0.25)';
+
 function SortableTable<Row extends object>({
   columns, rows, empty, defaultSort, colPercents = [40, 20, 20, 20],
 }: {
@@ -75,7 +81,9 @@ function SortableTable<Row extends object>({
     if (sort.dir === 'desc') arr.reverse();
     return arr;
   }, [rows, columns, activeIdx, sort.dir]);
+
   const shouldHighlight = sorted.length > 1;
+
   return (
     <div className="overflow-auto">
       <table className="w-full text-xs table-fixed">
@@ -139,6 +147,7 @@ function SortableTable<Row extends object>({
   );
 }
 /** ---------- /Sortable table ---------- */
+
 type PitchTableRow = {
   note: string;
   midi: number;
@@ -165,9 +174,55 @@ type RhythmTableRow = {
   hitPct: number;
   avgOffset: number | null;
 };
+
 export default function CombinedDetails({
   pitchNotes, melodyDur, lineDur, intervals, loading = false, err = null,
 }: CombinedDetailsProps) {
+
+  // ---- Prepare rows so we can conditionally hide empty cards
+  const pitchRows: PitchTableRow[] = React.useMemo(() => (
+    (pitchNotes ?? []).slice(0, 24).map((r: PitchNoteRow) => ({
+      note: midiToNoteFlat(r.midi),
+      midi: r.midi,
+      attempts: r.n,
+      ratioPct: Math.round(r.ratio * 100),
+      precision: Math.round(r.cents_mae),
+    }))
+  ), [pitchNotes]);
+
+  const intervalRows: IntervalTableRow[] = React.useMemo(() => (
+    (intervals ?? []).map((r: IcRow) => {
+      const pct = r.attempts ? Math.round((100 * r.correct) / r.attempts) : 0;
+      return {
+        interval: intervalName(r.semitones),
+        semitones: r.semitones,
+        attempts: r.attempts,
+        correct: r.correct,
+        pct,
+      };
+    })
+  ), [intervals]);
+
+  const melodyRows: MelodyTableRow[] = React.useMemo(() => (
+    (melodyDur ?? []).map((r: MelDurRow) => ({
+      dur: r.duration_label,
+      attempts: r.attempts,
+      hitPct:
+        r.hits != null && r.attempts ? Math.round((100 * Number(r.hits)) / Number(r.attempts)) :
+        r.hit_pct != null ? Math.round(Number(r.hit_pct)) : null,
+      avgOffset: r.first_voice_mu_abs_ms == null ? null : Math.round(Number(r.first_voice_mu_abs_ms)),
+    }))
+  ), [melodyDur]);
+
+  const rhythmRows: RhythmTableRow[] = React.useMemo(() => (
+    (lineDur ?? []).map((r: LineDurRow) => ({
+      dur: r.duration_label,
+      attempts: r.attempts,
+      hitPct: Math.round(Number(r.hit_pct)),
+      avgOffset: r.mu_abs_ms == null ? null : Math.round(Number(r.mu_abs_ms)),
+    }))
+  ), [lineDur]);
+
   return (
     <>
       {loading ? (
@@ -183,94 +238,79 @@ export default function CombinedDetails({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {/* Row 1, Col 1: Pitch */}
-          <Panel title="Pitch">
-            <SortableTable<PitchTableRow>
-              defaultSort={{ key: 'ratioPct', dir: 'desc' }} // On-pitch %
-              empty="No pitch notes."
-              columns={[
-                { key: 'note', label: 'Note', get: (r) => r.midi, render: (r) => r.note, align: 'left' },
-                { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
-                { key: 'ratioPct', label: 'On-pitch %', get: (r) => r.ratioPct, align: 'right' },
-                { key: 'precision', label: 'Precision ¢', get: (r) => r.precision, align: 'right' },
-              ]}
-              rows={(pitchNotes ?? []).slice(0, 24).map((r: PitchNoteRow) => ({
-                note: midiToNoteFlat(r.midi),
-                midi: r.midi,
-                attempts: r.n,
-                ratioPct: Math.round(r.ratio * 100),
-                precision: Math.round(r.cents_mae),
-              }))}
-            />
-          </Panel>
-          {/* Row 1, Col 2: Intervals (moved up) */}
-          <Panel title="Intervals">
-            <SortableTable<IntervalTableRow>
-              defaultSort={{ key: 'pct', dir: 'desc' }}
-              empty="No interval attempts."
-              columns={[
-                { key: 'interval', label: 'Interval', get: (r) => r.semitones, render: (r) => r.interval, align: 'left' },
-                { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
-                { key: 'correct', label: 'Correct', get: (r) => r.correct, align: 'right' },
-                { key: 'pct', label: '%', get: (r) => r.pct, align: 'right' },
-              ]}
-              rows={(intervals ?? []).map((r: IcRow) => {
-                const pct = r.attempts ? Math.round((100 * r.correct) / r.attempts) : 0;
-                return {
-                  interval: intervalName(r.semitones),
-                  semitones: r.semitones,
-                  attempts: r.attempts,
-                  correct: r.correct,
-                  pct,
-                };
-              })}
-            />
-          </Panel>
-          {/* Row 2, Col 1: Melody timing (Hit %) */}
-          <Panel title="Melody timing">
-            <SortableTable<MelodyTableRow>
-              defaultSort={{ key: 'hitPct', dir: 'desc' }}
-              empty="No melody rows."
-              columns={[
-                { key: 'dur', label: 'Note Value', get: (r) => r.dur, align: 'left' },
-                { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
-                { key: 'hitPct', label: 'Hit %', get: (r) => r.hitPct, align: 'right' },
-                { key: 'avgOffset', label: 'Average Offset', get: (r) => r.avgOffset, align: 'right' },
-              ]}
-              rows={(melodyDur ?? []).map((r: MelDurRow) => ({
-                dur: r.duration_label,
-                attempts: r.attempts,
-                hitPct:
-                  r.hits != null && r.attempts ? Math.round((100 * Number(r.hits)) / Number(r.attempts)) :
-                  r.hit_pct != null ? Math.round(Number(r.hit_pct)) : null,
-                avgOffset: r.first_voice_mu_abs_ms == null ? null : Math.round(Number(r.first_voice_mu_abs_ms)),
-              }))}
-            />
-          </Panel>
+          {pitchRows.length > 0 && (
+            <Panel title="Pitch">
+              <SortableTable<PitchTableRow>
+                defaultSort={{ key: 'ratioPct', dir: 'desc' }} // On-pitch %
+                empty="No pitch notes."
+                columns={[
+                  { key: 'note', label: 'Note', get: (r) => r.midi, render: (r) => r.note, align: 'left' },
+                  { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
+                  { key: 'ratioPct', label: 'On-pitch %', get: (r) => r.ratioPct, align: 'right' },
+                  { key: 'precision', label: 'Precision ¢', get: (r) => r.precision, align: 'right' },
+                ]}
+                rows={pitchRows}
+              />
+            </Panel>
+          )}
+
+          {/* Row 1, Col 2: Intervals */}
+          {intervalRows.length > 0 && (
+            <Panel title="Intervals">
+              <SortableTable<IntervalTableRow>
+                defaultSort={{ key: 'pct', dir: 'desc' }}
+                empty="No interval attempts."
+                columns={[
+                  { key: 'interval', label: 'Interval', get: (r) => r.semitones, render: (r) => r.interval, align: 'left' },
+                  { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
+                  { key: 'correct', label: 'Correct', get: (r) => r.correct, align: 'right' },
+                  { key: 'pct', label: '%', get: (r) => r.pct, align: 'right' },
+                ]}
+                rows={intervalRows}
+              />
+            </Panel>
+          )}
+
+          {/* Row 2, Col 1: Melody timing */}
+          {melodyRows.length > 0 && (
+            <Panel title="Melody timing">
+              <SortableTable<MelodyTableRow>
+                defaultSort={{ key: 'hitPct', dir: 'desc' }}
+                empty="No melody rows."
+                columns={[
+                  { key: 'dur', label: 'Note Value', get: (r) => r.dur, align: 'left' },
+                  { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
+                  { key: 'hitPct', label: 'Hit %', get: (r) => r.hitPct, align: 'right' },
+                  { key: 'avgOffset', label: 'Average Offset', get: (r) => r.avgOffset, align: 'right' },
+                ]}
+                rows={melodyRows}
+              />
+            </Panel>
+          )}
+
           {/* Row 2, Col 2: Rhythm line */}
-          <Panel title="Rhythm line">
-            <SortableTable<RhythmTableRow>
-              defaultSort={{ key: 'hitPct', dir: 'desc' }}
-              empty="No rhythm rows."
-              columns={[
-                { key: 'dur', label: 'Note Value', get: (r) => r.dur, align: 'left' },
-                { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
-                { key: 'hitPct', label: 'Hit %', get: (r) => r.hitPct, align: 'right' },
-                { key: 'avgOffset', label: 'Average Offset', get: (r) => r.avgOffset, align: 'right' },
-              ]}
-              rows={(lineDur ?? []).map((r: LineDurRow) => ({
-                dur: r.duration_label,
-                attempts: r.attempts,
-                hitPct: Math.round(Number(r.hit_pct)),
-                avgOffset: r.mu_abs_ms == null ? null : Math.round(Number(r.mu_abs_ms)),
-              }))}
-            />
-          </Panel>
+          {rhythmRows.length > 0 && (
+            <Panel title="Rhythm line">
+              <SortableTable<RhythmTableRow>
+                defaultSort={{ key: 'hitPct', dir: 'desc' }}
+                empty="No rhythm rows."
+                columns={[
+                  { key: 'dur', label: 'Note Value', get: (r) => r.dur, align: 'left' },
+                  { key: 'attempts', label: 'Attempts', get: (r) => r.attempts, align: 'right' },
+                  { key: 'hitPct', label: 'Hit %', get: (r) => r.hitPct, align: 'right' },
+                  { key: 'avgOffset', label: 'Average Offset', get: (r) => r.avgOffset, align: 'right' },
+                ]}
+                rows={rhythmRows}
+              />
+            </Panel>
+          )}
         </div>
       )}
       {err ? <div className="mt-2 text-sm text-[#dc2626]">{err}</div> : null}
     </>
   );
 }
+
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div

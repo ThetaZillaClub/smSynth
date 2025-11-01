@@ -6,6 +6,8 @@ import { COURSES } from '@/lib/courses/registry';
 import ResultDetails from './ResultDetails';
 import ResultsList, { type ResultRow } from './ResultsList';
 import HeaderSummary from './HeaderSummary';
+import HomeHeader from '@/components/home/HomeHeader';
+
 type DbRow = {
   id: string;
   created_at: string;
@@ -19,26 +21,33 @@ type DbRow = {
   rhythm_line_percent: string | number | null;
   intervals_correct_ratio: string | number | null;
 };
+
 const titleByLessonSlug: Record<string, string> = (() => {
   const m: Record<string, string> = {};
   for (const c of COURSES) for (const l of c.lessons) m[l.slug] = l.title;
   return m;
 })();
+
 // Pretty course titles by slug
 const courseTitleBySlug: Record<string, string> = (() => {
   const m: Record<string, string> = {};
   for (const c of COURSES) m[c.slug] = c.title;
   return m;
 })();
+
 function safeNum(x: unknown): number | null {
   if (x == null) return null;
   const n = typeof x === 'number' ? x : Number(x);
   return Number.isFinite(n) ? n : null;
 }
+
 export default function StudentHistory({
+  headerBootstrap,
   onHeaderMetaChange,
 }: {
-  /** Emits the selected lesson's Title + Course title + YYYY-MM-DD date for the top header's right 3-row slot. */
+  /** Injects user/name/avatar so the header can live inside the left bento column. */
+  headerBootstrap?: { displayName: string; avatarUrl: string | null; studentImagePath: string | null };
+  /** Back-compat: will still emit meta if provided, but no longer required now that header lives here. */
   onHeaderMetaChange?: (meta: { title: string; courseTitle: string; date: string } | null) => void;
 }) {
   const [rows, setRows] = React.useState<ResultRow[]>([]);
@@ -46,6 +55,12 @@ export default function StudentHistory({
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [courseFilter, setCourseFilter] = React.useState<string | 'all'>('all');
+
+  // visibility flags from ResultDetails (hide header cards if that table is empty)
+  const [sectionPresence, setSectionPresence] = React.useState<{
+    pitch: boolean; melody: boolean; line: boolean; intervals: boolean;
+  } | null>(null);
+
   React.useEffect(() => {
     let cancel = false;
     (async () => {
@@ -67,6 +82,7 @@ export default function StudentHistory({
           .order('created_at', { ascending: false })
           .limit(200);
         if (error) throw error;
+
         const mapped: ResultRow[] = (data as DbRow[]).map((r) => {
           const title = titleByLessonSlug[r.lesson_slug] ?? r.lesson_slug ?? 'Unknown Lesson';
           const final = safeNum(r.final_percent);
@@ -76,7 +92,7 @@ export default function StudentHistory({
           const intervalsRatio = safeNum(r.intervals_correct_ratio);
           const timeOn = safeNum(r.pitch_time_on_ratio);
           const mae = safeNum(r.pitch_cents_mae);
-        return {
+          return {
             id: r.id,
             when: new Date(r.created_at),
             course: r.course_slug,
@@ -105,18 +121,22 @@ export default function StudentHistory({
     })();
     return () => { cancel = true; };
   }, []);
+
   const filteredRows = React.useMemo(
     () => rows.filter(r => courseFilter === 'all' ? true : r.course === courseFilter),
     [rows, courseFilter]
   );
+
   React.useEffect(() => {
     if (!filteredRows.length) { setSelectedId(null); return; }
     if (!selectedId || !filteredRows.some(r => r.id === selectedId)) {
       setSelectedId(filteredRows[0].id);
     }
   }, [courseFilter, filteredRows, selectedId]);
+
   const selected = filteredRows.find(r => r.id === selectedId) ?? null;
-  // Emit title + course + date to the header (3-row block)
+
+  // Emit title + course + date upward if requested (back-compat)
   React.useEffect(() => {
     if (!onHeaderMetaChange) return;
     if (!selected) { onHeaderMetaChange(null); return; }
@@ -125,44 +145,52 @@ export default function StudentHistory({
     const date = selected.when.toISOString().slice(0, 10);
     onHeaderMetaChange({ title, courseTitle, date });
   }, [selected, onHeaderMetaChange]);
+
   const courseOptions = React.useMemo(
     () => COURSES.map(c => ({ slug: c.slug, title: c.title })),
     []
   );
+
+  // Reset presence flags when selection changes (avoid showing stale layout)
+  React.useEffect(() => {
+    setSectionPresence(null);
+  }, [selectedId]);
+
+  // When presence is unknown during a transition, hide dynamic cards to prevent layout flash
+  const showPitch = sectionPresence ? sectionPresence.pitch : false;
+  const showMelody = sectionPresence ? sectionPresence.melody : false;
+  const showLine = sectionPresence ? sectionPresence.line : false;
+  const showIntervals = sectionPresence ? sectionPresence.intervals : false;
+
+  // Lesson details in the header’s right slot (right-aligned by HomeHeader).
+  // Keep a simple px-3 *here* (not inside HomeHeader).
+  const rightRows = selected
+    ? {
+        top:    <div className="px-3 text-[13px] font-medium text-[#0f0f0f] leading-tight truncate">{selected.title}</div>,
+        middle: <div className="px-3 text-[12px] text-[#0f0f0f]/80 leading-tight truncate">{courseTitleBySlug[selected.course] ?? selected.course}</div>,
+        bottom: <div className="px-3 text-[11px] text-[#0f0f0f]/60 leading-tight tabular-nums">{selected.when.toISOString().slice(0, 10)}</div>,
+      }
+    : undefined;
+
   return (
     <section className="w-full h-full">
-      <div className="h-full grid grid-cols-1 md:grid-cols-8 gap-3 isolate pb-2">
-        {/* LEFT: Details (6/8) — header text moved to top header; keep metrics here */}
-        <div className="md:col-span-6 min-h-0">
-          {selected ? (
-            <div className="mt-0">
-              <HeaderSummary
-                finalPct={selected.final}
-                pitchPct={selected.pitch}
-                timeOnPitchPct={selected.pitchTimeOn ?? null}
-                pitchMae={selected.pitchMae ?? null}
-                melodyPct={selected.melody}
-                linePct={selected.line}
-                intervalsPct={selected.intervals}
-              />
-            </div>
-          ) : (
-            <div className="text-sm text-[#6b6b6b]">
-              Select a lesson from the right to see details.
-            </div>
-          )}
-          <div className="mt-3">
-            {selected ? (
-              <ResultDetails
-                resultId={selected.id}
-                pitchSummary={{ timeOnPct: selected.pitchTimeOn ?? null, maeCents: selected.pitchMae ?? null }}
-              />
-            ) : null}
-            {error ? <div className="mt-2 text-sm text-[#dc2626]">{error}</div> : null}
-          </div>
+      {/* Two rows: [header][content] on md+. ResultsList spans both rows to reach top. */}
+      <div className="h-full grid grid-cols-1 md:grid-cols-8 md:grid-rows-[auto_minmax(0,1fr)] gap-3 isolate pb-2">
+        {/* ROW 1, LEFT: Header (no card) */}
+        <div className="md:col-span-6">
+          {headerBootstrap ? (
+            <HomeHeader
+              displayName={headerBootstrap.displayName}
+              avatarUrl={headerBootstrap.avatarUrl}
+              studentImagePath={headerBootstrap.studentImagePath}
+              headlineMode="name"
+              rightRows={rightRows}
+            />
+          ) : null}
         </div>
-        {/* RIGHT: Recent Results (2/8) — table is its own card inside ResultsList */}
-        <div className="md:col-span-2 min-h-0">
+
+        {/* ROWS 1–2, RIGHT: Recent Results — spans both rows so it reaches the very top */}
+        <div className="md:col-span-2 md:row-span-2 min-h-0">
           {loading ? (
             <div
               className="rounded-2xl border border-[#d2d2d2] bg-[#eaeaea] p-6 shadow-sm space-y-2 h-full"
@@ -183,6 +211,42 @@ export default function StudentHistory({
               courseOptions={courseOptions}
             />
           )}
+        </div>
+
+        {/* ROW 2, LEFT: Summary + Details */}
+        <div className="md:col-span-6 min-h-0">
+          {selected ? (
+            <div className="mt-0">
+              <HeaderSummary
+                key={selected.id}
+                finalPct={selected.final}
+                pitchPct={selected.pitch}
+                timeOnPitchPct={selected.pitchTimeOn ?? null}
+                pitchMae={selected.pitchMae ?? null}
+                melodyPct={selected.melody}
+                linePct={selected.line}
+                intervalsPct={selected.intervals}
+                showPitch={showPitch}
+                showMelody={showMelody}
+                showLine={showLine}
+                showIntervals={showIntervals}
+              />
+            </div>
+          ) : (
+            <div className="text-sm text-[#6b6b6b]">
+              Select a lesson from the right to see details.
+            </div>
+          )}
+          <div className="mt-3">
+            {selected ? (
+              <ResultDetails
+                resultId={selected.id}
+                pitchSummary={{ timeOnPct: selected.pitchTimeOn ?? null, maeCents: selected.pitchMae ?? null }}
+                onSectionPresenceChange={(p) => setSectionPresence(p)}
+              />
+            ) : null}
+            {error ? <div className="mt-2 text-sm text-[#dc2626]">{error}</div> : null}
+          </div>
         </div>
       </div>
     </section>
