@@ -156,7 +156,7 @@ export default function SessionAnalytics({
                 "pitch-acc": "On-pitch% per note",
                 "pitch-prec": "MAE (¢) per note",
                 melody: "Hit % by duration (per take)",
-                line: "Average credit by beat duration",
+                line: "Average credit by rhythm value",
                 intervals: "Class accuracy per take",
               }[view]}</div>
             </div>
@@ -199,6 +199,7 @@ export default function SessionAnalytics({
               {view === "line" && visibility.showRhythmLine && anyLine && (
                 <RhythmLineChart
                   scores={sScores}
+                  snapshots={sSnaps.map((s) => ({ rhythm: s.rhythm }))}
                   bpm={bpm}
                   den={den}
                   introEpoch={introEpoch}

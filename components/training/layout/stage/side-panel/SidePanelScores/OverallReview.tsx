@@ -140,6 +140,26 @@ function labelsFromRhythmFabric(
   return durations.map((sec) => secondsToNoteName(sec, bpm, den));
 }
 
+/** ─────────── Rhythm-fabric helpers for labeling blue-line events ─────────── */
+function noteValueToUiName(v: unknown): string {
+  if (typeof v !== "string" || !v) return "—";
+  const s = v.replace(/-/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Map take event index → UI label from rhythm fabric (by counting note events). */
+function makeIndexToLabel(rhythm: RhythmEvent[] | null | undefined): (idx: number) => string {
+  const labels: string[] = [];
+  if (Array.isArray(rhythm)) {
+    for (const ev of rhythm) {
+      if ((ev as any)?.type === "note") {
+        labels.push(noteValueToUiName((ev as any)?.value));
+      }
+    }
+  }
+  return (idx: number) => (idx >= 0 && idx < labels.length ? labels[idx]! : "—");
+}
+
 export default function OverallReview({
   scores,
   snapshots = [],
@@ -202,24 +222,26 @@ export default function OverallReview({
     scores.reduce((a, s) => a + s.rhythm.melodyMeanAbsMs, 0) / n
   );
 
-  const lineSamples = scores.filter((s) => s.rhythm.lineEvaluated);
-  const haveLine = lineSamples.length > 0;
-  const lineN = lineSamples.length || 1;
-  const linePct = haveLine
-    ? Math.round(
-        (lineSamples.reduce((a, s) => a + s.rhythm.linePercent, 0) / lineN) * 10
-      ) / 10
-    : 0;
-  const lineHit = haveLine
-    ? Math.round(
-        (lineSamples.reduce((a, s) => a + s.rhythm.lineHitRate, 0) / lineN) * 100
-      )
-    : 0;
-  const lineMeanAbs = haveLine
-    ? Math.round(
-        lineSamples.reduce((a, s) => a + s.rhythm.lineMeanAbsMs, 0) / lineN
-      )
-    : 0;
+  // Event-level aggregation across all takes with line data
+  const { haveLine, linePct, lineHit, lineMeanAbs } = React.useMemo(() => {
+    const events = scores.flatMap((s) =>
+      s.rhythm.lineEvaluated ? (s.rhythm.linePerEvent ?? []) : []
+    );
+    const n = events.length;
+    if (!n) return { haveLine: false, linePct: 0, lineHit: 0, lineMeanAbs: 0 };
+
+    const creditSum = events.reduce((a, e) => a + Math.max(0, e.credit ?? 0), 0);
+    const hitCount  = events.reduce((a, e) => a + (e.hit ? 1 : 0), 0);
+    const absErrs   = events
+      .map((e) => (Number.isFinite(e.errMs) ? Math.abs(e.errMs as number) : null))
+      .filter((v): v is number => v != null);
+
+    const pct      = Math.round(((creditSum / n) * 100) * 10) / 10; // 1 decimal
+    const hitPct   = Math.round((hitCount / n) * 100);
+    const meanAbs  = absErrs.length ? Math.round(absErrs.reduce((a,b)=>a+b,0) / absErrs.length) : 0;
+
+    return { haveLine: true, linePct: pct, lineHit: hitPct, lineMeanAbs: meanAbs };
+  }, [scores]);
 
   const intervalsPct =
     Math.round(
@@ -387,49 +409,47 @@ export default function OverallReview({
       .sort((a, b) => a.order - b.order);
   }, [scores, snapshots, bpm, den]);
 
-  // Beat-only aggregation for rhythm line (unchanged)
+  // Fabric-aware aggregation for rhythm line (now matches take view labeling)
   const aggLineRows = React.useMemo(() => {
     type Acc = { label: string; order: number; n: number; meanHit: number; meanAbsErr: number };
     const m = new Map<string, Acc>();
     let orderCounter = 0;
-
-    const beatSec = 60 / Math.max(1, bpm);
-    const labelName = den === 4 ? "Quarter" : "Beat";
-    const labelFor = (sec: number) => {
-      if (!Number.isFinite(sec) || sec <= 0) return undefined;
-      const ratio = sec / beatSec;
-      return Math.abs(ratio - 1) <= 0.25 ? labelName : undefined; // ±25%
-    };
 
     for (let i = 0; i < scores.length; i++) {
       const s = scores[i]!;
       if (!s.rhythm.lineEvaluated) continue;
 
       const rows = s.rhythm.linePerEvent ?? [];
-      for (let j = 0; j < rows.length - 1; j++) {
-        const a = rows[j]!;
-        const b = rows[j + 1]!;
-        const durSec = Math.max(0, (b.expSec ?? 0) - (a.expSec ?? 0));
-        const label = labelFor(durSec);
-        if (!label) continue;
+      const snap = snapshots?.[i];
+      const labelByIdx = makeIndexToLabel(snap?.rhythm);
+
+      for (let j = 0; j < rows.length; j++) {
+        const ev = rows[j]!;
+        // Prefer fabric label; fall back to duration→name if fabric missing
+        let label = labelByIdx(ev.idx);
+        if (label === "—") {
+          const next = rows[j + 1];
+          const durSec = next ? Math.max(0, (next.expSec ?? 0) - (ev.expSec ?? 0)) : NaN;
+          label = Number.isFinite(durSec) && durSec > 0 ? secondsToNoteName(durSec, bpm, den) : "All";
+        }
 
         if (!m.has(label))
           m.set(label, { label, order: orderCounter++, n: 0, meanHit: 0, meanAbsErr: 0 });
         const g = m.get(label)!;
         g.n += 1;
 
-        const hit = (a.credit ?? 0) > 0 ? 1 : 0;
+        const hit = ev.hit ? 1 : 0;
         g.meanHit += (hit - g.meanHit) / g.n;
 
-        if (Number.isFinite(a.errMs)) {
-          const abs = Math.abs(a.errMs!);
+        if (Number.isFinite(ev.errMs)) {
+          const abs = Math.abs(ev.errMs!);
           g.meanAbsErr += (abs - g.meanAbsErr) / g.n;
         }
       }
     }
 
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
-  }, [scores, bpm, den]);
+  }, [scores, snapshots, bpm, den]);
 
   React.useEffect(() => {
     if (view === "melody" && !visibility.showMelodyRhythm) setView("summary");
@@ -752,9 +772,7 @@ function ClickableRow({
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">
         {label}
       </div>
-      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">
-        {value}
-      </div>
+      <div className="text-sm md:text-base text-[#0f0f0f] font-semibold">{value}</div>
       {detail ? <div className="text-xs text-[#373737] mt-0.5">{detail}</div> : null}
     </button>
   );

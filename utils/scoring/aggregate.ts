@@ -69,6 +69,8 @@ export function aggregateForSubmission(
   const melodyAbsErrs: number[] = [];
   const lineHits: number[] = [];
   const lineAbsErrs: number[] = [];
+  let lineEventCount = 0;
+  let lineCreditSum = 0;
   let anyLine = false;
 
   // New totals for aggregated hit-rate
@@ -89,6 +91,8 @@ export function aggregateForSubmission(
         if (hit) lineSuccessesTotal += 1;
         lineHits.push(hit ? 1 : 0);
         if (Number.isFinite(e.errMs)) lineAbsErrs.push(Math.abs(e.errMs!));
+        lineEventCount += 1;
+        lineCreditSum  += Math.max(0, e.credit ?? 0);        
       });
     }
   }
@@ -97,11 +101,14 @@ export function aggregateForSubmission(
     melodyAttemptsTotal ? clamp01(melodyHitsTotal / melodyAttemptsTotal) : clamp01(melPct / 100);
   const melodyMeanAbsMs = melodyAbsErrs.length ? Math.round(mean(melodyAbsErrs)) : 0;
 
-  const avgLinePctRaw   = mean(scores.filter(s => s.rhythm.lineEvaluated).map(s => s.rhythm.linePercent));
-  const showLine        = visibility?.showRhythmLine !== false;
-  const linePercent     = showLine && anyLine ? r2(avgLinePctRaw || 0) : 0;
+  const showLine     = visibility?.showRhythmLine !== false;
+  const linePercent  =
+    showLine && anyLine
+      ? r2(lineEventCount ? (lineCreditSum / lineEventCount) * 100 : 0)
+      : 0;
 
-  const lineHitRate     = lineHits.length ? clamp01(mean(lineHits)) : clamp01((avgLinePctRaw || 0) / 100);
+  const lineHitRate     = lineAttemptsTotal ? clamp01(lineSuccessesTotal / lineAttemptsTotal)
+                                            : clamp01(lineHits.length ? mean(lineHits) : 0);
   const lineMeanAbsMs   = lineAbsErrs.length ? Math.round(mean(lineAbsErrs)) : 0;
 
   // ---- NEW: roll up rows for DB child tables (labels supplied by caller) ----
