@@ -4,6 +4,7 @@ import React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
 import type { Phrase } from "@/utils/stage";
 import type { SolfegeScaleName } from "@/utils/lyrics/solfege";
+import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import { finalizeVisible } from "@/utils/scoring/final/finalize";
 // ⬇️ Point explicitly at the barrel file inside the folder
 import {
@@ -26,6 +27,9 @@ export default function TakeReview({
   den,
   tonicPc = 0,
   scaleName = "major",
+  /** Provide the real rhythm fabrics when available so reviews can label from fabric (no guessing) */
+  lineRhythm = null,
+  melodyRhythm = null,
   /** NEW: analytics visibility gating */
   visibility = {
     showPitch: true,
@@ -46,6 +50,9 @@ export default function TakeReview({
   den: number;
   tonicPc?: number;
   scaleName?: SolfegeScaleName;
+  /** Rhythm fabrics (optional but preferred) */
+  lineRhythm?: RhythmEvent[] | null;
+  melodyRhythm?: RhythmEvent[] | null;
   /** NEW: analytics visibility gating */
   visibility?: {
     showPitch: boolean;
@@ -151,7 +158,7 @@ export default function TakeReview({
             <ClickableStatTile
               label="Melody rhythm"
               value={`${melodyRhythmPct.toFixed(1)}%`}
-              detail="Open hit-rate by note value"
+              detail="Open per-note timing"
               onClick={() => setView("melody")}
             />
           )}
@@ -179,10 +186,21 @@ export default function TakeReview({
         <PitchReview score={score!} phrase={phrase ?? null} tonicPc={tonicPc} scaleName={scaleName} />
       ) : view === "melody" ? (
         visibility.showMelodyRhythm ? (
-          <MelodyRhythmReview score={score!} phrase={phrase ?? null} bpm={bpm} den={den} />
+          <MelodyRhythmReview
+            score={score!}
+            phrase={phrase ?? null}
+            bpm={bpm}
+            den={den}
+            melodyRhythm={melodyRhythm}
+          />
         ) : null
       ) : view === "line" ? (
-        visibility.showRhythmLine ? <RhythmLineReview score={score!} /> : null
+        visibility.showRhythmLine ? (
+          <RhythmLineReview
+            score={score!}
+            lineRhythm={lineRhythm}
+          />
+        ) : null
       ) : view === "intervals" ? (
         visibility.showIntervals ? <IntervalReview score={score!} /> : null
       ) : null}
@@ -259,7 +277,7 @@ function IconPlayRhythm(props: React.SVGProps<SVGSVGElement>) { /* ... */ return
         c63.5,0,115.1,51.6,115.1,115.1v160.8h36.6V238.1C407.7,154.5,339.6,86.4,256,86.4z" /><path fill="currentColor" d="M41.9,336.3c0,31.1,22.7,56.9,52.4,61.8V274.4c-13.2,2.2-25,8.5-34,17.5C48.9,303.3,41.9,318.9,41.9,336.3z" /><path fill="currentColor" d="M451.7,291.9c-9.1-9-20.9-15.4-34.1-17.5v123.7c29.7-4.9,52.4-30.7,52.4-61.8
         C470.1,318.9,463.1,303.3,451.7,291.9z" /><path fill="currentColor" d="M256.9,247.9c-49.1,0-88.8,39.8-88.8,88.8c0,49.1,39.8,88.8,88.8,88.8s88.8-39.8,88.8-88.8
         C345.7,287.7,306,247.9,256.9,247.9z M326.4,357.8c-1,1-2.3,1.5-3.5,1.5s-2.6-0.5-3.5-1.5l-31.5-31.5l-27.4,27.4c-2,2-5.1,2-7.1,0
-        L226,326.3l-31.5,31.5c-2,2-5.1,2-7.1,0c-2-2-2-5.1,0-7.1l35-35c2-2,5.1-2,7.1,0l27.4,27.4l27.4-27.4c2-2,5.1-2,7.1,0l35,35
+        L226,326.3l-31.5,31.5c-2,2-5.1,2-7.1,0c-2-2-2-5.1,0-7.1l35-35c2-2,5.1-2,7.1,0l35,35
         C328.3,352.7,328.3,355.8,326.4,357.8z" /></svg>
 ); }
 function IconPlayBoth(props: React.SVGProps<SVGSVGElement>) { /* ... */ return (

@@ -220,6 +220,9 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
         den={den}
         tonicPc={tonicPc}
         scaleName={scaleName as SolfegeScaleName}
+        /** ✨ Pass real fabrics so reviews can label correctly */
+        lineRhythm={selectedSnap?.rhythm ?? null}
+        melodyRhythm={selectedSnap?.melodyRhythm ?? null}
         visibility={visibility}    // ← NEW
       />
     );
@@ -227,4 +230,13 @@ export default function TrainingSidePanel(props: TrainingSidePanelProps) {
 
   // Fallback (out of range index or no phrase)
   return <SidePanelScores scores={scores} onOpen={setOpenIndex} />;
+
+  function handleRepeat() {
+    onStop();
+    // no-op placeholder kept for parity with GameLayout's CourseNavGate usage
+  }
+
+  function onToggleExercise() {
+    // no-op placeholder kept for parity with GameLayout usage
+  }
 }

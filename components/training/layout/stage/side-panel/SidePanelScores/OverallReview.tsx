@@ -11,7 +11,12 @@ import { midiLabelForKey } from "@/utils/pitch/enharmonics";
 import { pcToSolfege, type SolfegeScaleName } from "@/utils/lyrics/solfege";
 import { finalizeVisible } from "@/utils/scoring/final/finalize";
 
-type TakeSnap = { phrase: Phrase; rhythm: RhythmEvent[] | null };
+type TakeSnap = {
+  phrase: Phrase;
+  rhythm: RhythmEvent[] | null;
+  /** Prefer using the melody-specific rhythm fabric when present */
+  melodyRhythm?: RhythmEvent[] | null;
+};
 
 type View = "summary" | "pitch" | "melody" | "line" | "intervals";
 
@@ -66,6 +71,74 @@ function getPerNoteMelody(s: TakeScore): PerNoteMelodyRow[] {
   return isPerNoteMelodyRowArray(maybe) ? maybe : [];
 }
 /** ───────────────────────────────────────────────────────────────── */
+
+/**
+ * Best-effort extraction of absolute expected time from a RhythmEvent.
+ * We try common field names to stay resilient.
+ */
+function readEventTimeSec(ev: unknown): number | null {
+  if (!ev || typeof ev !== "object") return null;
+  const o = ev as Record<string, unknown>;
+  const cands = ["expSec", "tSec", "timeSec", "sec", "t"];
+  for (const k of cands) {
+    const v = o[k];
+    if (typeof v === "number" && isFinite(v)) return v;
+  }
+  return null;
+}
+
+/**
+ * Best-effort extraction of duration (sec) from a RhythmEvent, if provided directly.
+ */
+function readEventDurSec(ev: unknown): number | null {
+  if (!ev || typeof ev !== "object") return null;
+  const o = ev as Record<string, unknown>;
+  const cands = ["durSec", "durationSec", "dur"];
+  for (const k of cands) {
+    const v = o[k];
+    if (typeof v === "number" && isFinite(v) && v > 0) return v;
+  }
+  return null;
+}
+
+/**
+ * Build duration *labels* from the rhythm fabric for a single take, using either:
+ *  - per-event durSec when present; or
+ *  - consecutive deltas between expected times (expSec/tSec/…).
+ * Returns an array of UI-ready note names ("Quarter", "Dotted eighth", …), aligned to onsets.
+ */
+function labelsFromRhythmFabric(
+  rhythm: RhythmEvent[] | null | undefined,
+  bpm: number,
+  den: number
+): string[] {
+  if (!Array.isArray(rhythm) || rhythm.length === 0) return [];
+
+  // Try direct per-event durations first (all events must have valid durSec)
+  const direct = rhythm
+    .map(readEventDurSec)
+    .filter((x) => x == null || (typeof x === "number" && x > 0));
+
+  let durations: number[] = [];
+  if (direct.length === rhythm.length) {
+    durations = direct as number[];
+  } else {
+    // Fallback: compute deltas from absolute expected times
+    const times = rhythm.map(readEventTimeSec);
+    const valid = times.every((t) => typeof t === "number");
+    if (!valid) return [];
+    durations = times
+      .map((t, i) => {
+        const a = t as number;
+        const b = (i + 1 < times.length ? (times[i + 1] as number) : NaN);
+        const d = b - a;
+        return Number.isFinite(d) && d > 0 ? d : NaN;
+      })
+      .filter((d) => Number.isFinite(d)) as number[];
+  }
+
+  return durations.map((sec) => secondsToNoteName(sec, bpm, den));
+}
 
 export default function OverallReview({
   scores,
@@ -213,18 +286,26 @@ export default function OverallReview({
     return Array.from(m.values()).sort((a, b) => a.order - b.order);
   }, [scores, snapshots, tonicPc, scaleName]);
 
-  // NEW: Melody timing aggregated using melodyByDuration (with legacy fallback)
+  /**
+   * NEW: Melody timing aggregated using RHYTHM FABRIC when available.
+   * Order of precedence per take:
+   *   1) Use scoring-provided melodyByDuration (authoritative).
+   *   2) Else, if a melody rhythm fabric is available in snapshots, use its per-event durations
+   *      to label buckets and marry them to perNoteMelody rows by index.
+   *   3) Else, fallback to legacy "seconds to label" from phrase note durations.
+   */
   const aggMelodyRows = React.useMemo(() => {
     type Acc = {
       attempts: number;
       hitsApprox: number;
-      muSum: number; muDen: number;
+      muSum: number;
+      muDen: number;
       order: number;
     };
     const m = new Map<string, Acc>();
     let ord = 0;
 
-    // Preferred path: use per-take aggregated rows
+    // 1) Preferred: take-level aggregates from scoring
     let usedByDuration = false;
     for (const s of scores) {
       const byDur = getMelodyByDuration(s);
@@ -232,43 +313,66 @@ export default function OverallReview({
       usedByDuration = true;
       for (const r of byDur) {
         const label = String(r.durationLabel ?? "All");
-        const attempts =
-          Math.max(0, typeof r.attempts === "number" ? r.attempts : 0);
+        const attempts = Math.max(0, Number(r.attempts ?? 0));
         const hits =
-          typeof r.hits === "number"
-            ? Math.max(0, r.hits)
+          r.hits != null
+            ? Math.max(0, Number(r.hits))
             : attempts *
-              (Math.max(0, typeof r.hitPct === "number" ? r.hitPct : 0) / 100);
+              (Math.max(0, Number(r.hitPct ?? 0)) / 100);
 
-        if (!m.has(label)) m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
+        if (!m.has(label))
+          m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
         const g = m.get(label)!;
         g.attempts += attempts;
         g.hitsApprox += hits;
-        if (typeof r.firstVoiceMuAbsMs === "number" && Number.isFinite(r.firstVoiceMuAbsMs)) {
+        if (typeof r.firstVoiceMuAbsMs === "number" && isFinite(r.firstVoiceMuAbsMs)) {
           g.muSum += Math.abs(r.firstVoiceMuAbsMs) * attempts;
           g.muDen += attempts;
         }
       }
     }
+    if (usedByDuration) {
+      return Array.from(m.entries())
+        .map(([label, g]) => ({
+          label,
+          order: g.order,
+          hitPct: g.attempts ? Math.round((100 * g.hitsApprox) / g.attempts) : 0,
+          muAbsMs: g.muDen ? Math.round(g.muSum / g.muDen) : 0,
+        }))
+        .sort((a, b) => a.order - b.order);
+    }
 
-    if (!usedByDuration) {
-      // Fallback: legacy per-note coverage grouped by duration
-      for (let i = 0; i < scores.length; i++) {
-        const s = scores[i]!;
-        const per = getPerNoteMelody(s);
-        const notes = snapshots[i]?.phrase?.notes ?? [];
-        for (let j = 0; j < notes.length; j++) {
-          const r = per?.[j];
-          if (!r || typeof r.coverage !== "number") continue;
-          const label = secondsToNoteName(notes[j]!.durSec, bpm, den);
-          if (!m.has(label)) m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
-          const g = m.get(label)!;
-          g.attempts += 1;
-          g.hitsApprox += Math.max(0, Math.min(1, r.coverage)); // treat coverage as hit-probability proxy
-          if (typeof r.onsetErrMs === "number" && Number.isFinite(r.onsetErrMs)) {
-            g.muSum += Math.abs(r.onsetErrMs);
-            g.muDen += 1;
-          }
+    // 2) Rhythm fabric-aware fallback (per-note rows married to melodyRhythm labels)
+    for (let i = 0; i < scores.length; i++) {
+      const s = scores[i]!;
+      const per = getPerNoteMelody(s);
+      const snap = snapshots[i];
+      const notes = snap?.phrase?.notes ?? [];
+
+      // Prefer melodyRhythm; fall back to generic rhythm fabric if needed.
+      const fabricLabels = labelsFromRhythmFabric(
+        (snap?.melodyRhythm ?? snap?.rhythm) as RhythmEvent[] | null | undefined,
+        bpm,
+        den
+      );
+
+      for (let j = 0; j < notes.length; j++) {
+        const r = per?.[j];
+        if (!r || typeof r.coverage !== "number") continue;
+
+        const label =
+          (fabricLabels[j] as string | undefined) ??
+          secondsToNoteName(notes[j]!.durSec, bpm, den);
+
+        if (!m.has(label))
+          m.set(label, { attempts: 0, hitsApprox: 0, muSum: 0, muDen: 0, order: ord++ });
+        const g = m.get(label)!;
+
+        g.attempts += 1;
+        g.hitsApprox += Math.max(0, Math.min(1, r.coverage));
+        if (typeof r.onsetErrMs === "number" && isFinite(r.onsetErrMs)) {
+          g.muSum += Math.abs(r.onsetErrMs);
+          g.muDen += 1;
         }
       }
     }
@@ -283,7 +387,7 @@ export default function OverallReview({
       .sort((a, b) => a.order - b.order);
   }, [scores, snapshots, bpm, den]);
 
-  // NEW: Beat-only aggregation for rhythm line (unchanged)
+  // Beat-only aggregation for rhythm line (unchanged)
   const aggLineRows = React.useMemo(() => {
     type Acc = { label: string; order: number; n: number; meanHit: number; meanAbsErr: number };
     const m = new Map<string, Acc>();
@@ -670,7 +774,7 @@ function SubHeader({
       className={[
         "w-full text-left rounded-xl bg-[#f2f2f2] border border-[#dcdcdc]",
         "p-3 hover:shadow-md shadow-sm active:scale-[0.99] transition",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0f0f0f]",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f0f0f]",
       ].join(" ")}
     >
       <div className="text-[11px] uppercase tracking-wide text-[#6b6b6b]">

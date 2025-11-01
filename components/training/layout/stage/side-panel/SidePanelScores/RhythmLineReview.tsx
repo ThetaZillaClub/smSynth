@@ -2,8 +2,34 @@
 "use client";
 import * as React from "react";
 import type { TakeScore } from "@/utils/scoring/score";
+import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 
-export default function RhythmLineReview({ score }: { score: TakeScore }) {
+function noteValueToUiName(v: unknown): string {
+  if (typeof v !== "string" || !v) return "—";
+  const s = v.replace(/-/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Map take event index → UI label from rhythm fabric (by counting note events). */
+function makeIndexToLabel(rhythm: RhythmEvent[] | null | undefined): (idx: number) => string {
+  const labels: string[] = [];
+  if (Array.isArray(rhythm)) {
+    for (const ev of rhythm) {
+      if ((ev as any)?.type === "note") {
+        labels.push(noteValueToUiName((ev as any)?.value));
+      }
+    }
+  }
+  return (idx: number) => (idx >= 0 && idx < labels.length ? labels[idx]! : "—");
+}
+
+export default function RhythmLineReview({
+  score,
+  lineRhythm = null, // ← pass the actual “blue line” rhythm fabric when available
+}: {
+  score: TakeScore;
+  lineRhythm?: RhythmEvent[] | null;
+}) {
   if (!score.rhythm.lineEvaluated) {
     return (
       <div
@@ -19,6 +45,7 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
   }
 
   const rows = score.rhythm.linePerEvent ?? [];
+  const labelFor = React.useMemo(() => makeIndexToLabel(lineRhythm), [lineRhythm]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -41,8 +68,7 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-[#6b6b6b]">
               <th className="px-2 py-2">#</th>
-              <th className="px-2 py-2">Expected</th>
-              <th className="px-2 py-2">Tap</th>
+              <th className="px-2 py-2">Value</th>
               <th className="px-2 py-2">Δt (ms)</th>
               <th className="px-2 py-2">Credit</th>
             </tr>
@@ -50,21 +76,18 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
           <tbody>
             {rows.length === 0 ? (
               <tr className="border-t border-[#eee]">
-                <td className="px-2 py-1.5" colSpan={5}>
+                <td className="px-2 py-1.5" colSpan={4}>
                   No onsets to evaluate.
                 </td>
               </tr>
             ) : (
               rows.map((r, i) => {
                 const dt = r.errMs == null ? "—" : Math.round(r.errMs).toString();
-                const creditPct = `${Math.round(r.credit * 100)}%`;
+                const creditPct = `${Math.round((r.credit ?? 0) * 100)}%`;
                 return (
                   <tr key={i} className="border-t border-[#eee]">
                     <td className="px-2 py-1.5 text-[#555]">{r.idx + 1}</td>
-                    <td className="px-2 py-1.5">{r.expSec.toFixed(3)}s</td>
-                    <td className="px-2 py-1.5">
-                      {r.tapSec == null ? "—" : `${r.tapSec.toFixed(3)}s`}
-                    </td>
+                    <td className="px-2 py-1.5">{labelFor(r.idx)}</td>
                     <td className="px-2 py-1.5">{dt}</td>
                     <td className="px-2 py-1.5">{creditPct}</td>
                   </tr>
@@ -76,7 +99,7 @@ export default function RhythmLineReview({ score }: { score: TakeScore }) {
       </div>
 
       <div className="text-xs text-[#444]">
-        Tip: Hit rate counts expected beats that have a sufficiently close tap. Mean absolute error
+        Tip: Hit rate counts expected notes that have a sufficiently close tap. Mean absolute error
         summarizes timing deviation for those hits.
       </div>
     </div>
