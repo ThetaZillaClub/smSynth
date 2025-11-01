@@ -120,10 +120,11 @@ export function aggregateForSubmission(
   scores.forEach((s, takeIdx) => {
     (s.rhythm.perNoteMelody ?? []).forEach((r, noteIdx) => {
       const durSecForLabel = (r.dur ?? 0) + onsetGraceSec; // reverse the ignored head for labeling, if desired
-      const label =
-        opts?.melodyLabelFromSeconds?.(durSecForLabel, noteIdx, takeIdx) ??
-        (opts?.melodyLabelFromSeconds ? "Other" : "All");
+      const label = opts?.melodyLabelFromSeconds
+        ? (opts.melodyLabelFromSeconds(durSecForLabel, noteIdx, takeIdx) ?? "All")
+        : "All";
       const g = melMap.get(label) ?? { n: 0, hits: 0, absSum: 0 };
+
       g.n += 1;
       if ((r.coverage ?? 0) > 0) g.hits += 1;
       if (Number.isFinite(r.onsetErrMs)) g.absSum += Math.abs(r.onsetErrMs!);

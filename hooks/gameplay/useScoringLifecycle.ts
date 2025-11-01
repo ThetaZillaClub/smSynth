@@ -53,41 +53,21 @@ export type TakeSnapshot = {
 
 type HandLike = { snapshotEvents: () => number[] };
 
-// Simple local labeler: map seconds → nearest standard note value at current bpm/den.
-function makeSecondsToNoteLabel(bpm: number, den: number) {
-  const beatSec = 60 / Math.max(1, bpm);
-  const quarterSec = beatSec * (4 / Math.max(1, den));
-  const candidates: Array<{ sec: number; name: string }> = [
-    { sec: quarterSec * 4, name: "Whole" },
-    { sec: quarterSec * 2, name: "Half" },
-    { sec: quarterSec * 1, name: "Quarter" },
-    { sec: quarterSec * 0.5, name: "Eighth" },
-    { sec: quarterSec * 0.25, name: "Sixteenth" },
-    { sec: quarterSec * 0.125, name: "Thirty-second" },
-  ];
-  return (sec: number) => {
-    if (!Number.isFinite(sec) || sec <= 0) return undefined;
-    let best = candidates[0];
-    let bestErr = Math.abs(sec - best.sec) / best.sec;
-    for (let i = 1; i < candidates.length; i++) {
-      const c = candidates[i];
-      const rel = Math.abs(sec - c.sec) / c.sec;
-      if (rel < bestErr) { best = c; bestErr = rel; }
-    }
-    // If far off every canonical value (>25%), bucket as "Other"
-    return bestErr <= 0.25 ? best.name : "Other";
-  };
+// Fabric-first labeling helpers (align with take review components)
+function noteValueToUiName(v: unknown): string | undefined {
+  if (typeof v !== "string" || !v) return undefined;
+  const s = v.replace(/-/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
-
-// NEW: beat-only labeler for rhythm line
-function makeSecondsToBeatLabel(bpm: number, den: number) {
-  const beatSec = 60 / Math.max(1, bpm);
-  const baseLabel = den === 4 ? "Quarter" : "Beat";
-  return (sec: number) => {
-    if (!Number.isFinite(sec) || sec <= 0) return undefined;
-    const ratio = sec / beatSec;
-    return Math.abs(ratio - 1) <= 0.25 ? baseLabel : undefined;
-  };
+function fabricNoteLabels(rhythm: RhythmEvent[] | null | undefined): string[] {
+  if (!Array.isArray(rhythm)) return [];
+  const out: string[] = [];
+  for (const ev of rhythm) {
+    if ((ev as any)?.type === "note") {
+      out.push(noteValueToUiName((ev as any)?.value) ?? "");
+    }
+  }
+  return out;
 }
 
 export function useScoringLifecycle({
@@ -363,25 +343,27 @@ export function useScoringLifecycle({
         sessionSubmittedRef.current = true;
         const allScores = [...sessionScores, score];
 
-        // Build expected-onsets per take for line labeling
-        const prevOnsets = takeSnapshots.map((s) =>
-          s.rhythm ? makeOnsetsFromRhythm(s.rhythm, bpm, den) : []
+        // Fabric-first labels for rollups (no duration guessing)
+        const prevLineLabels = takeSnapshots.map((s) => fabricNoteLabels(s.rhythm));
+        const currLineLabels = fabricNoteLabels(usedRhythm);
+        const lineLabelsByTake = [...prevLineLabels, currLineLabels];
+
+        const prevMelodyLabels = takeSnapshots.map((s) =>
+          fabricNoteLabels(s.melodyRhythm ?? s.rhythm)
         );
-        const currOnsets = usedRhythm ? makeOnsetsFromRhythm(usedRhythm, bpm, den) : [];
-        const onsetsByTake = [...prevOnsets, currOnsets];
+        const currMelodyLabels = fabricNoteLabels(melodyRhythmForTakeRef.current ?? usedRhythm);
+        const melodyLabelsByTake = [...prevMelodyLabels, currMelodyLabels];
 
-        const noteLabel = makeSecondsToNoteLabel(bpm, den);
-        const beatLabel = makeSecondsToBeatLabel(bpm, den);
-
-        const melodyLabelFromSeconds = (sec: number) => noteLabel(sec);
-        const lineLabelByEvent = (takeIdx: number, ev: { idx: number; expSec: number }) => {
-          const arr = onsetsByTake[takeIdx] ?? [];
-          if (!arr.length) return undefined;
-          const i = ev.idx;
-          const next = i + 1 < arr.length ? arr[i + 1] : null;
-          const prev = i - 1 >= 0 ? arr[i] - arr[i - 1] : null;
-          const ioi = next != null ? next - arr[i] : prev != null ? prev : null;
-          return ioi && ioi > 0 ? beatLabel(ioi) : undefined; // only beats
+        const melodyLabelFromSeconds = (_sec: number, noteIdx?: number, takeIdx?: number) => {
+          if (takeIdx == null || noteIdx == null) return "All";
+          const arr = melodyLabelsByTake[takeIdx] ?? [];
+          const lbl = arr[noteIdx] ?? "";
+          return lbl || "All";
+        };
+        const lineLabelByEvent = (takeIdx: number, ev: { idx: number /*, expSec: number */ }) => {
+          const arr = lineLabelsByTake[takeIdx] ?? [];
+          const lbl = arr[ev.idx] ?? "";
+          return lbl || undefined; // undefined → skip this event from rollup
         };
 
         const aggScore = aggregateForSubmission(allScores, undefined, {

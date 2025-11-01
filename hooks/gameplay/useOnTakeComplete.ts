@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type { Phrase } from "@/utils/stage";
 import type { RhythmEvent } from "@/utils/phrase/phraseTypes";
 import type { TakeScore } from "@/utils/scoring/score";
-import { makeOnsetsFromRhythm } from "@/utils/phrase/onsets";
 import { aggregateForSubmission } from "@/utils/scoring/aggregate";
 import type { LoopPhase } from "@/hooks/gameplay/usePracticeLoop";
 
@@ -14,41 +13,27 @@ export type TakeSnapshot = {
   melodyRhythm: RhythmEvent[] | null;
 };
 
-// Note-labeler for melody coverage (unchanged behavior)
-function makeSecondsToNoteLabel(bpm: number, den: number) {
-  const beatSec = 60 / Math.max(1, bpm);
-  const quarterSec = beatSec * (4 / Math.max(1, den));
-  const candidates: Array<{ sec: number; name: string }> = [
-    { sec: quarterSec * 4, name: "Whole" },
-    { sec: quarterSec * 2, name: "Half" },
-    { sec: quarterSec * 1, name: "Quarter" },
-    { sec: quarterSec * 0.5, name: "Eighth" },
-    { sec: quarterSec * 0.25, name: "Sixteenth" },
-    { sec: quarterSec * 0.125, name: "Thirty-second" },
-  ];
-  return (sec: number) => {
-    if (!Number.isFinite(sec) || sec <= 0) return undefined;
-    let best = candidates[0];
-    let bestErr = Math.abs(sec - best.sec) / best.sec;
-    for (let i = 1; i < candidates.length; i++) {
-      const c = candidates[i];
-      const rel = Math.abs(sec - c.sec) / c.sec;
-      if (rel < bestErr) { best = c; bestErr = rel; }
-    }
-    return bestErr <= 0.25 ? best.name : "Other";
-  };
+/** ─────────────────────────── Helpers ─────────────────────────── */
+
+function noteValueToUiName(v: unknown): string | undefined {
+  if (typeof v !== "string" || !v) return undefined;
+  const s = v.replace(/-/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// NEW: beat-labeler for rhythm-line rollups — only accept true beats
-function makeSecondsToBeatLabel(bpm: number, den: number) {
-  const beatSec = 60 / Math.max(1, bpm); // true beat duration
-  const baseLabel = den === 4 ? "Quarter" : "Beat";
-  return (sec: number) => {
-    if (!Number.isFinite(sec) || sec <= 0) return undefined;
-    const ratio = sec / beatSec;
-    return Math.abs(ratio - 1) <= 0.25 ? baseLabel : undefined; // skip non-beats
-  };
+/** NOTE-only labels from fabric.value; indices align with linePerEvent.idx */
+function fabricNoteLabels(rhythm: RhythmEvent[] | null | undefined): string[] {
+  if (!Array.isArray(rhythm)) return [];
+  const labels: string[] = [];
+  for (const ev of rhythm) {
+    if ((ev as any)?.type === "note") {
+      labels.push(noteValueToUiName((ev as any)?.value) ?? "");
+    }
+  }
+  return labels;
 }
+
+/** ─────────────────────────── Hook ─────────────────────────── */
 
 export function useOnTakeComplete({
   active,
@@ -67,8 +52,8 @@ export function useOnTakeComplete({
   scoreTake,
   sessionScores,
   maxTakes,
-  submitLesson, // submitLesson is optional
-  visibility,   // ⬅️ NEW
+  submitLesson,
+  visibility,
 }: {
   active: boolean;
   loopPhase: LoopPhase;
@@ -134,41 +119,43 @@ export function useOnTakeComplete({
       snapshotSamples: samplerSnapshot,
       snapshotBeats: () => (haveRhythm ? handSnapshot() : []),
       melodyOnsetsSec: usedPhrase.notes.map((n) => n.startSec),
-      rhythmOnsetsSec: makeOnsetsFromRhythm(usedRhythm, bpm, den),
-      align: undefined, // caller passes align via scoreTake wrapper if needed
+      // rhythmOnsetsSec now unused for labeling; scoring still gets its own linePerEvent from scoreTake
+      rhythmOnsetsSec: [],
+      align: undefined,
     });
 
     const totalTakesNow = sessionScores.length + 1;
+
     if (totalTakesNow >= maxTakes && !submittedRef.current) {
       submittedRef.current = true;
       const all = [...sessionScores, score];
 
-      // Build expected-onsets per take
-      const prevOnsets = snapshots.map((s) =>
-        s.rhythm ? makeOnsetsFromRhythm(s.rhythm, bpm, den) : []
+      // Fabric-first NOTE labels for the blue line (index == linePerEvent.idx)
+      const prevLineLabels = snapshots.map((s) => fabricNoteLabels(s.rhythm));
+      const currLineLabels = fabricNoteLabels(usedRhythm);
+      const lineLabelsByTake = [...prevLineLabels, currLineLabels];
+
+      // Melody labels: prefer melodyRhythm.value, fallback to rhythm.value
+      const prevMelodyLabels = snapshots.map((s) =>
+        fabricNoteLabels(s.melodyRhythm ?? s.rhythm)
       );
-      const currOnsets = usedRhythm ? makeOnsetsFromRhythm(usedRhythm, bpm, den) : [];
-      const onsetsByTake = [...prevOnsets, currOnsets];
+      const currMelodyLabels = fabricNoteLabels(melodyRhythmRef.current ?? usedRhythm);
+      const melodyLabelsByTake = [...prevMelodyLabels, currMelodyLabels];
 
-      // Labelers
-      const melodyNoteLabel = makeSecondsToNoteLabel(bpm, den);
-      const beatLabel = makeSecondsToBeatLabel(bpm, den);
-
-      const melodyLabelFromSeconds = (sec: number) => melodyNoteLabel(sec);
-      const lineLabelByEvent = (takeIdx: number, ev: { idx: number; expSec: number }) => {
-        const arr = onsetsByTake[takeIdx] ?? [];
-        if (!arr.length) return undefined;
-        const i = ev.idx;
-        const next = i + 1 < arr.length ? arr[i + 1] : null;
-        const prev = i - 1 >= 0 ? arr[i] - arr[i - 1] : null;
-        const ioi = next != null ? next - arr[i] : prev != null ? prev : null;
-        return ioi && ioi > 0 ? beatLabel(ioi) : undefined; // only accept true beats
-      };
-
-      // ⬇️ VISIBILITY-AWARE SUBMISSION AGGREGATE (+labels)
       const agg = aggregateForSubmission(all, visibility, {
-        melodyLabelFromSeconds,
-        lineLabelByEvent,
+        // Use fabric labeling by note index; ignore raw `sec`
+        melodyLabelFromSeconds: (_sec: number, noteIdx?: number, takeIdx?: number) => {
+          if (takeIdx == null || noteIdx == null) return "All";
+          const arr = melodyLabelsByTake[takeIdx] ?? [];
+          const lbl = arr[noteIdx] ?? "";
+          return lbl || "All";
+        },
+        lineLabelByEvent: (takeIdx: number, ev: { idx: number }) => {
+          const arr = lineLabelsByTake[takeIdx] ?? [];
+          const lbl = arr[ev.idx] ?? "";
+          // undefined → skip from rollup; avoids junk buckets
+          return lbl || undefined;
+        },
         onsetGraceSec: 0.12,
       });
 
@@ -176,6 +163,7 @@ export function useOnTakeComplete({
         perTakeFinals: all.map((s, i) => ({ i, final: s.final.percent })),
         perTakePitch: all.map((s, i) => ({ i, pct: s.pitch.percent })),
       };
+
       submitLesson?.({ takeIndex: totalTakesNow - 1, score: agg, snapshots: snap });
     }
 
@@ -205,7 +193,7 @@ export function useOnTakeComplete({
     sessionScores,
     maxTakes,
     submitLesson,
-    visibility, // ⬅️ include in deps so changes apply to the terminal aggregate
+    visibility,
     snapshots,
   ]);
 
